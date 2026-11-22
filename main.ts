@@ -28,6 +28,7 @@ const here = fileURLToPath(new URL('.', import.meta.url));
 const Radar = createRequire(import.meta.url)('./dashboard/model.js') as {
   build(s: Snapshot): { rows: unknown[]; products: unknown[]; live: unknown[]; fit: { slope: number; n: number } };
   boardRows(r: unknown): Row[];
+  digest(rows: Row[]): string;
 };
 
 function arg(name: string, fallback: string): string {
@@ -91,7 +92,8 @@ if (issue !== null) fail(`the board breaks a gate rule: ${issue}`);
 
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'board.json'), `${JSON.stringify({ as_of: snapshot.as_of, source: snapshot.source, model: 'dashboard/model.js', rows })}\n`);
-writeFileSync(join(out, 'data.js'), `window.SNAPSHOT=${JSON.stringify(snapshot)};\n`);
+// The board's digest goes beside the data: the page recomputes it from its own rows and shows the match.
+writeFileSync(join(out, 'data.js'), `window.SNAPSHOT=${JSON.stringify(snapshot)};\nwindow.BOARD=${JSON.stringify({ rows: rows.length, digest: Radar.digest(rows) })};\n`);
 
 function copyFiles(from: string, to: string): string[] {
   mkdirSync(to, { recursive: true });

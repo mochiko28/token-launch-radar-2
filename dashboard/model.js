@@ -1,34 +1,28 @@
-/* Launch Radar value model, run by main.ts (board.json) and by the page, so every number on screen
- * is computed here from the snapshot.
- *   calibrate()  fits ln(mcap/TVL) = a[family] + b * ln(TVL/$100M) on the snapshot's trading tokens;
- *                how far families may differ (k) is picked by leave-one-out error.
- *   value()      applies it to each pre-token protocol: TVL carried a week at its 7-day change,
- *                then a factor for time without a token.
- *   farmPlan()   steps with a dollar cost and a time each.
- * No protocol name appears in this file. */
+/* Launch Radar value model, run by main.ts (board.json) and by the page: every number on screen is
+ * computed here from the snapshot. No protocol name appears in this file. */
 (function (root) {
   'use strict';
 
   var DAY = 86400000;
   var M = {
     version: 'radar-fit-3',
-    ref_tvl: 1e8,            // the fit's reference size: $100M of TVL
-    ratio_floor: 0.02,       // mcap/TVL outliers are clipped before the fit
+    ref_tvl: 1e8, // the fit's reference size: $100M of TVL
+    ratio_floor: 0.02, // mcap/TVL outliers are clipped before the fit
     ratio_cap: 20,
     shrink_options: [0, 1, 2, 4, 8, 16, 32, Infinity], // k: pseudo-peers pulling a family to the mean
-    growth_floor: -30,       // 7-day change used for momentum, clipped (per cent)
+    growth_floor: -30, // 7-day change used for momentum, clipped (per cent)
     growth_cap: 50,
-    age_full: 730,           // days without a token for the full +25% staying-power premium
-    age_low: 0.75,           // time factor at day 0
-    age_high: 1.25,          // time factor at age_full and beyond
-    drop_share: 0.10,        // assumed share of supply sent to depositors, pro rata to TVL-days
-    farm_days: 90,           // the plan's holding window
-    hour_usd: 25,            // the reader's hands-on time, priced into every plan
-    target_cover: 2,         // the stake is sized so the expected drop covers gas and time this many times
-    season_days: 365         // TVL-days older than this are taken as already paid by earlier seasons
+    age_full: 730, // days without a token for the full time factor
+    age_low: 0.75, // time factor at day 0
+    age_high: 1.25, // time factor at age_full and beyond
+    drop_share: 0.10, // assumed share of supply sent to depositors, pro rata to TVL-days
+    farm_days: 90, // the plan's holding window
+    hour_usd: 25, // the reader's hands-on time, priced into every plan
+    target_cover: 2, // deposit sized so the drop covers gas and time this many times
+    season_days: 365 // TVL-days older than this count as paid by earlier seasons
   };
 
-  // DefiLlama categories grouped into families, so each family has enough trading peers to fit.
+  // DefiLlama categories grouped into families.
   var FAMILIES = [
     ['vault', 'Vaults & curators', ['Risk Curators', 'Onchain Capital Allocator', 'Yield Aggregator', 'Yield', 'Liquidity Manager', 'Leveraged Farming', 'Farm', 'Indexes', 'Options Vault']],
     ['lend', 'Lending & CDP', ['Lending', 'CDP', 'CDP Manager', 'Uncollateralized Lending', 'Collateral Markets', 'Collateral Management']],
@@ -44,10 +38,8 @@
   function family(p) { return FAM_OF[p.category] || 'infra'; }
 
   // Typical cost of one transaction in USD, by chain; anything unlisted is costed at $0.30.
-  var GAS = { Ethereum: 3, Bitcoin: 2.5, Tron: 1.2, Binance: 0.08, BSC: 0.08, Arbitrum: 0.05, Base: 0.03, Optimism: 0.04,
-    Polygon: 0.02, Solana: 0.01, Avalanche: 0.06, Sui: 0.01, Aptos: 0.01, Hyperliquid: 0.02, 'Hyperliquid L1': 0.02, Sonic: 0.02,
-    Linea: 0.05, Scroll: 0.05, Blast: 0.04, Mantle: 0.03, Unichain: 0.02, Ink: 0.02, Katana: 0.02, Plasma: 0.01, Monad: 0.01,
-    Berachain: 0.02, Stellar: 0.01, Near: 0.01, TON: 0.03, Starknet: 0.05, Zksync: 0.05, 'zkSync Era': 0.05, Gnosis: 0.01, Corn: 0.02 };
+  var GAS = {};
+  'Ethereum=3 Bitcoin=2.5 Tron=1.2 Binance=0.08 BSC=0.08 Arbitrum=0.05 Base=0.03 Optimism=0.04 Polygon=0.02 Solana=0.01 Avalanche=0.06 Sui=0.01 Aptos=0.01 Hyperliquid=0.02 Hyperliquid_L1=0.02 Sonic=0.02 Linea=0.05 Scroll=0.05 Blast=0.04 Mantle=0.03 Unichain=0.02 Ink=0.02 Katana=0.02 Plasma=0.01 Monad=0.01 Berachain=0.02 Stellar=0.01 Near=0.01 TON=0.03 Starknet=0.05 Zksync=0.05 zkSync_Era=0.05 Gnosis=0.01 Corn=0.02'.split(' ').forEach(function (kv) { kv = kv.split('='); GAS[kv[0].replace(/_/g, ' ')] = +kv[1]; });
   function gas(chain) { return GAS[chain] != null ? GAS[chain] : 0.3; }
 
   function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
@@ -64,8 +56,7 @@
   var VERSIONED = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
   var WRAPPED = /\b(wrapped|staked|staking)\b/i;
   var EXCHANGE = /^(Binance|Coinbase|Bybit|Kraken|Bitget|OKX|Bitfinex|Gemini)\b/;
-  // One more test on top of the house rule: a no-token protocol whose name starts with the first word
-  // of a protocol that records a token (a chain port or product line of that token) is a sibling.
+  // Plus: a no-token protocol named with the first word of a token-holding one is a likely sibling.
   function firstWord(n) { return n.toLowerCase().split(/[\s.-]+/)[0]; }
   function tokenWords(snap) {
     var w = {};
@@ -83,10 +74,8 @@
   }
   function bySlug(a, b) { return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0; }
 
-  /* Fit the value curve on protocols whose token trades. One token is one point: protocols sharing a
-   * CoinGecko id (a v2 and v3, a lending arm and a DEX) pool their TVL, since DefiLlama hangs the
-   * whole token's market cap on each. Products and exchanges are left out by the same productOf rule
-   * that sets them aside on the board. Returns the slope, each family's multiple and the fit's error. */
+  /* The value curve, fitted on trading tokens: one point per CoinGecko id (its protocols' TVL pooled,
+   * as DefiLlama hangs the whole market cap on each); products and exchanges left out (productOf). */
   function calibrate(snap) {
     var tok = {}, order = [];
     snap.protocols.forEach(function (p) {
@@ -102,10 +91,8 @@
       var t = tok[k];
       return { p: t.p, tvl: t.tvl, mcap: t.mcap, members: t.members, f: family(t.p), x: Math.log(t.tvl / M.ref_tvl), y: Math.log(clamp(t.mcap / t.tvl, M.ratio_floor, M.ratio_cap)) };
     });
-    // Error is measured out of sample and against the real market cap: each token is predicted by a
-    // fit that leaves it out (leave-one-out), and its miss is ln(actual mcap / prediction), unclipped.
-    // The family pull k is chosen the same way, from 0 (families stand alone) to Infinity (one curve
-    // for all, size only): the snapshot picks the k with the smallest median out-of-sample miss.
+    // Misses are out of sample (leave-one-out) against the real, unclipped market cap. The family pull k,
+    // from 0 (families alone) to Infinity (one size curve), is the one with the smallest median miss.
     function looMiss(k) {
       return pts.map(function (q, i) { return Math.log(q.mcap / predict(fitPoints(pts.filter(function (o, j) { return j !== i; }), k), q)); });
     }
@@ -122,13 +109,65 @@
     miss.forEach(function (m) { if (m >= q25 && m <= q75) inBand++; });
     return { k: best.k, trials: trials.map(function (t) { return { k: t.k, median: t.median }; }), slope: full.b, elasticity: 1 + full.b, base: Math.exp(full.all), families: full.fams, n: pts.length, points: pts,
       median_error: Math.exp(quantile(absMiss, 0.5)), band_low: Math.exp(q25), band_high: Math.exp(q75), band_hits: inBand,
-      clipped: pts.filter(function (q) { var r = q.mcap / q.tvl; return r < M.ratio_floor || r > M.ratio_cap; }).length };
+      clipped: pts.filter(function (q) { var r = q.mcap / q.tvl; return r < M.ratio_floor || r > M.ratio_cap; }).length,
+      tests: termTests(pts, snap.as_of) };
+  }
+
+  /* Every value term tested held-out twice against real market caps: leave-one-out, and walk-forward
+   * (fit the 60% listed first, score the rest). ok = the term lowers the median miss in both. */
+  function termTests(pts, asOf) {
+    var ages = pts.map(function (q) { return ageDays(asOf, q.p.listed_at); });
+    var mid = ages.filter(function (a) { return a != null; }).sort(function (a, b) { return a - b; });
+    pts.forEach(function (q, i) {
+      q.g = clamp(q.p.change_7d || 0, M.growth_floor, M.growth_cap) / 100;
+      q.age = ages[i] == null ? mid[mid.length >> 1] : ages[i];
+    });
+    var dated = pts.filter(function (q) { return q.p.listed_at; }).sort(function (a, b) { return a.p.listed_at < b.p.listed_at ? -1 : a.p.listed_at > b.p.listed_at ? 1 : bySlug(a.p, b.p); });
+    var cut = Math.floor(dated.length * 0.6);
+    function score(make) {
+      var err = function (m, q) { return Math.abs(Math.log(q.mcap / q.tvl) - m(q)); };
+      var loo = pts.map(function (q, i) { return err(make(pts.filter(function (o, j) { return j !== i; })), q); });
+      var m = make(dated.slice(0, cut));
+      var wf = dated.slice(cut).map(function (q) { return err(m, q); });
+      var med = function (a) { return Math.exp(quantile(a.sort(function (u, v) { return u - v; }), 0.5)); };
+      return { loo: med(loo), wf: med(wf), w: make(pts).w };
+    }
+    var T = [
+      ['flat', 'one multiple, no size term', function (q) { return [1]; }],
+      ['size', 'size curve, ln TVL', function (q) { return [1, q.x]; }],
+      ['family', '+ category family', null],
+      ['growth', '+ 7-day change', function (q) { return [1, q.x, Math.log(1 + q.g)]; }],
+      ['age', '+ days since listing', function (q) { return [1, q.x, Math.log(1 + q.age / 365)]; }]
+    ].map(function (t) {
+      var r = score(t[2] ? function (tr) { return ols(tr, t[2]); } : function (tr) { var f = fitPoints(tr, 0); var m = function (q) { return f.fams[q.f].ln + f.b * q.x; }; m.w = []; return m; });
+      r.key = t[0]; r.label = t[1];
+      return r;
+    });
+    T.forEach(function (t) { t.ok = t.key === 'flat' ? null : t.loo < T[t.key === 'size' ? 0 : 1].loo && t.wf < T[t.key === 'size' ? 0 : 1].wf; });
+    return { terms: T, wf_n: dated.length - cut, wf_train: cut, wf_from: dated[cut].p.listed_at };
+  }
+  // Least squares by the normal equations; returns the predictor, its weights on .w.
+  function ols(pts, feats) {
+    var n = feats(pts[0]).length, A = [], v = [], i, j, r, t;
+    for (i = 0; i < n; i++) { A.push([]); v.push(0); for (j = 0; j < n; j++) A[i].push(0); }
+    pts.forEach(function (q) { var f = feats(q); for (i = 0; i < n; i++) { v[i] += f[i] * q.y; for (j = 0; j < n; j++) A[i][j] += f[i] * f[j]; } });
+    for (i = 0; i < n; i++) for (r = 0; r < n; r++) if (r !== i) { t = A[r][i] / A[i][i]; for (j = 0; j < n; j++) A[r][j] -= t * A[i][j]; v[r] -= t * v[i]; }
+    var w = v.map(function (x, k) { return x / A[k][k]; });
+    var m = function (q) { return feats(q).reduce(function (s, x, k) { return s + x * w[k]; }, 0); };
+    m.w = w;
+    return m;
+  }
+  // FNV-1a of each row's slug and value: main.ts writes it to data.js, the cover recomputes and compares.
+  function digest(rows) {
+    var h = 2166136261;
+    rows.forEach(function (r) { var s = r.slug + ':' + r.implied_value_usd + '|'; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } });
+    return ('0000000' + h.toString(16)).slice(-8);
   }
   function quantile(a, t) { var i = (a.length - 1) * t, lo = Math.floor(i); return a[lo] + (a[Math.min(lo + 1, a.length - 1)] - a[lo]) * (i - lo); }
   function predict(f, q) { return q.tvl * Math.exp(f.fams[q.f].ln + f.b * q.x); }
 
-  /* The least-squares core: a slope pooled within families, then family intercepts shrunk toward the
-   * all-family mean with k pseudo-peers; k = Infinity fits one curve for all. */
+  /* Least squares: slope pooled within families, family intercepts pulled to the mean by k pseudo-peers
+   * (k = Infinity: one curve for all). */
   function fitPoints(pts, k) {
     var g = {}, one = k === Infinity;
     pts.forEach(function (q) { var f = one ? 'all' : q.f; (g[f] = g[f] || []).push(q); });
@@ -154,7 +193,7 @@
     return { b: b, all: all, fams: fams };
   }
 
-  /* The implied value of one protocol under the fit, with each factor kept for the detail view. */
+  /* Implied value of one protocol, every factor kept for the detail view. */
   function value(p, fit, asOf, ageFallback) {
     var fam = fit.families[family(p)];
     var growth = clamp(p.change_7d == null ? 0 : p.change_7d, M.growth_floor, M.growth_cap);
@@ -207,9 +246,8 @@
     rwa: function (s, tx) { return 2 * tx; }, stake: function (s, tx) { return 2 * tx; }
   };
 
-  /* A farm plan: each step is an action, a dollar cost and a time, from the row's own figures. The
-   * chain is the cheapest of the protocol's three main chains; the stake is the smallest position
-   * whose expected drop covers the plan's costs three times, between $500 and $25,000. */
+  /* A farm plan from the row's own figures: steps with a dollar cost and a time each, on the cheapest of
+   * its three main chains. */
   function farmPlan(p, v) {
     var main = p.chains.slice(0, 3), chain = main[0] || 'its main chain';
     main.forEach(function (c) { if (gas(c) < gas(chain)) chain = c; });
@@ -230,11 +268,9 @@
       ];
     }
     function total(st) { var c = 0, t = 5; st.forEach(function (s) { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * M.hour_usd }; }
-    // Only capital that sits in the protocol earns: the main deposit, plus the side deposit for vaults
-    // (a second vault); borrowed, re-used or traded side amounts are activity, not extra capital.
+    // Only capital in the protocol earns: the deposit, plus the side deposit for vaults (a second vault).
     function eligible(stake) { return kind === 'vault' ? stake + Math.round(stake / 4) : stake; }
-    // The smallest stake, in $400 steps of main deposit ($500 of capital), whose drop covers the plan's
-    // actual costs target_cover times; total capital never passes $25,000.
+    // The smallest deposit ($500 steps of capital, up to $25,000) whose drop covers costs target_cover times.
     var stake = 20000;
     for (var k = 400; k <= 20000; k += 400) {
       if (eligible(k) * perDollar >= M.target_cover * total(steps(k)).all) { stake = k; break; }
@@ -290,6 +326,6 @@
     });
   }
 
-  var api = { MODEL: M, productOf: productOf, FAMILIES: FAMILIES, family: family, calibrate: calibrate, value: value, farmPlan: farmPlan, stepText: stepText, build: build, boardRows: boardRows, usd: usd, mins: mins, gas: gas };
+  var api = { digest: digest, MODEL: M, productOf: productOf, FAMILIES: FAMILIES, family: family, calibrate: calibrate, value: value, farmPlan: farmPlan, stepText: stepText, build: build, boardRows: boardRows, usd: usd, mins: mins, gas: gas };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.RadarModel = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
