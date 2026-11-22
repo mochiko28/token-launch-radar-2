@@ -37,7 +37,7 @@ for (const [name, hash] of SHOTS) {
   await sleep(900);
   const png = Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64');
   let file = name + '.png', bytes = png;
-  if (png.length < LO || png.length > HI) {
+  if (!process.argv[5] && (png.length < LO || png.length > HI)) {
     let lo = 50, hi = 100, best = null;
     while (lo <= hi) {
       const q = (lo + hi) >> 1;

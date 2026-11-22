@@ -68,11 +68,21 @@
   var VERSIONED = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
   var WRAPPED = /\b(wrapped|staked|staking)\b/i;
   var EXCHANGE = /^(Binance|Coinbase|Bybit|Kraken|Bitget|OKX|Bitfinex|Gemini)\b/;
-  function productOf(p) {
-    if (PRODUCT_CATS.indexOf(p.category) >= 0) return p.category === 'CEX' ? 'exchange' : p.category.toLowerCase();
+  // One more test on top of the house rule: a no-token protocol whose name starts with the first word
+  // of a protocol that records a token (a chain port or product line of that token) is a sibling.
+  function firstWord(n) { return n.toLowerCase().split(/[\s.-]+/)[0]; }
+  function tokenWords(snap) {
+    var w = {};
+    snap.protocols.forEach(function (p) { if (hasToken(p) && firstWord(p.name).length >= 3) w[firstWord(p.name)] = p.name; });
+    return w;
+  }
+  function productOf(p, words) {
+    if (p.category === 'CEX') return 'exchange';
+    if (PRODUCT_CATS.indexOf(p.category) >= 0 || /bridge/i.test(p.category || '')) return p.category.toLowerCase();
     if (VERSIONED.test(p.name)) return 'versioned pool';
     if (WRAPPED.test(p.name)) return 'wrapped or staked';
     if (EXCHANGE.test(p.name)) return 'exchange product';
+    if (words && !hasToken(p) && Object.prototype.hasOwnProperty.call(words, firstWord(p.name))) return 'sibling of ' + words[firstWord(p.name)];
     return null;
   }
   function bySlug(a, b) { return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0; }
@@ -143,7 +153,7 @@
     // Airdrop yield: a drop of drop_share of the implied value, split over every dollar-day of TVL in
     // the current season (since listing, at most season_days) plus the plan's window.
     var apr = implied * M.drop_share / (tvlNext * (Math.min(ageUsed, M.season_days) + M.farm_days)) * 365;
-    return { family: fam.key, growth: growth, tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
+    return { family: fam.key, growth: growth, growth_imputed: p.change_7d == null, age_imputed: age == null, tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
       fitted: Math.round(fitted), age: age, age_used: ageUsed, time_factor: timeF, implied: implied,
       low: Math.round(implied / band), high: Math.round(implied * band), multiple: implied / p.tvl_usd, apr: apr };
   }
@@ -164,6 +174,7 @@
     lend: ['Supply {S} of USDC to {N} on {C} and turn it on as collateral', 'Borrow {s} of a stablecoin against it and keep the health factor above 2.0: borrowing is the activity lenders usually reward most'],
     dex: ['Add {S} to a stablecoin or ETH pair on {N} on {C}, with a wide range if the pool is concentrated', 'Make one swap of about {s} a week through {N} so the wallet logs volume as well as liquidity'],
     deriv: ['Deposit {S} of USDC as margin on {N} on {C}', 'Each week open and close a small hedged trade of about {s} notional (long and short at 1-2x), fees near 0.05% a side'],
+    predict: ['Deposit {S} of USDC on {N} on {C} and hold it as the account balance', 'Each week buy and later sell about {s} of shares across two or three liquid markets, so the wallet logs trading volume'],
     stable: ['Mint or deposit {S} into {N}\'s yield-bearing dollar on {C}', 'Deposit {s} of the receipt into a pool or money market that lists it, which many points programs count twice'],
     rwa: ['Complete {N}\'s onboarding (KYC where it asks; review often takes 1-2 days) and subscribe {S} to its tokenized yield product on {C}', 'Hold the token in the wallet the issuer whitelisted; use {s} of it as collateral where a market accepts it'],
     stake: ['Stake {S} worth of the native asset through {N} on {C} and keep the liquid receipt', 'Deposit {s} of the receipt into a DeFi pool that accepts it, so the stake counts in two places'],
@@ -171,10 +182,11 @@
   };
 
   // What the second action costs: one-off ones two transactions, weekly ones every week of the window.
-  var WEEKLY = { dex: 1, deriv: 1, infra: 1 };
+  var WEEKLY = { dex: 1, deriv: 1, predict: 1, infra: 1 };
   var ACT2 = {
     dex: function (s, tx, w) { return w * (s * 0.0005 + tx); },
     deriv: function (s, tx, w) { return w * (s * 0.001 + 2 * tx); },
+    predict: function (s, tx, w) { return w * (s * 0.01 + 2 * tx); },
     infra: function (s, tx, w) { return w * 2 * tx; },
     lend: function (s, tx) { return 2 * tx; }, vault: function (s, tx) { return 2 * tx; }, stable: function (s, tx) { return 2 * tx; },
     rwa: function (s, tx) { return 2 * tx; }, stake: function (s, tx) { return 2 * tx; }
@@ -186,25 +198,34 @@
   function farmPlan(p, v) {
     var main = p.chains.slice(0, 3), chain = main[0] || 'its main chain';
     main.forEach(function (c) { if (gas(c) < gas(chain)) chain = c; });
+    var kind = p.category === 'Prediction Market' ? 'predict' : v.family;
+    var asset = /^(Bitcoin|Lightning)/.test(chain) ? 'BTC' : 'USDC';
     var tx = gas(chain), weeks = Math.round(M.farm_days / 7), perDollar = v.apr * M.farm_days / 365;
     function steps(stake) {
-      var side = Math.round(stake / 4), act = ACT[v.family];
-      var fill = function (t) { return t.replace(/\{S\}/g, usd(stake)).replace(/\{s\}/g, usd(side)).replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain); };
+      var side = Math.round(stake / 4), act = ACT[kind];
+      var fill = function (t) { return t.replace(/USDC/g, asset).replace(/\{S\}/g, usd(stake)).replace(/\{s\}/g, usd(side)).replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain); };
       return [
-        { act: 'Withdraw ' + usd(stake + side) + ' of USDC from an exchange straight to a fresh wallet on ' + chain + (chain !== main[0] ? ' (cheaper than ' + main[0] + ', where it also runs)' : '') + '; keep only farm funds in it',
+        { act: 'Withdraw ' + usd(stake + side) + ' of ' + asset + ' from an exchange straight to a fresh wallet on ' + chain + (chain !== main[0] ? ' (cheaper than ' + main[0] + ', where it also runs)' : '') + '; keep only farm funds in it',
           usd: 1 + tx, min: 15 },
         { act: fill(act[0]), usd: 2 * tx, min: v.family === 'rwa' ? 30 : 10 },
-        { act: fill(act[1]), usd: ACT2[v.family](side, tx, weeks), min: v.family in WEEKLY ? weeks * 10 : 10 },
+        { act: fill(act[1]), usd: ACT2[kind](side, tx, weeks), min: kind in WEEKLY ? weeks * 10 : 10 },
         { act: 'Once a week for ' + weeks + ' weeks, open the points or rewards page, re-check the position and top it up by one transaction', usd: weeks * tx, min: weeks * 5 },
         { act: 'Exit if TVL falls below ' + usd(p.tvl_usd * 0.75) + ' (25% under today\'s ' + usd(p.tvl_usd) + ') or the team reports an incident; otherwise hold the full ' + M.farm_days + ' days', usd: 2 * tx, min: 10 },
         { act: 'At launch claim only through the protocol\'s own app; the model prices the token near ' + usd(v.implied) + ' (band ' + usd(v.low) + '-' + usd(v.high) + '), so sell the claim if it opens above ' + usd(v.high), usd: 2 * tx, min: 15 }
       ];
     }
     function total(st) { var c = 0, t = 0; st.forEach(function (s) { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * M.hour_usd }; }
-    var first = total(steps(1000)).all;
-    var stake = clamp(Math.ceil(M.target_cover * first / 1.25 / Math.max(perDollar, 1e-9) / 500) * 500, 500, 25000);
-    var st = steps(stake), t = total(st), capital = stake + Math.round(stake / 4), drop = capital * perDollar;
-    return { chain: chain, gas: tx, stake: capital, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * M.hour_usd, all_in: t.all,
+    // Only capital that sits in the protocol earns: the main deposit, plus the side deposit for vaults
+    // (a second vault); borrowed, re-used or traded side amounts are activity, not extra capital.
+    function eligible(stake) { return kind === 'vault' ? stake + Math.round(stake / 4) : stake; }
+    // The smallest stake, in $400 steps of main deposit ($500 of capital), whose drop covers the plan's
+    // actual costs target_cover times; total capital never passes $25,000.
+    var stake = 20000;
+    for (var k = 400; k <= 20000; k += 400) {
+      if (eligible(k) * perDollar >= M.target_cover * total(steps(k)).all) { stake = k; break; }
+    }
+    var st = steps(stake), t = total(st), capital = stake + Math.round(stake / 4), drop = eligible(stake) * perDollar;
+    return { chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * M.hour_usd, all_in: t.all,
       days: M.farm_days, drop: drop, net: drop - t.all, verdict: drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip' };
   }
   function stepText(s) {
@@ -218,8 +239,9 @@
     var watch = {};
     snap.watchlist.forEach(function (s) { watch[s] = true; });
     var noToken = snap.protocols.filter(function (p) { return !hasToken(p) && p.tvl_usd > 0; });
-    var pre = noToken.filter(function (p) { return watch[p.slug] || !productOf(p); });
-    var products = noToken.filter(function (p) { return !watch[p.slug] && productOf(p); }).map(function (p) { return { p: p, kind: productOf(p) }; })
+    var words = tokenWords(snap);
+    var pre = noToken.filter(function (p) { return watch[p.slug] || !productOf(p, words); });
+    var products = noToken.filter(function (p) { return !watch[p.slug] && productOf(p, words); }).map(function (p) { return { p: p, kind: productOf(p, words) }; })
       .sort(function (a, b) { return b.p.tvl_usd - a.p.tvl_usd || bySlug(a.p, b.p); });
     var ages = pre.map(function (p) { return ageDays(snap.as_of, p.listed_at); }).filter(function (a) { return a != null; }).sort(function (a, b) { return a - b; });
     var ageFallback = ages.length ? ages[ages.length >> 1] : 365;

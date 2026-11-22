@@ -9,7 +9,7 @@
 
   const radar = R.build(S), fit = radar.fit, M = radar.model, rows = radar.rows, usd = R.usd;
   const FAM = {}; R.FAMILIES.forEach((f) => { FAM[f[0]] = f[1]; });
-  const bySlug = {}; rows.forEach((r) => { bySlug[r.p.slug] = r; });
+  const bySlug = Object.create(null); rows.forEach((r) => { bySlug[r.p.slug] = r; });
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const pct = (x, d) => (x == null ? 'n/a' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d == null ? 1 : d) + '%');
   const mult = (x) => '×' + (x >= 10 ? x.toFixed(1) : x >= 1 ? x.toFixed(2) : x.toFixed(3));
@@ -24,8 +24,15 @@
     const st = Object.assign({}, DEF);
     location.hash.replace(/^#/, '').split('&').forEach((kv) => {
       const i = kv.indexOf('=');
-      if (i > 0 && kv.slice(0, i) in DEF) st[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
+      const k = kv.slice(0, i);
+      if (i > 0 && Object.prototype.hasOwnProperty.call(DEF, k)) { try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch (e) { /* a broken escape keeps the default */ } }
     });
+    // Unknown values fall back to the defaults, so a hand-typed link never breaks the page.
+    if (!['board', 'aside', 'trading'].includes(st.view)) st.view = 'board';
+    if (!['all', 'watch', 'early', 'outside'].includes(st.scope)) st.scope = 'all';
+    if (!['', 'farm', 'marginal', 'skip'].includes(st.verdict)) st.verdict = '';
+    if (!Object.prototype.hasOwnProperty.call(KEYS, st.sort)) st.sort = 'rank';
+    if (st.dir !== 'desc') st.dir = 'asc';
     return st;
   }
   function link(patch) {
@@ -37,8 +44,8 @@
 
   /* ---------- filtering and sorting ---------- */
   const KEYS = {
-    rank: (r) => r.rank, name: (r) => r.p.name.toLowerCase(), tvl: (r) => r.p.tvl_usd, g: (r) => (r.p.change_7d == null ? -1e9 : r.p.change_7d),
-    age: (r) => r.v.age_used, value: (r) => r.v.implied, multiple: (r) => r.v.multiple, apr: (r) => r.v.apr, plan: (r) => r.plan.net
+    rank: (r) => r.rank, name: (r) => r.p.name.toLowerCase(), tvl: (r) => r.p.tvl_usd, g: (r) => r.p.change_7d,
+    age: (r) => r.v.age_used, value: (r) => r.v.implied, multiple: (r) => r.v.multiple, apr: (r) => r.v.apr, plan: (r) => r.plan.drop / r.plan.all_in
   };
   function filtered(st) {
     const q = st.q.trim().toLowerCase(), fams = st.fam ? st.fam.split(',') : [];
@@ -46,10 +53,11 @@
       (!q || (r.p.name + ' ' + r.p.slug + ' ' + (r.p.category || '') + ' ' + r.p.chains.join(' ')).toLowerCase().includes(q)) &&
       (!fams.length || fams.includes(r.v.family)) &&
       (!st.chain || r.p.chains.includes(st.chain)) &&
-      (st.scope === 'all' || (st.scope === 'watch' ? r.watch : r.below)) &&
+      (st.scope === 'all' || (st.scope === 'watch' ? r.watch : st.scope === 'outside' ? !r.watch : r.below)) &&
       (!st.verdict || r.plan.verdict === st.verdict));
-    const key = KEYS[st.sort] || KEYS.rank, sign = st.dir === 'desc' ? -1 : 1;
-    return out.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * sign || a.rank - b.rank; });
+    const key = KEYS[st.sort], sign = st.dir === 'desc' ? -1 : 1;
+    // Missing figures (an unreported 7-day change) sort last in either direction.
+    return out.sort((a, b) => { const x = key(a), y = key(b); if (x == null || y == null) return (x == null) - (y == null) || a.rank - b.rank; return (x < y ? -1 : x > y ? 1 : 0) * sign || a.rank - b.rank; });
   }
 
   /* ---------- the radar chart: days without a token against airdrop yield ---------- */
@@ -75,7 +83,7 @@
   /* ---------- views ---------- */
   function head(st) {
     const n = (v) => (v === 'board' ? rows.length : v === 'aside' ? radar.products.length : fit.n);
-    document.getElementById('tabs').innerHTML = [['board', 'Pre-token board'], ['aside', 'Set aside'], ['trading', 'Token trades']]
+    document.getElementById('tabs').innerHTML = [['board', 'Pre-token board'], ['aside', 'Set aside'], ['trading', 'Trading tokens']]
       .map(([v, l]) => `<a href="${link({ view: v, p: '' })}" class="${st.view === v && !st.p ? 'on' : ''}">${l} <b>${n(v)}</b></a>`).join('');
     document.getElementById('meta').innerHTML = `<span>Snapshot <b>${esc(S.as_of)}</b></span><span>DefiLlama protocols</span><span>model <b>${esc(M.version)}</b></span>`;
   }
@@ -119,11 +127,11 @@
         <td>${famChip(r.v.family)}</td>
         <td class="num">${usd(r.p.tvl_usd)}</td>
         <td class="num ${r.p.change_7d > 0 ? 'up' : r.p.change_7d < 0 ? 'down' : ''}">${pct(r.p.change_7d)}</td>
-        <td class="num${r.v.age == null ? ' est' : ''}" title="${r.v.age == null ? 'No listing date: the median age is used' : 'Listed ' + esc(r.p.listed_at)}">${days(r.v.age_used)}</td>
+        <td class="num${r.v.age == null ? ' est' : ''}" title="${r.v.age == null ? 'No listing date: the median age is used' : 'Listed ' + esc(r.p.listed_at)}">${r.v.age == null ? '~' : ''}${days(r.v.age_used)}</td>
         <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small></td>
         <td class="num">${mult(r.v.multiple)}</td>
         <td class="num apr">${(r.v.apr * 100).toFixed(1)}%</td>
-        <td class="plan">${verdictTag(r.plan.verdict)}<small>${usd(r.plan.stake)} on ${esc(r.plan.chain)}</small></td></tr>`;
+        <td class="plan">${verdictTag(r.plan.verdict)}<small>${mult(r.plan.drop / r.plan.all_in)} · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}</small></td></tr>`;
     }).join('');
     return `<section class="hero">
       <div class="lead">
@@ -133,7 +141,7 @@
           <div><b>${watchCov}/${S.watchlist.length}</b><span>watchlist covered</span></div>
           <div><b>${rows.length - watchCov}</b><span>early rows beyond it</span></div>
           <div><b>${usd(total)}</b><span>implied, all rows</span></div>
-          <div><b>${farmN}</b><span>plans that pay ×${M.target_cover}</span></div>
+          <div><b>${farmN}</b><span>plans that cover costs ×${M.target_cover}</span></div>
         </div>
       </div>
       ${formula()}
@@ -141,14 +149,14 @@
     </section>
     <section class="filters">
       <label class="search"><input id="q" type="search" value="${esc(st.q)}" placeholder="Search name, category or chain" autocomplete="off" aria-label="Search"></label>
-      <div class="field"><span>Scope</span>${seg('scope', [['all', 'All'], ['watch', 'Watchlist'], ['early', 'Below $50M floor']])}</div>
+      <div class="field"><span>Scope</span>${seg('scope', [['all', 'All'], ['watch', 'Watchlist'], ['outside', 'Outside it'], ['early', 'Below $50M']])}</div>
       <div class="field"><span>Plan</span>${seg('verdict', [['', 'Any'], ['farm', 'Farm'], ['marginal', 'Marginal'], ['skip', 'Skip']])}</div>
       <label class="field"><span>Chain</span><select id="chain"><option value="">All chains</option>${Object.keys(chains).sort((a, b) => chains[b] - chains[a] || (a < b ? -1 : 1)).map((c) => `<option${c === st.chain ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
       <div class="count"><b>${shown.length}</b> of ${rows.length} shown${active ? ` · <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '' })}">clear filters</a>` : ''}</div>
     </section>
     <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div></section>
     <div class="tablewrap"><table class="board">
-      <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'No token', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('multiple', '÷ TVL', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan', 'plan')}</tr></thead>
+      <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'No token', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('multiple', '÷ TVL', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · drop ÷ cost', 'plan')}</tr></thead>
       <tbody>${body || '<tr><td colspan="10" class="empty">No protocol matches these filters.</td></tr>'}</tbody></table></div>`;
   }
 
@@ -166,7 +174,7 @@
     <section class="dhead">
       <div class="rankbig"><small>Rank</small><b>${r.rank}</b><small>of ${rows.length}</small></div>
       <div><h1>${esc(p.name)}</h1>
-        <p class="tags">${famChip(v.family)}<span class="tag">${esc(p.category || 'Uncategorised')}</span><span class="tag pre">No token on record</span>${r.watch ? '<span class="tag wlt">On the watchlist</span>' : '<span class="tag">Below the watchlist</span>'}</p>
+        <p class="tags">${famChip(v.family)}<span class="tag">${esc(p.category || 'Uncategorised')}</span><span class="tag pre">No token on record</span>${r.watch ? '<span class="tag wlt">On the watchlist</span>' : '<span class="tag">Outside the watchlist</span>'}</p>
         <p class="sub">${esc(p.chains.join(' · '))}${p.listed_at ? ` — tracked since ${esc(p.listed_at)}` : ' — no listing date on record'}</p></div>
       <div class="dval"><small>Implied token value</small><b>${usd(v.implied)}</b><small>50% band ${usd(v.low)} – ${usd(v.high)} · ${mult(v.multiple)} TVL</small></div>
     </section>
@@ -175,7 +183,7 @@
         <section class="card"><h2>How the value is built <span>model.js value()</span></h2>
           <table class="receipt">
             ${line('TVL', 'snapshot tvl_usd', usd(p.tvl_usd))}
-            ${line('Momentum ' + pct(v.growth, 2), 'change_7d ' + pct(p.change_7d, 2) + ' carried one week, clipped to ' + M.growth_floor + '…+' + M.growth_cap + '%', '→ ' + usd(v.tvl_next))}
+            ${line('Momentum ' + pct(v.growth, 2), (v.growth_imputed ? 'change_7d not reported: 0% assumed' : 'change_7d ' + pct(p.change_7d, 2) + ' carried one week, clipped to ' + M.growth_floor + '…+' + M.growth_cap + '%'), '→ ' + usd(v.tvl_next))}
             ${line('Family multiple', esc(fam.label) + ': ' + fam.peers + ' trading peers, raw ' + mult(fam.raw) + ' shrunk to the all-family ' + mult(fit.base), mult(v.fam_multiple))}
             ${line('Size curve', '(TVL ÷ $100M)<sup>' + fit.slope.toFixed(2) + '</sup>, slope fitted within families', mult(v.size_mult))}
             ${line('Fitted token value', 'what a trading peer of this size and family is worth', usd(v.fitted), 'sum')}
@@ -204,8 +212,8 @@
         </div>
         <ol class="steps">${pl.steps.map((s) => `<li><p>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>
         <div class="math">
-          <p><b>Drop APR ${(v.apr * 100).toFixed(2)}%</b> = implied ${usd(v.implied)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × ${Math.min(v.age_used, M.season_days)} + ${M.farm_days} season days) × 365.</p>
-          <p>${usd(pl.stake)} for ${pl.days} days earns about <b>${usd(pl.drop)}</b> against <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} gas and fees + ${R.mins(pl.minutes)} at $${M.hour_usd}/h): net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital is sized so the drop covers costs ×${M.target_cover} (from $500 to $25K${pl.stake >= 31250 ? ', capped here' : ''}).</p>
+          <p><b>Drop APR ${(v.apr * 100).toFixed(2)}%</b> = implied ${usd(v.implied)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
+          <p>${usd(pl.eligible)} of the ${usd(pl.stake)} sits in ${esc(p.name)} and earns; for ${pl.days} days that is about <b>${usd(pl.drop)}</b> against <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} gas and fees + ${R.mins(pl.minutes)} at $${M.hour_usd}/h): net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital is the smallest that covers costs ×${M.target_cover} (from $500 to $25K${pl.drop < M.target_cover * pl.all_in ? ', capped here' : ''}); at a ${M.drop_share * 50}% drop the figure halves.</p>
         </div>
       </section>
     </div>`;
@@ -236,13 +244,14 @@
     app.innerHTML = st.p ? detail(st) : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
     document.getElementById('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied values are this radar's own estimate of a token's worth if the record stayed as it is: no forecast that a token will launch, and never make.fun's claim. A protocol that records no token may still have one DefiLlama does not carry.`;
     if (st.p) window.scrollTo(0, 0);
+    if (typing) { clearTimeout(typing); typing = null; }
   }
   let typing = null;
   app.addEventListener('input', (e) => {
     if (e.target.id === 'q') {
       clearTimeout(typing);
       const val = e.target.value;
-      typing = setTimeout(() => { history.replaceState(null, '', link({ q: val })); render(); const q = document.getElementById('q'); q.focus(); q.setSelectionRange(val.length, val.length); }, 160);
+      typing = setTimeout(() => { typing = null; history.replaceState(null, '', link({ q: val })); render(); const q = document.getElementById('q'); if (q) { q.focus(); q.setSelectionRange(val.length, val.length); } }, 160);
     }
   });
   app.addEventListener('change', (e) => { if (e.target.id === 'chain') go({ chain: e.target.value }); });
