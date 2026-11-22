@@ -178,12 +178,12 @@
       <div><b>${farmN}</b><span>pay ×${M.target_cover} their costs</span></div>
       <div><b>${usd(mid((r) => r.plan.stake))} · ${R.mins(mid((r) => r.plan.minutes))}</b><span>median deposit · hands-on</span></div>
     </section>
-    <section class="hero">
+    <section class="hero${active ? ' slim' : ''}">
       <div class="lead">
         <h1>${rows.length} pre-token protocols, ranked by token value × launch odds</h1>
-        <div class="card checks"><h2>Self-checks <span>run in this page on load</span></h2><ul>${CHECKS.map(([ok, t]) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${t}</li>`).join('')}</ul></div>
+        ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>` : `<div class="card checks"><h2>Self-checks <span>run in this page on load</span></h2><ul>${CHECKS.map(([ok, t]) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${t}</li>`).join('')}</ul></div>`}
       </div>
-      ${formula()}
+      ${active ? '' : formula()}
       <div class="card chartcard"><h2>Radar <span>days without a token × airdrop yield</span></h2>${chart(shown)}</div>
     </section>
     <section class="filters">
