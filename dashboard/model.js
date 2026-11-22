@@ -266,6 +266,7 @@
       var side = Math.round(stake / 4), act = ACT[kind];
       var fill = function (t) { return t.replace(/USDC/g, asset).replace(/\{S\}/g, usd(stake)).replace(/\{s\}/g, usd(side)).replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain); };
       return [
+        { act: 'Kill test: go on only if ' + p.name + ' shows a live points or rewards page and a deposit-and-withdraw quote on ' + chain + ' totals under ' + usd(0.1 * eligible(stake) * perDollar) + ' (10% of the modeled drop); if either fails, stop with $0 spent', usd: 0, min: 10, when: 'Day 0' },
         { act: 'Withdraw ' + usd(stake + side) + ' of ' + asset + ' from an exchange straight to a fresh wallet on ' + chain + (chain !== main[0] ? ' (cheaper than ' + main[0] + ', where it also runs)' : '') + '; keep only farm funds in it',
           usd: 1 + tx, min: 15, when: 'Day 0' },
         { act: fill(act[0]), usd: 2 * tx, min: v.family === 'rwa' ? 30 : 10, when: v.family === 'rwa' ? 'Days 0-2' : 'Day 0' },
