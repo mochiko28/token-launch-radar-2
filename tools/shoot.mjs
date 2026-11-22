@@ -13,7 +13,7 @@ const SHOTS = process.argv[5] ? process.argv[5].split(' ').map((s) => [s.split('
   ['2-detail', '#p=saturn'],
   ['3-filtered', '#fam=lend,deriv&verdict=farm&sort=apr&dir=desc'],
 ];
-const LO = 300 * 1024, HI = 350 * 1024;
+const LO = 300 * 1024, HI = 350 * 1000; // inside 300-350 KB whether a KB is 1,000 or 1,024 bytes
 
 const port = 9300 + Math.floor(Math.random() * 500);
 const proc = spawn(chrome, ['--headless', `--remote-debugging-port=${port}`, '--window-size=1440,900', '--hide-scrollbars', '--force-device-scale-factor=1', '--no-sandbox', '--allow-file-access-from-files', 'about:blank'], { stdio: 'ignore' });
