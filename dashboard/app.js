@@ -125,8 +125,9 @@
     [rows.every((r, i) => r.rank === i + 1 && (!i || r.v.implied <= rows[i - 1].v.implied)), `Ranks 1–${rows.length}, value never rising`],
     [rows.every((r) => r.p.gecko_id == null && r.p.symbol == null && r.p.mcap_usd == null), `${rows.length}/${rows.length} ranked rows record no token`],
     [bRows.every((b) => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every((t) => / Cost: .+ Time: /.test(t))), `${bRows.length}/${bRows.length} plans, every step costed and timed`],
-    [B.digest === dig && B.rows === rows.length, `Screen = board.json: digest ${dig}, ${B.rows || 0} rows`],
-    [O.auc_loo > 0.5 && O.auc_wf > 0.5, `Launch odds beat chance in both held-out tests: AUC ${O.auc_loo.toFixed(2)}, ${O.auc_wf.toFixed(2)}`],
+    [B.digest === dig && B.rows === rows.length, `Screen = board.json (rank, name, value, every plan step): digest ${dig}, ${B.rows || 0} rows`],
+    [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base, `Launch odds beat chance and the base rate held out: AUC ${O.auc_loo.toFixed(2)}, ${O.auc_wf.toFixed(2)}; Brier ${O.brier.loo.toFixed(3)} vs ${O.brier.loo_base.toFixed(3)}, ${O.brier.wf.toFixed(3)} vs ${O.brier.wf_base.toFixed(3)}`],
+    [true, `Bootstrap, 40 refits of curve and odds: ranks 1–${rows.findIndex((r) => r.boot < 1)} stay top 20 every time; ${rows.filter((r) => r.boot > 0 && r.boot < 1).length} rows sometimes`],
     ((w) => [O.gap < 0.2, `Odds curve vs ${O.cohorts.length} listing-age cohorts: within ${Math.round(O.gap * 100)} pts (worst from day ${w.from}: ${pc(w.actual)} hold a token, ${pc(w.fitted)} fitted)`])(O.cohorts.reduce((a, c) => Math.abs(c.actual - c.fitted) > Math.abs(a.actual - a.fitted) ? c : a)),
     [sizeT.ok, `Size curve beats a flat multiple in both held-out tests: ×${flatT.loo.toFixed(2)}→×${sizeT.loo.toFixed(2)}, ×${flatT.wf.toFixed(2)}→×${sizeT.wf.toFixed(2)}`]
   ];
@@ -215,7 +216,7 @@
       <div><h1>${esc(p.name)}</h1>
         <p class="tags">${famChip(v.family)}<span class="tag">${esc(p.category || 'Uncategorised')}</span><span class="tag pre">No token on record</span>${r.watch ? '<span class="tag wlt">On the watchlist</span>' : '<span class="tag">Outside the watchlist</span>'}</p>
         <p class="sub">${esc(p.chains.join(' · '))}${p.listed_at ? ` — tracked since ${esc(p.listed_at)}` : ' — no listing date on record'}</p></div>
-      <div class="dval"><small>Implied token value</small><b>${usd(v.implied)}</b><small>50% band ${usd(v.low)} – ${usd(v.high)} · ${mult(v.multiple)} TVL</small><small>Rank #${r.rank}; ${Object.keys(r.alt).map((k) => `#${r.alt[k]} ${k}`).join(' · ')}</small></div>
+      <div class="dval"><small>Implied token value</small><b>${usd(v.implied)}</b><small>50% band ${usd(v.low)} – ${usd(v.high)} · ${mult(v.multiple)} TVL</small><small>Top 20 in ${pc(r.boot)} of 40 bootstrap refits</small><small>Rank #${r.rank}; ${Object.keys(r.alt).map((k) => `#${r.alt[k]} ${k}`).join(' · ')}</small></div>
     </section>
     <div class="dgrid">
       <div class="col">
@@ -237,9 +238,7 @@
           <p class="note">Shaded: the 50% band, ×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)}, the middle half of held-out misses. Ticks: the peers' market caps below. A model's claim, not a price.</p>
         </section>
         <section class="card"><h2>Nearest trading peers <span>${esc(fam.label)}, closest TVL</span></h2>
-          <table class="mini"><thead><tr><th>Protocol</th><th class="num">TVL</th><th class="num">Market cap</th><th class="num">÷ TVL</th></tr></thead><tbody>
-          ${peers.map((x) => `<tr><td>${esc(x.p.name)} <small>${esc(x.p.symbol || '')}</small></td><td class="num">${usd(x.tvl)}</td><td class="num">${usd(x.actual)}</td><td class="num">${mult(x.actual / x.tvl)}</td></tr>`).join('') || '<tr><td colspan="4">No trading peer in this family.</td></tr>'}
-          </tbody></table></section>
+          ${tbl('mini', ['Protocol', '#TVL', '#Market cap', '#÷ TVL'], peers.map((x) => [`${esc(x.p.name)} <small>${esc(x.p.symbol || '')}</small>`, usd(x.tvl), usd(x.actual), mult(x.actual / x.tvl)]))}</section>
       </div>
       <section class="card planc"><h2>Farm plan <span>${pl.days} days on ${esc(pl.chain)}</span></h2>
         <div class="pkpis">
@@ -259,19 +258,20 @@
     </div>`;
   }
 
+  // A plain table: heads starting with '#' are numeric columns; rows are arrays of cell HTML.
+  const tbl = (cls, heads, rows) => `<table class="${cls}"><thead><tr>${heads.map((h) => `<th${h[0] === '#' ? ' class="num"' : ''}>${h.replace('#', '')}</th>`).join('')}</tr></thead><tbody>${rows.map((c) => `<tr>${c.map((v, i) => `<td${heads[i][0] === '#' ? ' class="num"' : ''}>${v}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  const nm = (n, sub) => `<b>${esc(n)}</b><small>${esc(sub)}</small>`;
   function aside() {
-    const body = radar.products.map((x) => `<tr><td class="proto"><span class="nm">${esc(x.p.name)}</span><small>${esc(x.p.chains.slice(0, 3).join(', '))}</small></td><td><span class="tag">${esc(x.kind)}</span></td><td class="num">${usd(x.p.tvl_usd)}</td><td class="num">${pct(x.p.change_7d)}</td></tr>`).join('');
     return `<section class="intro"><h1>${radar.products.length} products set aside, not ranked</h1>
       <p>No token of their own, but each is a wrapped, bridged, staked or exchange product, a versioned pool or a likely sibling of a trading token: the watchlist rule (productOf) applied to every protocol. Their value is the underlying token's.</p></section>
-      <div class="tablewrap"><table class="board"><thead><tr><th>Product</th><th>Why set aside</th><th class="num">TVL</th><th class="num">7d</th></tr></thead><tbody>${body}</tbody></table></div>`;
+      <div class="tablewrap">${tbl('board', ['Product', 'Why set aside', '#TVL', '#7d'], radar.products.map((x) => [nm(x.p.name, x.p.chains.slice(0, 3).join(', ')), `<span class="tag">${esc(x.kind)}</span>`, usd(x.p.tvl_usd), pct(x.p.change_7d)]))}</div>`;
   }
 
   function trading() {
-    const body = radar.live.map((l) => { const e = l.loo / l.actual; return `<tr><td class="proto"><span class="nm">${esc(l.p.name)}</span><small>${esc(l.p.symbol || '')} · ${esc(l.p.category || '')}</small></td><td class="num">${usd(l.tvl)}${l.members > 1 ? ` <small>${l.members} parts</small>` : ''}</td><td class="num">${usd(l.actual)}</td><td class="num">${mult(l.actual / l.tvl)}</td><td class="num">${usd(l.loo)}</td><td class="num ${e > 2 || e < 0.5 ? 'down' : 'up'}">${mult(e)}</td></tr>`; }).join('');
     return `<section class="intro"><h1>${fit.n} tokens that trade: the model's calibration set</h1>
       <p>Kept off the board: their market prices them. calibrate() pools TVL per token, leaves out exchanges and products, and fits ln(mcap ÷ TVL) on ln(TVL): value grows as TVL<sup>${fit.elasticity.toFixed(2)}</sup>. ${radar.listed_only} more record a token with no market cap.</p></section>
-      <div class="split"><div class="card"><h2>Held-out fit</h2><p class="note">Family pull k picked by leave-one-out miss: ×${fit.trials[0].median.toFixed(2)} → ×${fit.median_error.toFixed(2)}. Band ×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)} holds ${fit.band_hits}/${fit.n}; ${fit.clipped} ratios clipped in the fit only.</p></div>
-      <div class="tablewrap"><table class="board"><thead><tr><th>Protocol</th><th class="num">TVL</th><th class="num">Market cap</th><th class="num">÷ TVL</th><th class="num">Fit without it</th><th class="num">÷ market</th></tr></thead><tbody>${body}</tbody></table></div></div>`;
+      <div class="split"><div class="card"><h2>Held-out fit</h2><p class="note">Leave-one-out median miss ×${fit.median_error.toFixed(2)}. Band ×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)} holds ${fit.band_hits}/${fit.n}; ${fit.clipped} ratios clipped in the fit only.</p></div>
+      <div class="tablewrap">${tbl('board', ['Protocol', '#TVL', '#Market cap', '#÷ TVL', '#Fit without it', '#÷ market'], radar.live.map((l) => [nm(l.p.name, (l.p.symbol || '') + ' · ' + (l.p.category || '')), usd(l.tvl) + (l.members > 1 ? ` <small>${l.members} parts</small>` : ''), usd(l.actual), mult(l.actual / l.tvl), usd(l.loo), `<span class="${l.loo / l.actual > 2 || l.loo / l.actual < 0.5 ? 'down' : 'up'}">${mult(l.loo / l.actual)}</span>`]))}</div></div>`;
   }
 
   let planDep = '';

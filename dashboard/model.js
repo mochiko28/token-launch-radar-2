@@ -9,7 +9,6 @@
     ref_tvl: 1e8, // the fit's reference size: $100M of TVL
     ratio_floor: 0.02, // mcap/TVL outliers are clipped before the fit
     ratio_cap: 20,
-    shrink_options: [0, 1, 2, 4, 8, 16, 32, Infinity], // k: pseudo-peers pulling a family to the mean
     growth_floor: -30, // 7-day change used for momentum, clipped (per cent)
     growth_cap: 50,
     odds_days: 365, // launch odds are for a token within this many days
@@ -79,26 +78,20 @@
       var t = tok[k];
       return { p: t.p, tvl: t.tvl, mcap: t.mcap, members: t.members, f: family(t.p), x: Math.log(t.tvl / M.ref_tvl), y: Math.log(clamp(t.mcap / t.tvl, M.ratio_floor, M.ratio_cap)) };
     });
-    // Misses are out of sample (leave-one-out) against the real, unclipped market cap. The family pull k,
-    // from 0 (families alone) to Infinity (one size curve), is the one with the smallest median miss.
-    function looMiss(k) {
-      return pts.map(function (q, i) { return Math.log(q.mcap / predict(fitPoints(pts.filter(function (o, j) { return j !== i; }), k), q)); });
-    }
-    var trials = M.shrink_options.map(function (k) {
-      var m = looMiss(k);
-      return { k: k, miss: m, median: Math.exp(quantile(m.map(Math.abs).sort(function (u, v) { return u - v; }), 0.5)) };
-    });
-    var best = trials.reduce(function (a, t) { return t.median < a.median - 1e-12 ? t : a; });
-    var full = fitPoints(pts, best.k), miss = best.miss;
+    // Category families enter the curve (k = 0) only if they lower the miss in both held-out tests, else
+    // one size curve (k = Infinity). Misses: leave-one-out, against the real, unclipped market cap.
+    var tests = termTests(pts, snap.as_of), k = tests.terms[2].ok ? 0 : Infinity;
+    var miss = pts.map(function (q, i) { return Math.log(q.mcap / predict(fitPoints(pts.filter(function (o, j) { return j !== i; }), k), q)); });
+    var full = fitPoints(pts, k);
     pts.forEach(function (q, i) { q.fit = Math.round(predict(full, q)); q.loo = q.mcap / Math.exp(miss[i]); });
     var sorted = miss.slice().sort(function (u, v) { return u - v; });
     var absMiss = miss.map(Math.abs).sort(function (u, v) { return u - v; });
     var inBand = 0, q25 = quantile(sorted, 0.25), q75 = quantile(sorted, 0.75);
     miss.forEach(function (m) { if (m >= q25 && m <= q75) inBand++; });
-    return { k: best.k, trials: trials.map(function (t) { return { k: t.k, median: t.median }; }), slope: full.b, elasticity: 1 + full.b, base: Math.exp(full.all), families: full.fams, n: pts.length, points: pts,
+    return { k: k, slope: full.b, elasticity: 1 + full.b, base: Math.exp(full.all), families: full.fams, n: pts.length, points: pts,
       median_error: Math.exp(quantile(absMiss, 0.5)), band_low: Math.exp(q25), band_high: Math.exp(q75), band_hits: inBand,
       clipped: pts.filter(function (q) { var r = q.mcap / q.tvl; return r < M.ratio_floor || r > M.ratio_cap; }).length,
-      tests: termTests(pts, snap.as_of), odds: launchOdds(snap) };
+      tests: tests, odds: launchOdds(snap) };
   }
 
   /* Launch odds. F(p, a) = fitted share of peers (not exchanges or products) holding a token at age a,
@@ -141,7 +134,14 @@
       var m = pts.filter(function (q) { return q.a != null && q.a >= lo && q.a < edges[c + 1]; }), n = m.length || 1;
       return { from: lo, n: m.length, actual: m.reduce(function (t, q) { return t + q.y; }, 0) / n, fitted: m.reduce(function (t, q) { return t + F(q.p, q.a); }, 0) / n };
     });
-    return { w: w, cohorts: cohorts, gap: Math.max.apply(null, cohorts.map(function (c) { return Math.abs(c.actual - c.fitted); })), n: pts.length, with_token: pts.filter(function (q) { return q.y; }).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
+    // Brier score (mean squared probability error) against the base rate, both held out the same way.
+    var S = pts.reduce(function (t, q) { return t + q.y; }, 0), n = pts.length, rate = dated.slice(0, cut).reduce(function (t, q) { return t + q.y; }, 0) / cut;
+    var bri = function (T, f) { return T.reduce(function (t, q) { return t + Math.pow(f(q) - q.y, 2); }, 0) / T.length; };
+    var brier = { loo: bri(loo, function (q) { return sig(q.s); }), loo_base: bri(pts, function (q) { return (S - q.y) / (n - 1); }),
+      wf: bri(wf, function (q) { return sig(q.s); }), wf_base: bri(wf, function () { return rate; }) };
+    // A bootstrap refit: the odds curve fitted again on a resample of the peers.
+    var boot = function (rnd) { var wb = logit(pts.map(function () { return pts[Math.floor(rnd() * n)]; }), w, 4); return function (p, a) { return sig(dot(wb, X(p, a))); }; };
+    return { boot: boot, brier: brier, w: w, cohorts: cohorts, gap: Math.max.apply(null, cohorts.map(function (c) { return Math.abs(c.actual - c.fitted); })), n: pts.length, with_token: pts.filter(function (q) { return q.y; }).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
       F: F };
   }
   function sig(z) { return 1 / (1 + Math.exp(-z)); }
@@ -193,7 +193,7 @@
   // FNV-1a of each row's slug and value: main.ts writes it to data.js, the cover recomputes and compares.
   function digest(rows) {
     var h = 2166136261;
-    rows.forEach(function (r) { var s = r.slug + ':' + r.implied_value_usd + '|'; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } });
+    rows.forEach(function (r) { var s = [r.rank, r.slug, r.name, r.implied_value_usd].concat(r.farm_steps).join('|'); for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } });
     return ('0000000' + h.toString(16)).slice(-8);
   }
   function quantile(a, t) { var i = (a.length - 1) * t, lo = Math.floor(i); return a[lo] + (a[Math.min(lo + 1, a.length - 1)] - a[lo]) * (i - lo); }
@@ -329,6 +329,18 @@
       'at 2-year odds': function (r) { return r.v.fitted * (fit.odds.F(r.p, r.v.age_used + 730) - r.v.f0) / (1 - r.v.f0); },
       'if launched': function (r) { return r.v.fitted; } };
     Object.keys(ALT).forEach(function (k) { rows.slice().sort(function (a, b) { return ALT[k](b) - ALT[k](a) || bySlug(a.p, b.p); }).forEach(function (r, i) { (r.alt = r.alt || {})[k] = i + 1; }); });
+    // Bootstrap: refit the value curve on resampled trading tokens and the launch odds on resampled peers,
+    // 40 seeded draws (every run agrees), and count how often each row ranks in the top 20.
+    var seed = 7, rnd = function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    rows.forEach(function (r) { r.boot = 0; });
+    for (var d = 0; d < 40; d++) {
+      var bs = fit.points.map(function () { return fit.points[Math.floor(rnd() * fit.points.length)]; }), bf = fitPoints(bs, fit.k), Fb = fit.odds.boot(rnd);
+      rows.map(function (r) {
+        var a = r.v.age_used, f0 = Fb(r.p, a), qb = (Fb(r.p, a + M.odds_days) - f0) / (1 - f0);
+        return { r: r, s: r.v.tvl_next * Math.exp(bf.fams[r.v.family].ln + bf.b * Math.log(r.v.tvl_next / M.ref_tvl)) * qb };
+      })
+        .sort(function (a, b) { return b.s - a.s || bySlug(a.r.p, b.r.p); }).slice(0, 20).forEach(function (o) { o.r.boot += 1 / 40; });
+    }
     rows.forEach(function (r) { r.stable = r.rank <= 20 && Object.keys(r.alt).every(function (k) { return r.alt[k] <= 20; }); });
     var live = fit.points.map(function (q) { return { p: q.p, tvl: q.tvl, members: q.members, family: q.f, fit: q.fit, loo: Math.round(q.loo), actual: q.mcap }; })
       .sort(function (a, b) { return b.actual - a.actual || bySlug(a.p, b.p); });
