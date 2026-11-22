@@ -20,6 +20,7 @@
  const verdictTag = (v) => `<span class="verdict v-${v}">${v}</span>`;
  const maxImplied = rows[0].v.implied;
 
+ const CLEAR = { q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' };
  const DEF = { view: 'board', q: '', fam: '', chain: '', scope: 'all', verdict: '', sort: 'rank', dir: 'asc', p: '', dep: '', bud: '25000', hr: '25' };
  const HOURS = 8;
  function readHash() {
@@ -140,7 +141,7 @@
  const SHORT = [`${nAll}/${S.protocols.length} protocols accounted for`, `watchlist ${S.watchlist.filter((s) => bySlug[s]).length}/${S.watchlist.length}`, `ranks 1–${rows.length}, value never rising`,
   `${rows.length}/${rows.length} record no token`, `${bRows.length}/${bRows.length} plans costed and timed`, `screen = board.json, digest ${dig}`,
   `token-record score beats base rate in 3 held-out tests`, `ranks 1–${rows.findIndex((r) => r.boot < 1)} top 20 in all 40 refits`,
-  `odds within ${Math.round(O.gap * 100)} pts of every age cohort`, `value miss ×${flatT.loo.toFixed(1)} flat → ×${sizeT.loo.toFixed(1)} fitted`];
+  `score within ${Math.round(O.gap * 100)} pts of every age cohort`, `value miss ×${flatT.loo.toFixed(1)} flat → ×${sizeT.loo.toFixed(1)} fitted`];
 
  function board(st) {
   const shown = filtered(st), fams = st.fam ? st.fam.split(',') : [];
@@ -185,7 +186,7 @@
    <label class="field"><span>Deposit</span><select id="dep">${['', 1000, 5000, 10000, 25000, 100000, 250000].map((d) => `<option value="${d}"${String(d) === st.dep ? ' selected' : ''}>${d ? usd(d) : 'Auto: least that pays'}</option>`).join('')}</select></label>
    <label class="field"><span>Your hour</span><select id="hr">${[0, 10, 25, 50, 100].map((h) => `<option value="${h}"${String(h) === st.hr ? ' selected' : ''}>$${h}/h</option>`).join('')}</select></label>
    <label class="field"><span>Chain</span><select id="chain"><option value="">All chains</option>${Object.keys(chains).sort((a, b) => chains[b] - chains[a] || (a < b ? -1 : 1)).map((c) => `<option${c === st.chain ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
-   <div class="count">Top 20 at $${st.hr}/h: <b>${farmAt(+st.hr, st.dep)}</b> farm (${farmAt(0, st.dep)} at $0/h, ${farmAt(25, st.dep)} at $25/h) · <b>${shown.length}</b> of ${rows.length} shown${active ? ` · <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">clear filters</a>` : ''}</div>
+   <div class="count">Top 20 at $${st.hr}/h: <b>${farmAt(+st.hr, st.dep)}</b> farm (${farmAt(0, st.dep)} at $0/h, ${farmAt(25, st.dep)} at $25/h) · <b>${shown.length}</b> of ${rows.length} shown${active ? ` · <a href="${link(CLEAR)}">clear filters</a>` : ''}</div>
   </section>
   <section class="filters basket"><label class="field"><span>Budget</span><select id="bud">${[10000, 25000, 50000, 100000, 250000, 1000000].map((d) => `<option value="${d}"${String(d) === st.bud ? ' selected' : ''}>${usd(d)}</option>`).join('')}</select></label>
    <span>Basket, best net per dollar of the ${shown.length} shown, within ${usd(+st.bud)} and ${HOURS} h: ${pick.map((r) => `<a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a> ${usd(r.plan.stake)}`).join(' · ') || 'none pays'} → <b>${usd(cap)}</b>, ${hrs.toFixed(1)} h, net if they launch <b class="up">+${usd(pick.reduce((s, r) => s + r.plan.net, 0))}</b></span></section>
@@ -203,7 +204,7 @@
   <section class="hero slim">
    <div class="lead">
     <h1>${rows.length} pre-token protocols, ranked by token value × token-record score</h1>
-    ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>${ctl}` : `<p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × s</p>
+    ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link(CLEAR)}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>${ctl}` : `<p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × s</p>
     <div class="card checks"><h2>Self-checks <span>run in this page on load · <a href="${link({ view: 'model' })}">full checks and held-out tests →</a></span></h2><ul class="grid2">${CHECKS.map(([ok], i) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${SHORT[i]}</li>`).join('')}</ul></div>`}
    </div>
    <div class="card chartcard"><h2>Radar <span>days without a token × airdrop yield</span></h2>${chart(shown, 214)}</div>
