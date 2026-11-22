@@ -237,8 +237,16 @@
       if (eligible(k) * perDollar >= M.target_cover * total(steps(k)).all) { stake = k; break; }
     }
     var st = steps(stake), t = total(st), capital = stake + Math.round(stake / 4), drop = eligible(stake) * perDollar;
+    var verdict = drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip';
+    // A plan that does not clear the target says so first, with the drop share that would make it pay.
+    var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
+    if (verdict !== 'farm') {
+      st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: at ' + usd(capital) + ' the expected drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
+        ' of gas, fees and time ×' + (drop / t.all).toFixed(2) + '; it pays ×' + M.target_cover + ' only if about ' + (needShare * 100).toFixed(needShare < 0.1 ? 1 : 0) +
+        '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%), so ' + (verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
+    }
     return { chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * M.hour_usd, all_in: t.all,
-      days: M.farm_days, drop: drop, net: drop - t.all, verdict: drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip' };
+      days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, verdict: verdict };
   }
   function stepText(s) {
     var t = s.when + ': ' + s.act + '. Cost: about ' + usd(s.usd) + '. Time: ' + mins(s.min) + '.';
@@ -277,7 +285,7 @@
         token_status: 'pre-token', on_watchlist: r.watch, category: r.p.category, family: r.v.family, chains: r.p.chains,
         tvl_usd: r.p.tvl_usd, change_7d: r.p.change_7d, days_without_token: r.v.age, implied_low_usd: r.v.low, implied_high_usd: r.v.high,
         factors: { family_multiple: +r.v.fam_multiple.toFixed(4), size: +r.v.size_mult.toFixed(4), momentum_tvl: r.v.tvl_next, time: +r.v.time_factor.toFixed(4) },
-        airdrop_apr: +r.v.apr.toFixed(4), farm: { chain: r.plan.chain, capital_usd: r.plan.stake, cost_usd: +r.plan.cost.toFixed(2), minutes: r.plan.minutes, expected_drop_usd: +r.plan.drop.toFixed(2), verdict: r.plan.verdict } };
+        airdrop_apr: +r.v.apr.toFixed(4), farm: { chain: r.plan.chain, capital_usd: r.plan.stake, cost_usd: +r.plan.cost.toFixed(2), minutes: r.plan.minutes, expected_drop_usd: +r.plan.drop.toFixed(2), drop_share_for_target: +r.plan.need_share.toFixed(4), verdict: r.plan.verdict } };
     });
   }
 
