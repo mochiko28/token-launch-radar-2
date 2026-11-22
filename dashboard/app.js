@@ -75,6 +75,24 @@
       const rad = 2.2 + 9 * Math.sqrt(r.v.implied / maxImplied);
       dots += `<a href="${link({ p: r.p.slug })}"><circle class="dot f-${r.v.family}${on.has(r.p.slug) ? '' : ' off'}" cx="${X(r.v.age_used).toFixed(1)}" cy="${Y(r.v.apr).toFixed(1)}" r="${rad.toFixed(1)}"><title>${esc(r.p.name)}: ${usd(r.v.implied)}, ${(r.v.apr * 100).toFixed(1)}% drop APR, ${days(r.v.age)} without a token</title></circle></a>`;
     });
+    // Name the shown rows that matter most: the three largest implied values and the three best
+    // drop yields, each label placed beside its dot where it overlaps no other label.
+    const pick = [];
+    [(a, b) => b.v.implied - a.v.implied, (a, b) => b.v.apr - a.v.apr].forEach((cmp) => {
+      shown.slice().sort(cmp).slice(0, 3).forEach((r) => { if (!pick.includes(r)) pick.push(r); });
+    });
+    const boxes = [];
+    let labels = '';
+    pick.forEach((r) => {
+      const cx = X(r.v.age_used), cy = Y(r.v.apr), w = r.p.name.length * 5.6 + 6, h = 12;
+      const tries = [[cx + 8, cy - 6], [cx - 8 - w, cy - 6], [cx - w / 2, cy - 20], [cx - w / 2, cy + 8]];
+      const spot = tries.find(([x, y]) => x > L && x + w < W && y > 0 && y + h < H - B &&
+        boxes.every((b) => x + w < b[0] || b[0] + b[2] < x || y + h < b[1] || b[1] + b[3] < y));
+      if (!spot) return;
+      boxes.push([spot[0], spot[1], w, h]);
+      labels += `<text class="lab" x="${(spot[0] + 3).toFixed(1)}" y="${(spot[1] + 9).toFixed(1)}">${esc(r.p.name)}</text>`;
+    });
+    dots += labels;
     return `<svg viewBox="0 0 ${W} ${H}" class="radar" role="img" aria-label="Days without a token against airdrop yield, one dot per protocol">${g}
       <text class="zone" x="${L + 8}" y="${T + 14}">early, rich drop</text><text class="zone" x="${W - RR - 6}" y="${H - B - 8}" text-anchor="end">old, diluted</text>${dots}
       <text class="ax" x="${W - RR}" y="${T + 8}" text-anchor="end">dot size = implied value</text></svg>`;
@@ -131,7 +149,7 @@
         <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small></td>
         <td class="num">${mult(r.v.multiple)}</td>
         <td class="num apr">${(r.v.apr * 100).toFixed(1)}%</td>
-        <td class="plan">${verdictTag(r.plan.verdict)}<small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}</small></td></tr>`;
+        <td class="plan">${verdictTag(r.plan.verdict)} <span class="pmult">pays ${mult(r.plan.drop / r.plan.all_in)}</span><small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}</small></td></tr>`;
     }).join('');
     return `<section class="hero">
       <div class="lead">
