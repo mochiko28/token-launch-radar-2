@@ -106,7 +106,8 @@ table{width:100%;border-collapse:collapse;}
 .board tbody tr:hover,.board tbody tr:focus{background:#1f6f5c0a;outline:none;}
 .board tbody tr:last-child td{border-bottom:0;}
 th.num,td.num{text-align:right;white-space:nowrap;}
-td.rank{color:var(--dim);width:44px;}
+td.rank{color:var(--dim);width:56px;}
+td.rank small{white-space:nowrap;}
 td.proto a,td.proto .nm{font-weight:600;}
 td.proto a:hover{color:var(--accent);}
 td.proto small{margin-top:1px;}
