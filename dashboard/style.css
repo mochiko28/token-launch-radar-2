@@ -208,3 +208,6 @@ td.proto{min-width:230px;}
 .checkline b{color:var(--accent);}
 .checkline.bad{background:#b3412a12;border-color:#b3412a40;}
 .checkline.bad b{color:var(--red);}
+.steps li{padding:6px 0;}
+.steps p{font-size:12.5px;line-height:1.45;}
+.math p{margin:0 0 4px;}
