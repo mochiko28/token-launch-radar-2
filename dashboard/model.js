@@ -17,6 +17,7 @@
     drop_share: 0.10, // assumed share of supply sent to depositors, pro rata to TVL-days
     farm_days: 90, // the plan's holding window
     hour_usd: 25, // the reader's hands-on time, priced into every plan
+    carry_rate: 0.04, // a stablecoin savings rate: what the locked capital could earn elsewhere
     target_cover: 2, // deposit sized so the drop covers gas and time this many times
     season_days: 365 // TVL-days older than this count as paid by earlier seasons
   };
@@ -334,7 +335,10 @@
         { when: 'Day 0', usd: 0, min: 5, act: 'Write down the trigger that flips this plan: an announced allocation of at least ' + (needShare * 100).toFixed(0) + '% to depositors, ' + (payCap ? 'capital of about ' + usd(payCap) + ' to commit, ' : '') + 'or TVL falling below ' + usd(p.tvl_usd * 0.5) + ' with no change in odds (a smaller pool to share)' },
         { when: 'Day 30', usd: 0, min: 10, act: 'Look again on a new snapshot; if the plan now pays ×' + M.target_cover + ', follow the full plan (' + usd(capital) + ' capital, about ' + usd(t.cost) + ' in fees, ' + mins(Math.round(t.min)) + ' hands-on)' }];
     }
-    return { hour: hr, chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
+    // Capital carry: what the locked capital forgoes at carry_rate over the window; shown, not charged, since
+    // the deposit itself usually earns a comparable yield in the protocol.
+    var carry = capital * M.carry_rate * M.farm_days / 365;
+    return { carry: carry, hour: hr, chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
       days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, verdict: verdict };
   }
   function stepText(s) {

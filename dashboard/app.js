@@ -285,7 +285,7 @@
         <ol class="steps">${pl.steps.map((s) => `<li><p><em>${esc(s.when)}</em>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>
         <div class="math">
           <p><b>Drop APR ${(v.apr * 100).toFixed(2)}% if it launches</b> = ${usd(v.fitted)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
-          <p>${usd(pl.eligible)} earning for ${pl.days} days: <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${pl.hour}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital: ${st.dep ? 'your deposit' : pl.verdict === 'farm' ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}.</p>
+          <p>${usd(pl.eligible)} earning for ${pl.days} days: <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${pl.hour}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital carry: ${usd(pl.stake)} locked ${pl.days} days forgoes about ${usd(pl.carry)} at ${M.carry_rate * 100}% elsewhere; the deposit's own yield usually covers it, and if it earns nothing the net is ${pl.net - pl.carry >= 0 ? '+' : '−'}${usd(Math.abs(pl.net - pl.carry))}. Capital: ${st.dep ? 'your deposit' : pl.verdict === 'farm' ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}.</p>
         </div>
       </section>
     </div>`;
