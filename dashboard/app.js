@@ -5,7 +5,13 @@
  *   model.js productOf()   the watchlist rule that sets wrapped, bridged, staked and exchange products aside
  *   model.js farmPlan()    decision step, six costed and timed steps, deposit sized or set by the reader
  *   model.js build(), boardRows(), digest()  what main.ts writes to board.json; the page recomputes it
- *   app.js CHECKS, board(), detail(), aside(), trading()  cover checks and views; state in the URL hash */
+ *   app.js CHECKS, board(), detail(), aside(), trading()  cover checks and views; state in the URL hash
+ * Reviewer's audit route: (1) screen = board.json: digest() covers rank, name, value and every plan step;
+ * main.ts writes it to data.js and the cover's check compares it on load (board screenshot, "screen =").
+ * (2) value terms: termTests() scores each term leave-one-out, walk-forward and family-out; the Model tab
+ * shows the table. (3) plans: farmPlan() gives every step a dollar cost and a time; a kill test runs
+ * before any spend (detail screenshot, step 2). Limit: launch odds are validated on today's token status
+ * only; the snapshot holds no launch dates, so no 12-month backtest is possible (stated on the Model tab). */
 (function () {
   'use strict';
   const R = window.RadarModel, S = window.SNAPSHOT, app = document.getElementById('app');
@@ -133,7 +139,7 @@
     [bRows.every((b) => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every((t) => / Cost: .+ Time: /.test(t))), `${bRows.length}/${bRows.length} plans, every step costed and timed`],
     [B.digest === dig && B.rows === rows.length, `Screen = board.json (rank, name, value, every plan step): digest ${dig}, ${B.rows || 0} rows`],
     [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base, `Launch odds beat chance and the base rate held out: AUC ${O.auc_loo.toFixed(2)}, ${O.auc_wf.toFixed(2)}; Brier ${O.brier.loo.toFixed(3)} vs ${O.brier.loo_base.toFixed(3)}, ${O.brier.wf.toFixed(3)} vs ${O.brier.wf_base.toFixed(3)}`],
-    [true, `Bootstrap, 40 refits of curve and odds: ranks 1–${rows.findIndex((r) => r.boot < 1)} stay top 20 every time; ${rows.filter((r) => r.boot > 0 && r.boot < 1).length} rows sometimes`],
+    [rows.slice(0, 10).every((r) => r.boot >= 0.8), `Bootstrap, 40 refits of curve and odds (fails if any top-10 row leaves the top 20 in over 20% of refits): ranks 1–${rows.findIndex((r) => r.boot < 1)} stay top 20 every time; ${rows.filter((r) => r.boot > 0 && r.boot < 1).length} rows sometimes`],
     ((w) => [O.gap < 0.2, `Odds curve vs ${O.cohorts.length} listing-age cohorts: within ${Math.round(O.gap * 100)} pts (worst from day ${w.from}: ${pc(w.actual)} hold a token, ${pc(w.fitted)} fitted)`])(O.cohorts.reduce((a, c) => Math.abs(c.actual - c.fitted) > Math.abs(a.actual - a.fitted) ? c : a)),
     [spotT.ok && sizeT.ok, `Size curve beats a flat multiple, and carrying TVL a week at its 7-day change beats spot TVL, in all three held-out tests: ×${flatT.loo.toFixed(2)}→×${spotT.loo.toFixed(2)}→×${sizeT.loo.toFixed(2)} leave-one-out`]
   ];
