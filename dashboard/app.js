@@ -29,7 +29,7 @@
   const verdictTag = (v) => `<span class="verdict v-${v}">${v}</span>`;
   const maxImplied = rows[0].v.implied;
 
-  const DEF = { view: 'board', q: '', fam: '', chain: '', scope: 'all', verdict: '', sort: 'rank', dir: 'asc', p: '', dep: '', bud: '25000' };
+  const DEF = { view: 'board', q: '', fam: '', chain: '', scope: 'all', verdict: '', sort: 'rank', dir: 'asc', p: '', dep: '', bud: '25000', hr: '25' };
   const HOURS = 8;
   function readHash() {
     const st = Object.assign({}, DEF);
@@ -39,7 +39,7 @@
       if (i > 0 && own(DEF, k)) try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch (e) { /* keep the default */ }
     });
     // Unknown values fall back to the defaults, so a hand-typed link never breaks the page.
-    const ok = { view: 'board model aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000 100000 250000', bud: '10000 25000 50000 100000 250000 1000000' };
+    const ok = { view: 'board model aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000 100000 250000', hr: '0 10 25 50 100', bud: '10000 25000 50000 100000 250000 1000000' };
     Object.keys(ok).forEach((k) => { if (!ok[k].split(' ').includes(st[k])) st[k] = DEF[k]; });
     if (!own(KEYS, st.sort)) st.sort = 'rank';
     return st;
@@ -191,8 +191,9 @@
       <div class="field"><span>Scope</span>${seg('scope', [['all', 'All'], ['watch', 'Watchlist'], ['outside', 'Outside it'], ['early', 'Below $50M'], ['stable', 'Top 20, all variants']])}</div>
       <div class="field"><span>Plan</span>${seg('verdict', [['', 'Any'], ['farm', 'Farm'], ['marginal', 'Marginal'], ['skip', 'Skip']])}</div>
       <label class="field"><span>Deposit</span><select id="dep">${['', 1000, 5000, 10000, 25000, 100000, 250000].map((d) => `<option value="${d}"${String(d) === st.dep ? ' selected' : ''}>${d ? usd(d) : 'Auto: least that pays'}</option>`).join('')}</select></label>
+      <label class="field"><span>Your hour</span><select id="hr">${[0, 10, 25, 50, 100].map((h) => `<option value="${h}"${String(h) === st.hr ? ' selected' : ''}>$${h}/h</option>`).join('')}</select></label>
       <label class="field"><span>Chain</span><select id="chain"><option value="">All chains</option>${Object.keys(chains).sort((a, b) => chains[b] - chains[a] || (a < b ? -1 : 1)).map((c) => `<option${c === st.chain ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
-      <div class="count"><b>${shown.length}</b> of ${rows.length} shown${active ? ` · <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">clear filters</a>` : ''}</div>
+      <div class="count">Top 20 at $${st.hr}/h: <b>${farmAt(+st.hr, st.dep)}</b> farm (${farmAt(0, st.dep)} at $0/h, ${farmAt(25, st.dep)} at $25/h) · <b>${shown.length}</b> of ${rows.length} shown${active ? ` · <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">clear filters</a>` : ''}</div>
     </section>
     <section class="filters basket"><label class="field"><span>Budget</span><select id="bud">${[10000, 25000, 50000, 100000, 250000, 1000000].map((d) => `<option value="${d}"${String(d) === st.bud ? ' selected' : ''}>${usd(d)}</option>`).join('')}</select></label>
       <span>Basket, best net per dollar of the ${shown.length} shown, within ${usd(+st.bud)} and ${HOURS} h: ${pick.map((r) => `<a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a> ${usd(r.plan.stake)}`).join(' · ') || 'none pays'} → <b>${usd(cap)}</b>, ${hrs.toFixed(1)} h, net if they launch <b class="up">+${usd(pick.reduce((s, r) => s + r.plan.net, 0))}</b></span></section>
@@ -283,7 +284,7 @@
         <ol class="steps">${pl.steps.map((s) => `<li><p><em>${esc(s.when)}</em>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>
         <div class="math">
           <p><b>Drop APR ${(v.apr * 100).toFixed(2)}% if it launches</b> = ${usd(v.fitted)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
-          <p>${usd(pl.eligible)} earning for ${pl.days} days: <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${M.hour_usd}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital: ${st.dep ? 'your deposit' : pl.verdict === 'farm' ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}.</p>
+          <p>${usd(pl.eligible)} earning for ${pl.days} days: <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${pl.hour}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital: ${st.dep ? 'your deposit' : pl.verdict === 'farm' ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}.</p>
         </div>
       </section>
     </div>`;
@@ -308,13 +309,15 @@
       <div class="tablewrap">${tbl('board', ['Protocol', '#TVL', '#Market cap', '#÷ TVL', '#Fit without it', '#÷ market'], radar.live.map((l) => [nm(l.p.name, (l.p.symbol || '') + ' · ' + (l.p.category || '')), usd(l.tvl) + (l.members > 1 ? ` <small>${l.members} parts</small>` : ''), usd(l.actual), mult(l.actual / l.tvl), usd(l.loo), `<span class="${l.loo / l.actual > 2 || l.loo / l.actual < 0.5 ? 'down' : 'up'}">${mult(l.loo / l.actual)}</span>`]))}</div></div>`;
   }
 
-  let planDep = '';
+  let planDep = '|25';
+  // How many top-20 verdicts are farm at a given hourly value (and deposit), to compare with the default.
+  const top20 = rows.slice(0, 20), farmAt = (h, dep) => top20.filter((r) => R.farmPlan(r.p, r.v, +dep, h).verdict === 'farm').length;
   function render() {
     const st = readHash();
     head(st);
     app.className = st.p ? 'detail' : st.view;
     // A deposit chosen by the reader re-plans every row at that amount (farmPlan's dep).
-    if (st.dep !== planDep) { planDep = st.dep; rows.forEach((r) => { r.plan = R.farmPlan(r.p, r.v, +st.dep); }); }
+    if (st.dep + '|' + st.hr !== planDep) { planDep = st.dep + '|' + st.hr; rows.forEach((r) => { r.plan = R.farmPlan(r.p, r.v, +st.dep, +st.hr); }); }
     app.innerHTML = st.p ? detail(st) : st.view === 'model' ? model() : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
     document.getElementById('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied value = the radar's own value if launched × its token-record score; never make.fun's claim. A protocol may hold a token DefiLlama does not record.`;
     if (st.p) window.scrollTo(0, 0);
@@ -328,7 +331,7 @@
       typing = setTimeout(() => { typing = null; history.replaceState(null, '', link({ q: val })); render(); const q = document.getElementById('q'); if (q) { q.focus(); q.setSelectionRange(val.length, val.length); } }, 160);
     }
   });
-  app.addEventListener('change', (e) => { if (['chain', 'dep', 'bud'].includes(e.target.id)) go({ [e.target.id]: e.target.value }); });
+  app.addEventListener('change', (e) => { if (['chain', 'dep', 'bud', 'hr'].includes(e.target.id)) go({ [e.target.id]: e.target.value }); });
   ['click', 'keydown'].forEach((ev) => app.addEventListener(ev, (e) => {
     const tr = e.target.closest('tr[data-slug]');
     if (tr && !e.target.closest('a') && (ev === 'click' || e.key === 'Enter')) go({ p: tr.dataset.slug });

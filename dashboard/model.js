@@ -281,7 +281,9 @@
 
   /* A farm plan from the row's own figures: steps with a dollar cost and a time each, on the cheapest of
    * its three main chains. */
-  function farmPlan(p, v, dep) {
+  // hour: the reader's value of an hour of hands-on time (default M.hour_usd); dep: a fixed deposit.
+  function farmPlan(p, v, dep, hour) {
+    var hr = hour == null ? M.hour_usd : hour;
     var main = p.chains.slice(0, 3), chain = main[0] || 'its main chain';
     main.forEach(function (c) { if (gas(c) < gas(chain)) chain = c; });
     var kind = p.category === 'Prediction Market' ? 'predict' : v.family;
@@ -301,7 +303,7 @@
         { act: 'At launch claim only through the protocol\'s own app; the model prices it near ' + usd(v.fitted) + ' if launched, so sell the claim if its market cap opens above ' + usd(v.cap_high) + ' (top of its 50% band; the model fits market cap, not FDV)', usd: 2 * tx, min: 15, when: 'At launch' }
       ];
     }
-    function total(st) { var c = 0, t = 5; st.forEach(function (s) { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * M.hour_usd }; }
+    function total(st) { var c = 0, t = 5; st.forEach(function (s) { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * hr }; }
     // Only capital in the protocol earns: the deposit, plus the side deposit for vaults (a second vault).
     function eligible(stake) { return kind === 'vault' ? stake + Math.round(stake / 4) : stake; }
     // The smallest deposit ($500 steps of capital, up to $25,000) whose drop covers costs target_cover times.
@@ -332,7 +334,7 @@
         { when: 'Day 0', usd: 0, min: 5, act: 'Write down the trigger that flips this plan: an announced allocation of at least ' + (needShare * 100).toFixed(0) + '% to depositors, ' + (payCap ? 'capital of about ' + usd(payCap) + ' to commit, ' : '') + 'or TVL falling below ' + usd(p.tvl_usd * 0.5) + ' with no change in odds (a smaller pool to share)' },
         { when: 'Day 30', usd: 0, min: 10, act: 'Look again on a new snapshot; if the plan now pays ×' + M.target_cover + ', follow the full plan (' + usd(capital) + ' capital, about ' + usd(t.cost) + ' in fees, ' + mins(Math.round(t.min)) + ' hands-on)' }];
     }
-    return { chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * M.hour_usd, all_in: t.all,
+    return { hour: hr, chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
       days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, verdict: verdict };
   }
   function stepText(s) {
