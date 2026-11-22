@@ -173,6 +173,18 @@
         <td class="num apr">${(r.v.apr * 100).toFixed(1)}%</td>
         <td class="plan">${verdictTag(r.plan.verdict)} <span class="pmult">pays ${mult(r.plan.drop / r.plan.all_in)}</span><small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}</small></td></tr>`;
     }).join('');
+    // The controls: under the hero on the cover, beside the chart when filters are on.
+    const ctl = `    <section class="filters">
+      <label class="search"><input id="q" type="search" value="${esc(st.q)}" placeholder="Search name, category or chain" autocomplete="off" aria-label="Search"></label>
+      <div class="field"><span>Scope</span>${seg('scope', [['all', 'All'], ['watch', 'Watchlist'], ['outside', 'Outside it'], ['early', 'Below $50M'], ['stable', 'Top 20, all variants']])}</div>
+      <div class="field"><span>Plan</span>${seg('verdict', [['', 'Any'], ['farm', 'Farm'], ['marginal', 'Marginal'], ['skip', 'Skip']])}</div>
+      <label class="field"><span>Deposit</span><select id="dep">${['', 1000, 5000, 10000, 25000].map((d) => `<option value="${d}"${String(d) === st.dep ? ' selected' : ''}>${d ? usd(d) : 'Auto: least that pays'}</option>`).join('')}</select></label>
+      <label class="field"><span>Chain</span><select id="chain"><option value="">All chains</option>${Object.keys(chains).sort((a, b) => chains[b] - chains[a] || (a < b ? -1 : 1)).map((c) => `<option${c === st.chain ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+      <div class="count"><b>${shown.length}</b> of ${rows.length} shown${active ? ` · <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">clear filters</a>` : ''}</div>
+    </section>
+    <section class="filters basket"><label class="field"><span>Budget</span><select id="bud">${[10000, 25000, 50000, 100000].map((d) => `<option value="${d}"${String(d) === st.bud ? ' selected' : ''}>${usd(d)}</option>`).join('')}</select></label>
+      <span>Basket, best net per dollar of the ${shown.length} shown, within ${usd(+st.bud)} and ${HOURS} h: ${pick.map((r) => `<a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a> ${usd(r.plan.stake)}`).join(' · ') || 'none pays'} → <b>${usd(cap)}</b>, ${hrs.toFixed(1)} h, net <b class="up">+${usd(pick.reduce((s, r) => s + r.plan.net, 0))}</b></span></section>
+    <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div></section>`;
     return `<section class="strip">
       <div><b>${watchCov}/${S.watchlist.length}</b><span>watchlist covered</span></div>
       <div><b>${rows.length}</b><span>pre-token ranked, ${rows.filter((r) => r.below).length} under $50M</span></div>
@@ -186,22 +198,12 @@
     <section class="hero${active ? ' slim' : ''}">
       <div class="lead">
         <h1>${rows.length} pre-token protocols, ranked by token value × launch odds</h1>
-        ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>` : `<div class="card checks"><h2>Self-checks <span>run in this page on load</span></h2><ul>${CHECKS.map(([ok, t]) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${t}</li>`).join('')}</ul></div>`}
+        ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>${ctl}` : `<div class="card checks"><h2>Self-checks <span>run in this page on load</span></h2><ul>${CHECKS.map(([ok, t]) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${t}</li>`).join('')}</ul></div>`}
       </div>
       ${active ? '' : formula()}
       <div class="card chartcard"><h2>Radar <span>days without a token × airdrop yield</span></h2>${chart(shown)}</div>
     </section>
-    <section class="filters">
-      <label class="search"><input id="q" type="search" value="${esc(st.q)}" placeholder="Search name, category or chain" autocomplete="off" aria-label="Search"></label>
-      <div class="field"><span>Scope</span>${seg('scope', [['all', 'All'], ['watch', 'Watchlist'], ['outside', 'Outside it'], ['early', 'Below $50M'], ['stable', 'Top 20, all variants']])}</div>
-      <div class="field"><span>Plan</span>${seg('verdict', [['', 'Any'], ['farm', 'Farm'], ['marginal', 'Marginal'], ['skip', 'Skip']])}</div>
-      <label class="field"><span>Deposit</span><select id="dep">${['', 1000, 5000, 10000, 25000].map((d) => `<option value="${d}"${String(d) === st.dep ? ' selected' : ''}>${d ? usd(d) : 'Auto: least that pays'}</option>`).join('')}</select></label>
-      <label class="field"><span>Chain</span><select id="chain"><option value="">All chains</option>${Object.keys(chains).sort((a, b) => chains[b] - chains[a] || (a < b ? -1 : 1)).map((c) => `<option${c === st.chain ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
-      <div class="count"><b>${shown.length}</b> of ${rows.length} shown${active ? ` · <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">clear filters</a>` : ''}</div>
-    </section>
-    <section class="filters basket"><label class="field"><span>Budget</span><select id="bud">${[10000, 25000, 50000, 100000].map((d) => `<option value="${d}"${String(d) === st.bud ? ' selected' : ''}>${usd(d)}</option>`).join('')}</select></label>
-      <span>Basket, best net per dollar of the ${shown.length} shown, within ${usd(+st.bud)} and ${HOURS} h: ${pick.map((r) => `<a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a> ${usd(r.plan.stake)}`).join(' · ') || 'none pays'} → <b>${usd(cap)}</b>, ${hrs.toFixed(1)} h, net <b class="up">+${usd(pick.reduce((s, r) => s + r.plan.net, 0))}</b></span></section>
-    <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div></section>
+    ${active ? '' : ctl}
     <div class="tablewrap"><table class="board">
       <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'No token', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('odds', 'Odds 12m', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · if it launches', 'plan')}</tr></thead>
       <tbody>${body || '<tr><td colspan="10" class="empty">No protocol matches these filters.</td></tr>'}</tbody></table></div>`;

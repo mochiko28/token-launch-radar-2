@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 const [chrome, outDir, shotDir] = process.argv.slice(2);
 // An optional fourth argument, name=hash pairs split by spaces, captures other views for review.
 const SHOTS = process.argv[5] ? process.argv[5].split(' ').map((s) => [s.split('=')[0], s.slice(s.indexOf('=') + 1)]) : [
-  ['1-board', '', 1340],
+  ['1-board', '', 1440],
   ['2-detail', '#p=nonce-capital', 1180],
   ['3-filtered', '#dep=10000&verdict=farm&sort=plan&dir=desc', 1340],
 ];
