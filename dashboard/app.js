@@ -109,12 +109,12 @@
   function formula() {
     return `<div class="card model">
       <h2>Value model <span>fitted on this snapshot</span></h2>
-      <p class="eq">value = T × m<sub>fam</sub> × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × t<sub>age</sub></p>
+      <p class="eq">value = T × m × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × t<sub>age</sub></p>
       <dl>
-        <dt>Fit on</dt><dd>${fit.n} trading tokens in this snapshot (mcap ÷ TVL)</dd>
+        <dt>Fit on</dt><dd>${fit.n} trading tokens in this snapshot (mcap ÷ TVL), each scored with itself left out</dd>
         <dt>Size</dt><dd>value grows as TVL<sup>${fit.elasticity.toFixed(2)}</sup>: bigger pools earn lower multiples</dd>
         <dt>T</dt><dd>TVL carried one week at its own 7-day change (${M.growth_floor}% to +${M.growth_cap}%)</dd>
-        <dt>m<sub>fam</sub></dt><dd>family's fitted mcap ÷ TVL at $100M, ×${Math.min(...Object.values(fit.families).map((f) => f.multiple)).toFixed(2)} to ×${Math.max(...Object.values(fit.families).map((f) => f.multiple)).toFixed(2)}</dd>
+        <dt>m</dt><dd>${fit.k === Infinity ? mult(fit.base) + ' at $100M, one curve: grouping by category lost out of sample' : 'per family, pulled to ' + mult(fit.base) + ' with k=' + fit.k} (miss ×${fit.trials[0].median.toFixed(2)} → ×${fit.median_error.toFixed(2)})</dd>
         <dt>t<sub>age</sub></dt><dd>×${M.age_low} at day 0 to ×${M.age_high} at ${M.age_full}+ days with no token</dd>
         <dt>Error</dt><dd>out-of-sample median miss ×${fit.median_error.toFixed(1)}; band holds ${fit.band_hits}/${fit.n} tokens</dd>
       </dl></div>`;
@@ -144,7 +144,7 @@
         <td class="proto"><a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a>${r.watch ? '<span class="wl" title="On the snapshot watchlist">WL</span>' : ''}<small>${esc(r.p.category || 'Uncategorised')} · ${esc(r.p.chains.slice(0, 2).join(', '))}${r.p.chains.length > 2 ? ' +' + (r.p.chains.length - 2) : ''}</small></td>
         <td>${famChip(r.v.family)}</td>
         <td class="num">${usd(r.p.tvl_usd)}</td>
-        <td class="num ${r.p.change_7d > 0 ? 'up' : r.p.change_7d < 0 ? 'down' : ''}">${pct(r.p.change_7d)}</td>
+        <td class="num ${r.p.change_7d >= 0.05 ? 'up' : r.p.change_7d <= -0.05 ? 'down' : ''}">${pct(r.p.change_7d)}</td>
         <td class="num${r.v.age == null ? ' est' : ''}" title="${r.v.age == null ? 'No listing date: the median age is used' : 'Listed ' + esc(r.p.listed_at)}">${r.v.age == null ? '~' : ''}${days(r.v.age_used)}</td>
         <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small></td>
         <td class="num">${mult(r.v.multiple)}</td>
@@ -154,10 +154,10 @@
     return `<section class="hero">
       <div class="lead">
         <h1>${rows.length} pre-token protocols, ranked by what their token would be worth today</h1>
-        <p>Each value is computed in this page from the snapshot's TVL, 7-day change and days without a token, on a curve fitted to the ${fit.n} tokens in it that already trade. ${radar.products.length} wrapped, bridged and staked products are set aside.</p>
+        <p>Each value is computed in this page from the snapshot's TVL, 7-day change and days without a token, on a curve fitted to the ${fit.n} tokens in it that already trade. ${radar.products.length} wrapped, bridged, staked and exchange products are set aside.</p>
         <div class="kpis">
           <div><b>${watchCov}/${S.watchlist.length}</b><span>watchlist covered</span></div>
-          <div><b>${rows.length - watchCov}</b><span>early rows beyond it</span></div>
+          <div><b>${rows.length - watchCov}</b><span>more outside it, ${rows.filter((r) => r.below).length} under $50M</span></div>
           <div><b>${usd(total)}</b><span>implied, all rows</span></div>
           <div><b>${farmN}</b><span>plans that cover costs ×${M.target_cover}</span></div>
         </div>
@@ -202,9 +202,9 @@
           <table class="receipt">
             ${line('TVL', 'snapshot tvl_usd', usd(p.tvl_usd))}
             ${line('Momentum ' + pct(v.growth, 2), (v.growth_imputed ? 'change_7d not reported: 0% assumed' : 'change_7d ' + pct(p.change_7d, 2) + ' carried one week, clipped to ' + M.growth_floor + '…+' + M.growth_cap + '%'), '→ ' + usd(v.tvl_next))}
-            ${line('Family multiple', esc(fam.label) + ': ' + fam.peers + ' trading peers, raw ' + mult(fam.raw) + ' shrunk to the all-family ' + mult(fit.base), mult(v.fam_multiple))}
-            ${line('Size curve', '(TVL ÷ $100M)<sup>' + fit.slope.toFixed(2) + '</sup>, slope fitted within families', mult(v.size_mult))}
-            ${line('Fitted token value', 'what a trading peer of this size and family is worth', usd(v.fitted), 'sum')}
+            ${line('Peer multiple at $100M', fit.k === Infinity ? 'one curve for every category: chosen out of sample over per-family multiples (' + esc(fam.label) + ' alone: ' + mult(fam.raw) + ')' : esc(fam.label) + ': ' + fam.peers + ' peers, raw ' + mult(fam.raw) + ' pulled toward ' + mult(fit.base) + ' (k=' + fit.k + ')', mult(v.fam_multiple))}
+            ${line('Size curve', '(TVL ÷ $100M)<sup>' + fit.slope.toFixed(2) + '</sup>, slope fitted on the ' + fit.n + ' tokens', mult(v.size_mult))}
+            ${line('Fitted token value', 'what a trading peer of this size is worth', usd(v.fitted), 'sum')}
             ${line('Time without a token', (v.age == null ? 'no listing date: median ' + v.age_used + ' days used' : v.age + ' days since listing') + '; ×' + M.age_low + '→×' + M.age_high + ' over ' + M.age_full + ' days', mult(v.time_factor))}
             ${line('Implied value', 'rank ' + r.rank + ' of ' + rows.length + ' on this number', usd(v.implied), 'total')}
           </table>
@@ -246,11 +246,11 @@
   }
 
   function trading() {
-    const famRows = R.FAMILIES.map((f) => { const x = fit.families[f[0]]; return `<tr><td>${famChip(f[0])}</td><td class="num">${x.peers}</td><td class="num">${x.peers ? mult(x.raw) : '—'}</td><td class="num"><b>${mult(x.multiple)}</b></td></tr>`; }).join('');
+    const kRows = fit.trials.map((t) => `<tr class="${t.k === fit.k ? 'pick' : ''}"><td>${t.k === Infinity ? 'one curve, size only' : t.k === 0 ? 'each family alone' : 'families, pull k=' + t.k}</td><td class="num">×${t.median.toFixed(2)}</td></tr>`).join('');
     const body = radar.live.map((l) => { const e = l.loo / l.actual; return `<tr><td class="proto"><span class="nm">${esc(l.p.name)}</span><small>${esc(l.p.symbol || '')} · ${esc(l.p.category || '')}</small></td><td>${famChip(l.family)}</td><td class="num">${usd(l.tvl)}${l.members > 1 ? ` <small>${l.members} parts</small>` : ''}</td><td class="num">${usd(l.actual)}</td><td class="num">${mult(l.actual / l.tvl)}</td><td class="num">${usd(l.fit)}</td><td class="num">${usd(l.loo)}</td><td class="num ${e > 2 || e < 0.5 ? 'down' : 'up'}">${mult(e)}</td></tr>`; }).join('');
     return `<section class="intro"><h1>${fit.n} tokens that trade: the model's calibration set</h1>
-      <p>Kept apart from the board: their market already prices them. model.js calibrate() pools the TVL of protocols sharing one token, leaves out exchanges and wrapped, bridged or versioned products, and fits ln(mcap ÷ TVL) on ln(TVL) within each family (slope ${fit.slope.toFixed(3)}, so value grows as TVL<sup>${fit.elasticity.toFixed(2)}</sup>), then shrinks each family's multiple toward the all-family ${mult(fit.base)} with ${M.shrink_k} pseudo-peers. ${radar.listed_only} more protocols record a token with no market cap and sit on neither list.</p></section>
-      <div class="split"><div class="card"><h2>Family multiples at $100M TVL</h2><table class="mini"><thead><tr><th>Family</th><th class="num">Peers</th><th class="num">Raw</th><th class="num">Used</th></tr></thead><tbody>${famRows}</tbody></table>
+      <p>Kept apart from the board: their market already prices them. model.js calibrate() pools the TVL of protocols sharing one token, leaves out exchanges and wrapped, bridged or versioned products, and fits ln(mcap ÷ TVL) on ln(TVL) (slope ${fit.slope.toFixed(3)}: value grows as TVL<sup>${fit.elasticity.toFixed(2)}</sup>). How far category families may differ is chosen by leave-one-out error, at left. ${radar.listed_only} more protocols record a token with no market cap and sit on neither list.</p></section>
+      <div class="split"><div class="card"><h2>Model choice <span>median out-of-sample miss</span></h2><table class="mini"><tbody>${kRows}</tbody></table>
       <p class="note">Out of sample (each token predicted by a fit without it, against its real market cap): median miss ×${fit.median_error.toFixed(2)}; the 50% band ×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)} holds ${fit.band_hits} of ${fit.n}. ${fit.clipped} extreme ratios are clipped to ×${M.ratio_floor}–×${M.ratio_cap} inside the fit only.</p></div>
       <div class="tablewrap"><table class="board"><thead><tr><th>Protocol</th><th>Family</th><th class="num">TVL</th><th class="num">Market cap</th><th class="num">÷ TVL</th><th class="num">Model fit</th><th class="num">Left-out fit</th><th class="num">÷ market</th></tr></thead><tbody>${body}</tbody></table></div></div>`;
   }

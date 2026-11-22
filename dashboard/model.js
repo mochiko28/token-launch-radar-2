@@ -1,24 +1,21 @@
-/* Launch Radar value model. One file, run twice: by main.ts (Node, to write board.json) and by this
- * page (to draw it), so every number on screen is computed here from the snapshot, never typed in.
- *
- *   1. calibrate()  fits value on the snapshot's own protocols whose token already trades:
- *                   ln(mcap/TVL) = a[family] + b * ln(TVL / $100M), b pooled within families,
- *                   a[family] shrunk toward the all-family mean when a family has few peers.
- *   2. score()      applies the fit to every pre-token protocol, with two pre-token adjustments:
- *                   momentum (TVL carried one week forward at its own 7-day change) and
- *                   time without a token (TVL that stayed without a token is worth more).
- *   3. farmPlan()   turns the same figures into steps with a dollar cost and a time each.
- * No protocol name appears in this file: rows differ only by their snapshot figures. */
+/* Launch Radar value model, run by main.ts (board.json) and by the page, so every number on screen
+ * is computed here from the snapshot.
+ *   calibrate()  fits ln(mcap/TVL) = a[family] + b * ln(TVL/$100M) on the snapshot's trading tokens;
+ *                how far families may differ (k) is picked by leave-one-out error.
+ *   value()      applies it to each pre-token protocol: TVL carried a week at its 7-day change,
+ *                then a factor for time without a token.
+ *   farmPlan()   steps with a dollar cost and a time each.
+ * No protocol name appears in this file. */
 (function (root) {
   'use strict';
 
   var DAY = 86400000;
   var M = {
-    version: 'radar-fit-2',
+    version: 'radar-fit-3',
     ref_tvl: 1e8,            // the fit's reference size: $100M of TVL
     ratio_floor: 0.02,       // mcap/TVL outliers are clipped before the fit
     ratio_cap: 20,
-    shrink_k: 4,             // pseudo-peers pulling a thin family toward the all-family mean
+    shrink_options: [0, 1, 2, 4, 8, 16, 32, Infinity], // k: pseudo-peers pulling a family to the mean
     growth_floor: -30,       // 7-day change used for momentum, clipped (per cent)
     growth_cap: 50,
     age_full: 730,           // days without a token for the full +25% staying-power premium
@@ -105,19 +102,25 @@
       var t = tok[k];
       return { p: t.p, tvl: t.tvl, mcap: t.mcap, members: t.members, f: family(t.p), x: Math.log(t.tvl / M.ref_tvl), y: Math.log(clamp(t.mcap / t.tvl, M.ratio_floor, M.ratio_cap)) };
     });
-    var full = fitPoints(pts);
     // Error is measured out of sample and against the real market cap: each token is predicted by a
     // fit that leaves it out (leave-one-out), and its miss is ln(actual mcap / prediction), unclipped.
-    var miss = pts.map(function (q, i) {
-      q.fit = Math.round(predict(full, q));
-      q.loo = predict(fitPoints(pts.filter(function (o, j) { return j !== i; })), q);
-      return Math.log(q.mcap / q.loo);
+    // The family pull k is chosen the same way, from 0 (families stand alone) to Infinity (one curve
+    // for all, size only): the snapshot picks the k with the smallest median out-of-sample miss.
+    function looMiss(k) {
+      return pts.map(function (q, i) { return Math.log(q.mcap / predict(fitPoints(pts.filter(function (o, j) { return j !== i; }), k), q)); });
+    }
+    var trials = M.shrink_options.map(function (k) {
+      var m = looMiss(k);
+      return { k: k, miss: m, median: Math.exp(quantile(m.map(Math.abs).sort(function (u, v) { return u - v; }), 0.5)) };
     });
+    var best = trials.reduce(function (a, t) { return t.median < a.median - 1e-12 ? t : a; });
+    var full = fitPoints(pts, best.k), miss = best.miss;
+    pts.forEach(function (q, i) { q.fit = Math.round(predict(full, q)); q.loo = q.mcap / Math.exp(miss[i]); });
     var sorted = miss.slice().sort(function (u, v) { return u - v; });
     var absMiss = miss.map(Math.abs).sort(function (u, v) { return u - v; });
     var inBand = 0, q25 = quantile(sorted, 0.25), q75 = quantile(sorted, 0.75);
     miss.forEach(function (m) { if (m >= q25 && m <= q75) inBand++; });
-    return { slope: full.b, elasticity: 1 + full.b, base: Math.exp(full.all), families: full.fams, n: pts.length, points: pts,
+    return { k: best.k, trials: trials.map(function (t) { return { k: t.k, median: t.median }; }), slope: full.b, elasticity: 1 + full.b, base: Math.exp(full.all), families: full.fams, n: pts.length, points: pts,
       median_error: Math.exp(quantile(absMiss, 0.5)), band_low: Math.exp(q25), band_high: Math.exp(q75), band_hits: inBand,
       clipped: pts.filter(function (q) { var r = q.mcap / q.tvl; return r < M.ratio_floor || r > M.ratio_cap; }).length };
   }
@@ -125,10 +128,10 @@
   function predict(f, q) { return q.tvl * Math.exp(f.fams[q.f].ln + f.b * q.x); }
 
   /* The least-squares core: a slope pooled within families, then family intercepts shrunk toward the
-   * all-family mean with shrink_k pseudo-peers. */
-  function fitPoints(pts) {
-    var g = {};
-    pts.forEach(function (q) { (g[q.f] = g[q.f] || []).push(q); });
+   * all-family mean with k pseudo-peers; k = Infinity fits one curve for all. */
+  function fitPoints(pts, k) {
+    var g = {}, one = k === Infinity;
+    pts.forEach(function (q) { var f = one ? 'all' : q.f; (g[f] = g[f] || []).push(q); });
     var sxy = 0, sxx = 0;
     Object.keys(g).forEach(function (f) {
       var a = g[f], mx = 0, my = 0;
@@ -142,10 +145,10 @@
     all /= pts.length;
     var fams = {};
     FAMILIES.forEach(function (fd) {
-      var a = g[fd[0]] || [], s = 0;
+      var a = pts.filter(function (q) { return q.f === fd[0]; }), s = 0;
       a.forEach(function (q) { s += q.y - b * q.x; });
       var raw = a.length ? s / a.length : all;
-      var shrunk = (a.length * raw + M.shrink_k * all) / (a.length + M.shrink_k);
+      var shrunk = one ? all : (a.length * raw + k * all) / (a.length + k);
       fams[fd[0]] = { key: fd[0], label: fd[1], peers: a.length, raw: Math.exp(raw), multiple: Math.exp(shrunk), ln: shrunk };
     });
     return { b: b, all: all, fams: fams };
@@ -223,10 +226,10 @@
         { act: fill(act[1]), usd: ACT2[kind](side, tx, weeks), min: kind in WEEKLY ? weeks * 10 : 10, when: kind in WEEKLY ? 'Weeks 1-' + weeks : 'Day 1' },
         { act: 'Once a week for ' + weeks + ' weeks, open the points or rewards page, re-check the position and top it up by one transaction', usd: weeks * tx, min: weeks * 5, when: 'Weeks 1-' + weeks },
         { act: 'Exit if TVL falls below ' + usd(p.tvl_usd * 0.75) + ' (25% under today\'s ' + usd(p.tvl_usd) + ') or the team reports an incident; otherwise hold the full ' + M.farm_days + ' days', usd: 2 * tx, min: 10, when: 'Day ' + M.farm_days },
-        { act: 'At launch claim only through the protocol\'s own app; the model prices the token near ' + usd(v.implied) + ' (band ' + usd(v.low) + '-' + usd(v.high) + '), so sell the claim if it opens above ' + usd(v.high), usd: 2 * tx, min: 15, when: 'At launch' }
+        { act: 'At launch claim only through the protocol\'s own app; the model prices the token near ' + usd(v.implied) + ' (band ' + usd(v.low) + '-' + usd(v.high) + '), so sell the claim if the token opens above ' + usd(v.high) + ' fully diluted', usd: 2 * tx, min: 15, when: 'At launch' }
       ];
     }
-    function total(st) { var c = 0, t = 0; st.forEach(function (s) { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * M.hour_usd }; }
+    function total(st) { var c = 0, t = 5; st.forEach(function (s) { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * M.hour_usd }; }
     // Only capital that sits in the protocol earns: the main deposit, plus the side deposit for vaults
     // (a second vault); borrowed, re-used or traded side amounts are activity, not extra capital.
     function eligible(stake) { return kind === 'vault' ? stake + Math.round(stake / 4) : stake; }
@@ -238,13 +241,11 @@
     }
     var st = steps(stake), t = total(st), capital = stake + Math.round(stake / 4), drop = eligible(stake) * perDollar;
     var verdict = drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip';
-    // A plan that does not clear the target says so first, with the drop share that would make it pay.
+    // Every plan opens with its decision: the numbers, and the drop share at which it pays target_cover.
     var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
-    if (verdict !== 'farm') {
-      st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: at ' + usd(capital) + ' the expected drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
-        ' of gas, fees and time ×' + (drop / t.all).toFixed(2) + '; it pays ×' + M.target_cover + ' only if about ' + (needShare * 100).toFixed(needShare < 0.1 ? 1 : 0) +
-        '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%), so ' + (verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
-    }
+    st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: at ' + usd(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
+      ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
+      '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
     return { chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * M.hour_usd, all_in: t.all,
       days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, verdict: verdict };
   }

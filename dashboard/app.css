@@ -68,7 +68,8 @@ main { padding: 20px 32px 24px; max-width: 1440px; margin: 0 auto; }
 .radar .lab { fill: var(--text); font: 600 9.5px var(--sans); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; pointer-events: none; }
 .radar .zone { fill: var(--muted); font: italic 11px var(--sans); opacity: 0.7; }
 .dot { fill-opacity: 0.55; stroke-width: 1; stroke-opacity: 0.9; }
-.dot.off { fill-opacity: 0.06; stroke-opacity: 0.18; }
+.dot.off { fill-opacity: 0.06; stroke-opacity: 0.18; pointer-events: none; }
+.mini tr.pick td { color: var(--accent); font-weight: 600; }
 .radar a:hover .dot { fill-opacity: 1; }
 .f-vault { --c: var(--f-vault); } .f-lend { --c: var(--f-lend); } .f-dex { --c: var(--f-dex); } .f-deriv { --c: var(--f-deriv); }
 .f-stable { --c: var(--f-stable); } .f-rwa { --c: var(--f-rwa); } .f-stake { --c: var(--f-stake); } .f-infra { --c: var(--f-infra); }

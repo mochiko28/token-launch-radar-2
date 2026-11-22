@@ -10,8 +10,8 @@ const [chrome, outDir, shotDir] = process.argv.slice(2);
 // An optional fourth argument, name=hash pairs split by spaces, captures other views for review.
 const SHOTS = process.argv[5] ? process.argv[5].split(' ').map((s) => [s.split('=')[0], s.slice(s.indexOf('=') + 1)]) : [
   ['1-board', ''],
-  ['2-detail', '#p=saturn'],
-  ['3-filtered', '#fam=lend,deriv&verdict=farm&sort=apr&dir=desc'],
+  ['2-detail', '#p=tulipa-capital'],
+  ['3-filtered', '#scope=early&fam=lend,deriv,dex&verdict=farm&sort=apr&dir=desc'],
 ];
 const LO = 300 * 1024, HI = 350 * 1000; // inside 300-350 KB whether a KB is 1,000 or 1,024 bytes
 
