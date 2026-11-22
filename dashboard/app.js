@@ -111,7 +111,7 @@
       <p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × q<sub>12m</sub></p>
       <table class="mini tests"><thead><tr><th>Term · held-out median miss</th><th class="num">Leave-one-out</th><th class="num">Walk-forward</th><th class="num">Use</th></tr></thead><tbody>
       ${T.terms.map((t) => `<tr class="${t.ok ? 'pick' : ''}"><td>${t.label}</td><td class="num">${x(t.loo)}</td><td class="num">${x(t.wf)}</td><td class="num">${used[t.key]}</td></tr>`).join('')}</tbody></table>
-      <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%), stated. q<sub>12m</sub> = odds of a token within a year, a hazard fitted on ${O.n} peers (${O.with_token} with a token) by TVL and days listed: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward.</p></div>`;
+      <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%), stated. q<sub>12m</sub> = odds of a token within a year, a hazard fitted on ${O.n} peers (${O.with_token} with a token) by TVL, days listed, 7-day change and family: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward.</p></div>`;
   }
 
   // The cover's self-checks, computed here on every load: the gate's rules and the screen-to-board match.
@@ -219,7 +219,7 @@
             ${line('Peer multiple at $100M', (fit.k === Infinity ? 'one curve: it beat per-family multiples held out' : 'family pull k=' + fit.k) + ' (' + esc(fam.label) + ' alone ' + mult(fam.raw) + ')', mult(v.fam_multiple))}
             ${line('Size curve', '(TVL ÷ $100M)<sup>' + fit.slope.toFixed(2) + '</sup>, slope fitted on the ' + fit.n + ' tokens', mult(v.size_mult))}
             ${line('Value if launched', 'what a trading peer of this size is worth', usd(v.fitted), 'sum')}
-            ${line('Launch odds, next 12 months', (v.age == null ? 'no listing date: median ' + v.age_used + ' days' : v.age + ' days') + ' with no token; peers at this TVL holding one: ' + pc(v.f0) + ' now, ' + pc(v.f1) + ' a year older', pc(v.time_factor))}
+            ${line('Launch odds, next 12 months', (v.age == null ? 'no listing date: median ' + v.age_used + ' days' : v.age + ' days') + ' with no token; similar peers holding one: ' + pc(v.f0) + ' now, ' + pc(v.f1) + ' a year older', pc(v.time_factor))}
             ${line('Implied value', 'rank ' + r.rank + ' of ' + rows.length + ' on this number', usd(v.implied), 'total')}
           </table>
           <div class="scale">
@@ -253,10 +253,10 @@
   }
 
   function aside() {
-    const body = radar.products.map((x) => `<tr><td class="proto"><span class="nm">${esc(x.p.name)}</span><small>${esc(x.p.chains.slice(0, 3).join(', '))}</small></td><td><span class="tag">${esc(x.kind)}</span></td><td>${esc(x.p.category || 'Uncategorised')}</td><td class="num">${usd(x.p.tvl_usd)}</td><td class="num">${pct(x.p.change_7d)}</td></tr>`).join('');
+    const body = radar.products.map((x) => `<tr><td class="proto"><span class="nm">${esc(x.p.name)}</span><small>${esc(x.p.chains.slice(0, 3).join(', '))}</small></td><td><span class="tag">${esc(x.kind)}</span></td><td class="num">${usd(x.p.tvl_usd)}</td><td class="num">${pct(x.p.change_7d)}</td></tr>`).join('');
     return `<section class="intro"><h1>${radar.products.length} products set aside, not ranked</h1>
       <p>No token of their own, but each is a wrapped, bridged, staked or exchange product, a versioned pool or a likely sibling of a trading token: the watchlist rule (productOf) applied to every protocol. Their value is the underlying token's.</p></section>
-      <div class="tablewrap"><table class="board"><thead><tr><th>Product</th><th>Why set aside</th><th>Category</th><th class="num">TVL</th><th class="num">7d</th></tr></thead><tbody>${body}</tbody></table></div>`;
+      <div class="tablewrap"><table class="board"><thead><tr><th>Product</th><th>Why set aside</th><th class="num">TVL</th><th class="num">7d</th></tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
   function trading() {

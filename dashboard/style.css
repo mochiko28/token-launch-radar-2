@@ -2,8 +2,6 @@
 --bg:#0b1016;--panel:#111922;--panel2:#16212c;--line:#1f2c3a;--line2:#2a3a4c;
 --text:#e6edf4;--muted:#9eafc1;--dim:#7a8da3;
 --accent:#46e0a0;--amber:#f2b950;--red:#f27a72;--green:#46e0a0;
---f-vault:#6cb6ff;--f-lend:#46e0a0;--f-dex:#c39bf0;--f-deriv:#f7906c;
---f-stable:#f2cf5b;--f-rwa:#6fd8d0;--f-stake:#ff9fbf;--f-infra:#a6b4c4;
 --sans:"Inter","Adwaita Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
 --mono:"JetBrains Mono","Adwaita Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 --r:10px;
@@ -48,9 +46,6 @@ main{padding:20px 32px 24px;max-width:1440px;margin:0 auto;}
 .checks li.bad{color:var(--red);}
 .tests th:first-child,.tests td:first-child{text-align:left;}
 .model .eq{font:13px/1.6 var(--mono);color:var(--accent);background:#46e0a00d;border:1px solid #46e0a026;border-radius:8px;padding:8px 10px;margin:0 0 10px;}
-.model dl{display:grid;grid-template-columns:48px 1fr;gap:4px 10px;margin:0;font-size:12px;}
-.model dt{color:var(--accent);font-family:var(--mono);}
-.model dd{margin:0;color:var(--muted);}
 .chartcard{padding-bottom:8px;}
 .radar{width:100%;height:auto;display:block;}
 .radar .grid{stroke:var(--line);stroke-width:1;}
@@ -60,8 +55,8 @@ main{padding:20px 32px 24px;max-width:1440px;margin:0 auto;}
 .dot.off{fill-opacity:.06;stroke-opacity:.18;pointer-events:none;}
 .mini tr.pick td{color:var(--accent);font-weight:600;}
 .radar a:hover .dot{fill-opacity:1;}
-.f-vault{--c:var(--f-vault);} .f-lend{--c:var(--f-lend);} .f-dex{--c:var(--f-dex);} .f-deriv{--c:var(--f-deriv);}
-.f-stable{--c:var(--f-stable);} .f-rwa{--c:var(--f-rwa);} .f-stake{--c:var(--f-stake);} .f-infra{--c:var(--f-infra);}
+.f-vault{--c:#6cb6ff}.f-lend{--c:#46e0a0}.f-dex{--c:#c39bf0}.f-deriv{--c:#f7906c}
+.f-stable{--c:#f2cf5b}.f-rwa{--c:#6fd8d0}.f-stake{--c:#ff9fbf}.f-infra{--c:#a6b4c4}
 .dot{fill:var(--c);stroke:var(--c);}
 .filters{display:flex;gap:18px;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
 .field{display:flex;align-items:center;gap:8px;}
@@ -161,4 +156,3 @@ td.proto{min-width:230px;}
 .intro p{color:var(--muted);margin:0;}
 .split{display:grid;grid-template-columns:330px 1fr;gap:16px;align-items:start;}
 .foot{max-width:1440px;margin:0 auto;padding:8px 32px 28px;color:var(--dim);font-size:11.5px;}
-@media (max-width:1100px){.hero,.dgrid,.split{grid-template-columns:1fr;} .meta{display:none;}}

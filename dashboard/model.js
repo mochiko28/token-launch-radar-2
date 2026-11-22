@@ -13,6 +13,7 @@
     growth_floor: -30, // 7-day change used for momentum, clipped (per cent)
     growth_cap: 50,
     odds_days: 365, // launch odds are for a token within this many days
+    odds_ridge: 1, // L2 penalty of the odds fit: best-calibrated walk-forward of the leave-one-out ties
     drop_share: 0.10, // assumed share of supply sent to depositors, pro rata to TVL-days
     farm_days: 90, // the plan's holding window
     hour_usd: 25, // the reader's hands-on time, priced into every plan
@@ -62,8 +63,7 @@
   }
   function bySlug(a, b) { return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0; }
 
-  /* The value curve, fitted on trading tokens: one point per CoinGecko id (its protocols' TVL pooled,
-   * as DefiLlama hangs the whole market cap on each); products and exchanges left out (productOf). */
+  // The value curve, fitted on trading tokens: one point per CoinGecko id, its protocols' TVL pooled.
   function calibrate(snap) {
     var tok = {}, order = [];
     snap.protocols.forEach(function (p) {
@@ -101,21 +101,28 @@
       tests: termTests(pts, snap.as_of), odds: launchOdds(snap) };
   }
 
-  /* Launch odds. F(p, a) = fitted share of peers (not exchanges or products) holding a token at this TVL
-   * and age a (logistic on ln TVL, ln age); q = (F(a + odds_days) - F(a)) / (1 - F(a)), the hazard. */
+  /* Launch odds. F(p, a) = fitted share of peers (not exchanges or products) holding a token at age a,
+   * given ln TVL, ln age, 7-day change and family (logistic, L2 penalty odds_ridge on all but the
+   * intercept); q = (F(a + odds_days) - F(a)) / (1 - F(a)), the hazard. */
   function launchOdds(snap) {
     var peers = snap.protocols.filter(function (p) { return p.tvl_usd > 0 && !productOf(p); });
     var known = peers.map(function (p) { return ageDays(snap.as_of, p.listed_at); }).filter(function (a) { return a != null; }).sort(function (a, b) { return a - b; });
-    var mid = known[known.length >> 1];
-    var X = function (p, a) { return [1, Math.log(p.tvl_usd / M.ref_tvl), Math.log(1 + a / 365)]; };
+    var mid = known[known.length >> 1], fams = FAMILIES.slice(0, -1);
+    var X = function (p, a) {
+      return [1, Math.log(p.tvl_usd / M.ref_tvl), Math.log(1 + a / 365), Math.log(1 + clamp(p.change_7d || 0, M.growth_floor, M.growth_cap) / 100)]
+        .concat(fams.map(function (f) { return family(p) === f[0] ? 1 : 0; }));
+    };
     var pts = peers.map(function (p) { var a = ageDays(snap.as_of, p.listed_at); return { p: p, a: a, x: X(p, a == null ? mid : a), y: p.gecko_id != null || p.symbol != null ? 1 : 0 }; });
-    function logit(T) {
-      var w = [0, 0, 0], it, i, j, k, t;
-      for (it = 0; it < 25; it++) {
-        var g = [0, 0, 0], H = [[0.01, 0, 0], [0, 0.01, 0], [0, 0, 0.01]];
-        T.forEach(function (q) { var pr = sig(dot(w, q.x)); for (i = 0; i < 3; i++) { g[i] += (q.y - pr) * q.x[i]; for (j = 0; j < 3; j++) H[i][j] += pr * (1 - pr) * q.x[i] * q.x[j]; } });
-        for (i = 0; i < 3; i++) for (k = 0; k < 3; k++) if (k !== i) { t = H[k][i] / H[i][i]; for (j = 0; j < 3; j++) H[k][j] -= t * H[i][j]; g[k] -= t * g[i]; }
-        for (i = 0; i < 3; i++) w[i] += g[i] / H[i][i];
+    // Newton steps from w0 (zeros, or the full fit's weights for a leave-one-out refit).
+    function logit(T, w0, steps) {
+      var n = T[0].x.length, w = [], it, i, j, k, t, g, H;
+      for (i = 0; i < n; i++) w.push(w0 ? w0[i] : 0);
+      for (it = 0; it < (steps || 25); it++) {
+        g = w.map(function (v, i) { return i ? -M.odds_ridge * v : 0; });
+        H = w.map(function (v, i) { return w.map(function (u, j) { return i === j ? (i ? M.odds_ridge : 1e-6) : 0; }); });
+        T.forEach(function (q) { var pr = sig(dot(w, q.x)); for (i = 0; i < n; i++) { g[i] += (q.y - pr) * q.x[i]; for (j = 0; j < n; j++) H[i][j] += pr * (1 - pr) * q.x[i] * q.x[j]; } });
+        for (i = 0; i < n; i++) for (k = 0; k < n; k++) if (k !== i) { t = H[k][i] / H[i][i]; for (j = 0; j < n; j++) H[k][j] -= t * H[i][j]; g[k] -= t * g[i]; }
+        for (i = 0; i < n; i++) w[i] += g[i] / H[i][i];
       }
       return w;
     }
@@ -124,11 +131,11 @@
       pos.forEach(function (a) { neg.forEach(function (b) { c += a.s > b.s ? 1 : a.s === b.s ? 0.5 : 0; }); });
       return c / (pos.length * neg.length);
     }
-    var loo = pts.map(function (q, i) { return { y: q.y, s: dot(logit(pts.filter(function (o, j) { return j !== i; })), q.x) }; });
+    var w = logit(pts), F = function (p, a) { return sig(dot(w, X(p, a))); };
+    var loo = pts.map(function (q, i) { return { y: q.y, s: dot(logit(pts.filter(function (o, j) { return j !== i; }), w, 3), q.x) }; });
     var dated = pts.filter(function (q) { return q.a != null; }).sort(function (u, v) { return v.a - u.a || bySlug(u.p, v.p); });
     var cut = Math.floor(dated.length * 0.6), ww = logit(dated.slice(0, cut));
     var wf = dated.slice(cut).map(function (q) { return { y: q.y, s: dot(ww, q.x) }; });
-    var w = logit(pts), F = function (p, a) { return sig(dot(w, X(p, a))); };
     // Cohort check: each listing-age cohort's share holding a token against the curve's mean prediction.
     var edges = [0, 180, 365, 730, 1095, 1e9], cohorts = edges.slice(0, 5).map(function (lo, c) {
       var m = pts.filter(function (q) { return q.a != null && q.a >= lo && q.a < edges[c + 1]; }), n = m.length || 1;
@@ -138,10 +145,9 @@
       F: F };
   }
   function sig(z) { return 1 / (1 + Math.exp(-z)); }
-  function dot(w, x) { return w[0] * x[0] + w[1] * x[1] + w[2] * x[2]; }
+  function dot(w, x) { return x.reduce(function (s, v, i) { return s + v * w[i]; }, 0); }
 
-  /* Every value term tested held-out twice against real market caps: leave-one-out, and walk-forward
-   * (fit the 60% listed first, score the rest). ok = the term lowers the median miss in both. */
+  // Each value term tested on real market caps, leave-one-out and walk-forward (60% listed first fit).
   function termTests(pts, asOf) {
     var ages = pts.map(function (q) { return ageDays(asOf, q.p.listed_at); });
     var mid = ages.filter(function (a) { return a != null; }).sort(function (a, b) { return a - b; });
