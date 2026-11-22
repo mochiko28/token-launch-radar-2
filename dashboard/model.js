@@ -278,12 +278,12 @@
   main.forEach(function (c) { if (gas(c) < gas(chain)) chain = c; });
   var kind = p.category === 'Prediction Market' ? 'predict' : v.family;
   var asset = /^(Bitcoin|Lightning)/.test(chain) ? 'BTC' : 'USDC';
-  var tx0 = gas(chain), weeks = Math.round(M.farm_days / 7), perDollar = v.apr * M.farm_days / 365;
+  var tx0 = gas(chain), weeks = Math.round(M.farm_days / 7);
   function steps(stake, gm) {
    var tx = tx0 * (gm || 1), side = Math.round(stake / 4), act = ACT[kind];
    var fill = function (t) { return t.replace(/USDC/g, asset).replace(/\{S\}/g, usd(stake)).replace(/\{s\}/g, usd(side)).replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain); };
    return [
-    { act: 'Kill test, go on only if all hold: ' + fill(act[3]) + '; and a deposit-and-withdraw quote totals under ' + usd(0.1 * eligible(stake) * perDollar) + ' (10% of the modeled drop). If any fails, stop with $0 spent', usd: 0, min: 15, when: 'Day 0' },
+    { act: 'Kill test, go on only if all hold: ' + fill(act[3]) + '; and a deposit-and-withdraw quote totals under ' + usd(0.1 * earn(stake)) + ' (10% of the modeled drop). If any fails, stop with $0 spent', usd: 0, min: 15, when: 'Day 0' },
     { act: 'Withdraw ' + usd(stake + side) + ' of ' + asset + ' from an exchange straight to a fresh wallet on ' + chain + (chain !== main[0] ? ' (cheaper than ' + main[0] + ', where it also runs)' : '') + '; keep only farm funds in it',
      usd: 1 + tx, min: 15, when: 'Day 0' },
     { act: fill(act[0]), usd: 2 * tx, min: v.family === 'rwa' ? 30 : 10, when: v.family === 'rwa' ? 'Days 0-2' : 'Day 0' },
@@ -294,21 +294,24 @@
    ];
   }
   function total(st) { var c = 0, t = 5; st.forEach(function (s) { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * hr }; }
-  // Only capital in the protocol earns (vaults: both deposits).
-  function eligible(stake) { return kind === 'vault' ? stake + Math.round(stake / 4) : stake; }
+  // Tranches [amount, day in]: only principal in the protocol earns, from the day it lands (vault side
+  // deposit day 1, RWA after a 2-day KYC review); swaps, trades and borrows log activity, not dollar-days.
+  function tranches(stake) { return kind === 'vault' ? [[stake, 0], [Math.round(stake / 4), 1]] : [[stake, kind === 'rwa' ? 2 : 0]]; }
+  function eligible(stake) { return tranches(stake).reduce(function (a, t) { return a + t[0]; }, 0); }
+  function earn(stake) { return tranches(stake).reduce(function (a, t) { return a + t[0] * (M.farm_days - t[1]); }, 0) * v.apr / 365; }
   // Auto: the least deposit ($500 steps, to $25K) that pays target_cover.
   var stake = dep ? Math.round(dep / 1.25) : 20000;
   for (var k = 400; !dep && k <= 20000; k += 400) {
-   if (eligible(k) * perDollar >= M.target_cover * total(steps(k)).all) { stake = k; break; }
+   if (earn(k) >= M.target_cover * total(steps(k)).all) { stake = k; break; }
   }
-  var st = steps(stake), t = total(st), capital = stake + Math.round(stake / 4), drop = eligible(stake) * perDollar;
+  var st = steps(stake), t = total(st), capital = stake + Math.round(stake / 4), drop = earn(stake);
   var verdict = drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip';
   // Every plan opens with its decision and the drop share at which it pays.
   var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
   // Least capital (to $1M) whose drop covers its own recomputed costs target_cover times.
   var payCap = 0;
   for (var c = 25000; !payCap && c <= 1000000; c = Math.round(c * 1.25)) {
-   var kk = Math.round(c / 1.25); if (eligible(kk) * perDollar >= M.target_cover * total(steps(kk)).all) payCap = Math.ceil(c / 1000) * 1000;
+   var kk = Math.round(c / 1.25); if (earn(kk) >= M.target_cover * total(steps(kk)).all) payCap = Math.ceil(c / 1000) * 1000;
   }
   st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: ' + Math.round(v.time_factor * 100) + '% of peers like it record a token, so the score-weighted drop is ' + usd(drop * v.time_factor) + ' (×' + (drop * v.time_factor / t.all).toFixed(2) + ' the costs); if it launches, at ' + usd(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
    ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + (verdict === 'farm' ? '' : '; before your time it nets ' + (drop >= t.cost ? '+' : '−') + usd(Math.abs(drop - t.cost)) + ', and ' + (payCap ? 'it would pay ×' + M.target_cover + ' at about ' + usd(payCap) + ' of capital' : 'no deposit up to $1M pays ×' + M.target_cover + ' because its fees grow with the deposit')) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
@@ -323,7 +326,7 @@
   }
   // Capital carry at carry_rate: shown, not charged (the deposit usually earns a yield).
   var carry = capital * M.carry_rate * M.farm_days / 365, stress = ACT[kind][4];
-  return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map(function (m) { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, drop >= M.target_cover * a.all ? 'farm' : drop >= a.all ? 'marginal' : 'skip']; }), stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
+  return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map(function (m) { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, drop >= M.target_cover * a.all ? 'farm' : drop >= a.all ? 'marginal' : 'skip']; }), stake: capital, eligible: eligible(stake), tranches: tranches(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
    days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, verdict: verdict };
  }
  function stepText(s) {
