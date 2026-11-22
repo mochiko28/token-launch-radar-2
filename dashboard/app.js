@@ -131,7 +131,7 @@
         <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small></td>
         <td class="num">${mult(r.v.multiple)}</td>
         <td class="num apr">${(r.v.apr * 100).toFixed(1)}%</td>
-        <td class="plan">${verdictTag(r.plan.verdict)}<small>${mult(r.plan.drop / r.plan.all_in)} · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}</small></td></tr>`;
+        <td class="plan">${verdictTag(r.plan.verdict)}<small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}</small></td></tr>`;
     }).join('');
     return `<section class="hero">
       <div class="lead">
@@ -156,7 +156,7 @@
     </section>
     <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div></section>
     <div class="tablewrap"><table class="board">
-      <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'No token', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('multiple', '÷ TVL', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · drop ÷ cost', 'plan')}</tr></thead>
+      <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'No token', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('multiple', '÷ TVL', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · 90 days', 'plan')}</tr></thead>
       <tbody>${body || '<tr><td colspan="10" class="empty">No protocol matches these filters.</td></tr>'}</tbody></table></div>`;
   }
 
@@ -210,7 +210,8 @@
           <div><small>Expected drop</small><b>${usd(pl.drop)}</b></div>
           <div><small>Verdict</small>${verdictTag(pl.verdict)}</div>
         </div>
-        <ol class="steps">${pl.steps.map((s) => `<li><p>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>
+        <div class="steph"><span></span><span>When · what to do</span><span>Cost</span><span>Time</span></div>
+        <ol class="steps">${pl.steps.map((s) => `<li><p><em>${esc(s.when)}</em>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>
         <div class="math">
           <p><b>Drop APR ${(v.apr * 100).toFixed(2)}%</b> = implied ${usd(v.implied)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
           <p>${usd(pl.eligible)} of the ${usd(pl.stake)} sits in ${esc(p.name)} and earns; for ${pl.days} days that is about <b>${usd(pl.drop)}</b> against <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} gas and fees + ${R.mins(pl.minutes)} at $${M.hour_usd}/h): net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital is the smallest that covers costs ×${M.target_cover} (from $500 to $25K${pl.drop < M.target_cover * pl.all_in ? ', capped here' : ''}); at a ${M.drop_share * 50}% drop the figure halves.</p>

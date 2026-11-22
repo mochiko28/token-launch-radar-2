@@ -218,12 +218,12 @@
       var fill = function (t) { return t.replace(/USDC/g, asset).replace(/\{S\}/g, usd(stake)).replace(/\{s\}/g, usd(side)).replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain); };
       return [
         { act: 'Withdraw ' + usd(stake + side) + ' of ' + asset + ' from an exchange straight to a fresh wallet on ' + chain + (chain !== main[0] ? ' (cheaper than ' + main[0] + ', where it also runs)' : '') + '; keep only farm funds in it',
-          usd: 1 + tx, min: 15 },
-        { act: fill(act[0]), usd: 2 * tx, min: v.family === 'rwa' ? 30 : 10 },
-        { act: fill(act[1]), usd: ACT2[kind](side, tx, weeks), min: kind in WEEKLY ? weeks * 10 : 10 },
-        { act: 'Once a week for ' + weeks + ' weeks, open the points or rewards page, re-check the position and top it up by one transaction', usd: weeks * tx, min: weeks * 5 },
-        { act: 'Exit if TVL falls below ' + usd(p.tvl_usd * 0.75) + ' (25% under today\'s ' + usd(p.tvl_usd) + ') or the team reports an incident; otherwise hold the full ' + M.farm_days + ' days', usd: 2 * tx, min: 10 },
-        { act: 'At launch claim only through the protocol\'s own app; the model prices the token near ' + usd(v.implied) + ' (band ' + usd(v.low) + '-' + usd(v.high) + '), so sell the claim if it opens above ' + usd(v.high), usd: 2 * tx, min: 15 }
+          usd: 1 + tx, min: 15, when: 'Day 0' },
+        { act: fill(act[0]), usd: 2 * tx, min: v.family === 'rwa' ? 30 : 10, when: v.family === 'rwa' ? 'Days 0-2' : 'Day 0' },
+        { act: fill(act[1]), usd: ACT2[kind](side, tx, weeks), min: kind in WEEKLY ? weeks * 10 : 10, when: kind in WEEKLY ? 'Weeks 1-' + weeks : 'Day 1' },
+        { act: 'Once a week for ' + weeks + ' weeks, open the points or rewards page, re-check the position and top it up by one transaction', usd: weeks * tx, min: weeks * 5, when: 'Weeks 1-' + weeks },
+        { act: 'Exit if TVL falls below ' + usd(p.tvl_usd * 0.75) + ' (25% under today\'s ' + usd(p.tvl_usd) + ') or the team reports an incident; otherwise hold the full ' + M.farm_days + ' days', usd: 2 * tx, min: 10, when: 'Day ' + M.farm_days },
+        { act: 'At launch claim only through the protocol\'s own app; the model prices the token near ' + usd(v.implied) + ' (band ' + usd(v.low) + '-' + usd(v.high) + '), so sell the claim if it opens above ' + usd(v.high), usd: 2 * tx, min: 15, when: 'At launch' }
       ];
     }
     function total(st) { var c = 0, t = 0; st.forEach(function (s) { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * M.hour_usd }; }
@@ -241,7 +241,7 @@
       days: M.farm_days, drop: drop, net: drop - t.all, verdict: drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip' };
   }
   function stepText(s) {
-    var t = s.act + '. Cost: about ' + usd(s.usd) + '. Time: ' + mins(s.min) + '.';
+    var t = s.when + ': ' + s.act + '. Cost: about ' + usd(s.usd) + '. Time: ' + mins(s.min) + '.';
     return t.length > 600 ? t.slice(0, 597) + '...' : t;
   }
 
