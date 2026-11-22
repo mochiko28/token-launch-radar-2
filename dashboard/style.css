@@ -194,3 +194,13 @@ td.proto{min-width:230px;}
 .board tbody tr:hover td{background:#1f6f5c0a;}
 .hero.slim .chartcard{align-self:stretch;display:flex;flex-direction:column;}
 .hero.slim .chartcard .radar{margin:auto 0;}
+/* Slim cover: more of the ranking above the fold, nothing truncated. */
+.strip div{padding:7px 14px;}
+.strip b{font-size:16px;}
+.checks{padding:8px 14px;}
+.strip span{white-space:nowrap;font-size:10.5px;}
+.checks li{padding:1px 0;font-size:11.5px;line-height:1.45;}
+.ctl{padding:10px 16px 0;}
+.ctl .filters{margin-bottom:7px;}
+.ctl .chip{height:26px;}
+.board td{padding:4px 10px;}
