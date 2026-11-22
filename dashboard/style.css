@@ -45,6 +45,17 @@ main{padding:20px 32px 24px;max-width:1440px;margin:0 auto;}
 .strip b{display:block;font:600 17px var(--mono);color:var(--text);}
 .strip div:first-child b{color:var(--amber);}
 .strip span{color:var(--dim);font-size:11px;}
+/* Title band: navy bar and KPI strip carry the identity. */
+.top{background:#1b2436;border-bottom:0;}
+.brand span,.tabs a.on,.tabs a:hover{color:#f6f3ec;}
+.tabs a,.meta,.meta b{color:#aab3c2;}
+.tabs a.on{background:#2a3550;box-shadow:inset 0 -2px 0 #e0b25a;}
+.tabs a b,.tabs a.on b{background:#2a3550;color:#e0b25a;}
+.strip{background:#2a3550;border:0;}
+.strip div{background:#1b2436;}
+.strip b{color:#f6f3ec;}
+.strip div:first-child b{color:#e0b25a;}
+.strip span{color:#aab3c2;}
 .checks{margin-top:4px;padding:10px 14px;}
 .checks ul{list-style:none;margin:0;padding:0;font-size:12px;}
 .checks li{padding:3px 0;color:var(--muted);}
