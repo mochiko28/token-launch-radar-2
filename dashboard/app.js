@@ -39,7 +39,7 @@
       if (i > 0 && own(DEF, k)) try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch (e) { /* keep the default */ }
     });
     // Unknown values fall back to the defaults, so a hand-typed link never breaks the page.
-    const ok = { view: 'board model aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000 100000 250000', bud: '10000 25000 50000 100000' };
+    const ok = { view: 'board model aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000 100000 250000', bud: '10000 25000 50000 100000 250000 1000000' };
     Object.keys(ok).forEach((k) => { if (!ok[k].split(' ').includes(st[k])) st[k] = DEF[k]; });
     if (!own(KEYS, st.sort)) st.sort = 'rank';
     return st;
@@ -183,7 +183,7 @@
         <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small></td>
         <td class="num">${pc(r.v.time_factor)}</td>
         <td class="num apr">${(r.v.apr * 100).toFixed(1)}%</td>
-        <td class="plan">${verdictTag(r.plan.verdict)} <span class="pmult">pays ${mult(r.plan.drop / r.plan.all_in)}</span><small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}${r.plan.verdict === 'farm' ? '' : ` · ×${M.target_cover} at ${usd(r.plan.pay_cap)}`}</small></td></tr>`;
+        <td class="plan">${verdictTag(r.plan.verdict)} <span class="pmult">pays ${mult(r.plan.drop / r.plan.all_in)}${r.plan.verdict === 'farm' ? '' : ` · ×${M.target_cover} at ${usd(r.plan.pay_cap)}`}</span><small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}</small></td></tr>`;
     }).join('');
     // The controls: under the hero on the cover, beside the chart when filters are on.
     const ctl = `<div class="ctl">    <section class="filters">
@@ -194,7 +194,7 @@
       <label class="field"><span>Chain</span><select id="chain"><option value="">All chains</option>${Object.keys(chains).sort((a, b) => chains[b] - chains[a] || (a < b ? -1 : 1)).map((c) => `<option${c === st.chain ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
       <div class="count"><b>${shown.length}</b> of ${rows.length} shown${active ? ` · <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">clear filters</a>` : ''}</div>
     </section>
-    <section class="filters basket"><label class="field"><span>Budget</span><select id="bud">${[10000, 25000, 50000, 100000].map((d) => `<option value="${d}"${String(d) === st.bud ? ' selected' : ''}>${usd(d)}</option>`).join('')}</select></label>
+    <section class="filters basket"><label class="field"><span>Budget</span><select id="bud">${[10000, 25000, 50000, 100000, 250000, 1000000].map((d) => `<option value="${d}"${String(d) === st.bud ? ' selected' : ''}>${usd(d)}</option>`).join('')}</select></label>
       <span>Basket, best net per dollar of the ${shown.length} shown, within ${usd(+st.bud)} and ${HOURS} h: ${pick.map((r) => `<a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a> ${usd(r.plan.stake)}`).join(' · ') || 'none pays'} → <b>${usd(cap)}</b>, ${hrs.toFixed(1)} h, net if they launch <b class="up">+${usd(pick.reduce((s, r) => s + r.plan.net, 0))}</b></span></section>
     <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div></section></div>`;
     return `<section class="strip">
