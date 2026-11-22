@@ -278,9 +278,9 @@
   main.forEach(function (c) { if (gas(c) < gas(chain)) chain = c; });
   var kind = p.category === 'Prediction Market' ? 'predict' : v.family;
   var asset = /^(Bitcoin|Lightning)/.test(chain) ? 'BTC' : 'USDC';
-  var tx = gas(chain), weeks = Math.round(M.farm_days / 7), perDollar = v.apr * M.farm_days / 365;
-  function steps(stake) {
-   var side = Math.round(stake / 4), act = ACT[kind];
+  var tx0 = gas(chain), weeks = Math.round(M.farm_days / 7), perDollar = v.apr * M.farm_days / 365;
+  function steps(stake, gm) {
+   var tx = tx0 * (gm || 1), side = Math.round(stake / 4), act = ACT[kind];
    var fill = function (t) { return t.replace(/USDC/g, asset).replace(/\{S\}/g, usd(stake)).replace(/\{s\}/g, usd(side)).replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain); };
    return [
     { act: 'Kill test, go on only if all hold: ' + fill(act[3]) + '; and a deposit-and-withdraw quote totals under ' + usd(0.1 * eligible(stake) * perDollar) + ' (10% of the modeled drop). If any fails, stop with $0 spent', usd: 0, min: 15, when: 'Day 0' },
@@ -323,7 +323,7 @@
   }
   // Capital carry at carry_rate: shown, not charged (the deposit usually earns a yield).
   var carry = capital * M.carry_rate * M.farm_days / 365, stress = ACT[kind][4];
-  return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
+  return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map(function (m) { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, drop >= M.target_cover * a.all ? 'farm' : drop >= a.all ? 'marginal' : 'skip']; }), stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
    days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, verdict: verdict };
  }
  function stepText(s) {
