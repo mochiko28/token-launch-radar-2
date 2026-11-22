@@ -294,8 +294,7 @@
    ];
   }
   function total(st) { var c = 0, t = 5; st.forEach(function (s) { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * hr }; }
-  // Tranches [amount, day in]: only principal in the protocol earns, from the day it lands (vault side
-  // deposit day 1, RWA after a 2-day KYC review); swaps, trades and borrows log activity, not dollar-days.
+  // Tranches [amount, day in]: principal earns from the day it lands; swaps, trades, borrows earn nothing.
   function tranches(stake) { return kind === 'vault' ? [[stake, 0], [Math.round(stake / 4), 1]] : [[stake, kind === 'rwa' ? 2 : 0]]; }
   function eligible(stake) { return tranches(stake).reduce(function (a, t) { return a + t[0]; }, 0); }
   function earn(stake) { return tranches(stake).reduce(function (a, t) { return a + t[0] * (M.farm_days - t[1]); }, 0) * v.apr / 365; }

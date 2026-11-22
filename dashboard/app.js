@@ -21,7 +21,7 @@
  const maxImplied = rows[0].v.implied;
 
  const CLEAR = { q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' };
- const DEF = { view: 'board', q: '', fam: '', chain: '', scope: 'all', verdict: '', sort: 'rank', dir: 'asc', p: '', dep: '', bud: '25000', hr: '25' };
+ const DEF = { view: 'board', q: '', fam: '', chain: '', scope: 'all', verdict: '', sort: 'rank', dir: 'asc', p: '', vs: '', dep: '', bud: '25000', hr: '25' };
  const HOURS = 8;
  function readHash() {
   const st = Object.assign({}, DEF);
@@ -30,14 +30,13 @@
    const i = kv.indexOf('='), k = kv.slice(0, i);
    if (i > 0 && own(DEF, k)) try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch (e) { /* keep the default */ }
   });
-  // Unknown values fall back to the defaults, so a hand-typed link never breaks the page.
   const ok = { view: 'board model aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000 100000 250000', hr: '0 10 25 50 100', bud: '10000 25000 50000 100000 250000 1000000' };
   Object.keys(ok).forEach((k) => { if (!ok[k].split(' ').includes(st[k])) st[k] = DEF[k]; });
   if (!own(KEYS, st.sort)) st.sort = 'rank';
   return st;
  }
  function link(patch) {
-  const st = Object.assign(readHash(), patch), parts = [];
+  const st = Object.assign(readHash(), 'p' in patch ? { vs: '' } : {}, patch), parts = [];
   Object.keys(DEF).forEach((k) => { if (st[k] !== DEF[k]) parts.push(k + '=' + encodeURIComponent(st[k])); });
   return '#' + parts.join('&');
  }
@@ -56,13 +55,22 @@
    (st.scope === 'all' || (st.scope === 'watch' ? r.watch : st.scope === 'outside' ? !r.watch : st.scope === 'stable' ? r.stable : r.below)) &&
    (!st.verdict || r.plan.verdict === st.verdict));
   const key = KEYS[st.sort], sign = st.dir === 'desc' ? -1 : 1;
-  // Missing figures (an unreported 7-day change) sort last in either direction.
   return out.sort((a, b) => { const x = key(a), y = key(b); if (x == null || y == null) return (x == null) - (y == null) || a.rank - b.rank; return (x < y ? -1 : x > y ? 1 : 0) * sign || a.rank - b.rank; });
  }
 
- // CSV of the rows shown, at the reader's deposit and hour: a data: link, so it works offline.
- const CSV_H = 'rank,slug,name,family,tvl_usd,change_7d,days_tracked,implied_usd,low_usd,high_usd,score,drop_apr,verdict,capital_usd,cost_usd,hours,drop_usd,net_usd,x2_at_usd';
- const csv = (shown) => 'data:text/csv;charset=utf-8,' + encodeURIComponent([CSV_H].concat(shown.map((r) => [r.rank, r.p.slug, '"' + r.p.name.replace(/"/g, '""') + '"', r.v.family, Math.round(r.p.tvl_usd), r.p.change_7d, r.v.age_used, Math.round(r.v.implied), Math.round(r.v.low), Math.round(r.v.high), r.v.time_factor.toFixed(3), r.v.apr.toFixed(4), r.plan.verdict, r.plan.stake, r.plan.cost.toFixed(2), (r.plan.minutes / 60).toFixed(1), r.plan.drop.toFixed(2), r.plan.net.toFixed(2), r.plan.verdict === 'farm' ? r.plan.stake : r.plan.pay_cap || ''].join(','))).join('\n'));
+ // FIELDS feed the CSV (raw) and the side-by-side view (formatted; dir marks the better side).
+ const sg = (x) => (x < 0 ? '−' : '+') + usd(Math.abs(x)), p2 = (x) => (x * 100).toFixed(2) + '%';
+ const FIELDS = [['Rank', (r) => r.rank, -1], ['Protocol', (r) => r.p.name], ['Family', (r) => fit.families[r.v.family].label], ['TVL', (r) => Math.round(r.p.tvl_usd), 0, usd],
+  ['7-day change %', (r) => r.p.change_7d, 0, pct], ['Days tracked', (r) => r.v.age_used], ['Value if launched', (r) => Math.round(r.v.fitted), 1, usd],
+  ['Token-record score', (r) => +r.v.time_factor.toFixed(3), 1, (x) => pc(x)], ['Implied value', (r) => Math.round(r.v.implied), 1, usd], ['50% band', (r) => usd(r.v.low) + '–' + usd(r.v.high)], ['Drop APR', (r) => +r.v.apr.toFixed(4), 1, p2], ['Verdict', (r) => r.plan.verdict], ['Capital', (r) => r.plan.stake, -1, usd],
+  ['Gas & fees', (r) => +r.plan.cost.toFixed(2), -1, usd], ['Hours', (r) => +(r.plan.minutes / 60).toFixed(1), -1], ['Modeled drop', (r) => +r.plan.drop.toFixed(2), 1, usd],
+  ['Net if it launches', (r) => +r.plan.net.toFixed(2), 1, sg], ['Verdict at 3x gas', (r) => r.plan.fees[1][3]], ['Stress loss', (r) => +r.plan.stress_usd.toFixed(2), -1, usd],
+  ['Capital for x2', (r) => (r.plan.verdict === 'farm' ? r.plan.stake : r.plan.pay_cap || ''), -1, (x) => (x ? usd(x) : 'none to $1M')]];
+ const csv = (shown) => 'data:text/csv;charset=utf-8,' + encodeURIComponent([FIELDS.map((f) => f[0])].concat(shown.map((r) => FIELDS.map((f) => { const x = f[1](r); return typeof x === 'string' ? '"' + x.replace(/"/g, '""') + '"' : x; }))).join('\n'));
+ function compare(a, b) {
+  return `<a class="back" href="${link({ vs: '' })}">← Back to ${esc(a.p.name)}</a><section class="intro"><h1>${esc(a.p.name)} vs ${esc(b.p.name)}</h1><p>Same model, deposit and hour; the better of each pair in bold.</p></section>
+  <div class="tablewrap">${tbl('board cmp', ['', '#' + esc(a.p.name), '#' + esc(b.p.name)], FIELDS.slice(2).map(([l, f, d, F]) => { const x = f(a), y = f(b), w = d && x !== y && x !== '' && y !== '' ? (x - y) * d > 0 : null; F = F || String; return [l, w === true ? `<b>${F(x)}</b>` : F(x), w === false ? `<b>${F(y)}</b>` : F(y)]; }))}</div>`;
+ }
  const rOf = (v) => 1.8 + 6.5 * Math.sqrt(v / maxImplied);
  function chart(shown, H) {
   const W = 470, L = 40, B = 26, T = 10, RR = 10;
@@ -78,7 +86,6 @@
    const rad = rOf(r.v.implied);
    dots += `<a href="${link({ p: r.p.slug })}"><circle class="dot f-${r.v.family}${on.has(r.p.slug) ? '' : ' off'}" cx="${X(r.v.age_used).toFixed(1)}" cy="${Y(r.v.apr).toFixed(1)}" r="${rad.toFixed(1)}"><title>${esc(r.p.name)} ${usd(r.v.implied)}</title></circle></a>`;
   });
-  // Label the 3 largest values and 3 best yields shown, beside each dot where no label overlaps.
   const pick = [];
   [(a, b) => b.v.implied - a.v.implied, (a, b) => b.v.apr - a.v.apr].forEach((cmp) => {
    shown.slice().sort(cmp).slice(0, 3).forEach((r) => { if (!pick.includes(r)) pick.push(r); });
@@ -94,7 +101,6 @@
    boxes.push([spot[0], spot[1], w, h]);
    labels += `<text class="lab" x="${(spot[0] + 3).toFixed(1)}" y="${(spot[1] + 9).toFixed(1)}">${esc(r.p.name)}</text>`;
   });
-  // Axis titles and a size legend: two reference dots at round implied values.
   g += `<text class="ax" x="${W - RR}" y="${H - 18}" text-anchor="end">days without a token →</text><text class="ax" x="${L + 4}" y="${T + 8}">airdrop APR if it launches ↑</text>`;
   [[1e6, '$1M'], [3e7, '$30M']].forEach(([v, l], i) => { g += `<circle class="dot f-infra" cx="${W - 120 + i * 50}" cy="${T + 12}" r="${rOf(v).toFixed(1)}"/><text class="ax" x="${W - 112 + i * 50}" y="${T + 15}">${l}</text>`; });
   return `<svg viewBox="0 0 ${W} ${H}" class="radar">${g}
@@ -117,13 +123,13 @@
    <p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × s</p>
    <table class="mini tests"><thead><tr><th>Term · held-out median miss</th><th class="num">Leave-one-out</th><th class="num">Walk-fwd</th><th class="num">Family out</th><th class="num">Use</th></tr></thead><tbody>
    ${T.terms.map((t) => `<tr class="${t.ok ? 'pick' : ''}"><td>${t.label}</td><td class="num">${x(t.loo)}</td><td class="num">${x(t.wf)}</td><td class="num">${x(t.lofo)}</td><td class="num">${used[t.key]}</td></tr>`).join('')}</tbody></table>
-   <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%). s = token-record score: the share of ${O.n} peers (logistic fit ; ${O.with_token} record a token) with this TVL, days tracked, 7-day change and family that record a token: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out (each family scored by a fit that never saw it).</p>
+   <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%). s = token-record score, a logistic fit on ${O.n} peers (${O.with_token} record a token): AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out.</p>
    <p class="note"><b>Missing ages:</b> ${rows.filter((r) => r.ageRange).length} ranked rows have no listing date and use the median age; re-ranked at the 25th and 75th percentile of observed ages they move: ${rows.filter((r) => r.ageRange).map((r) => `${esc(r.p.name)} #${r.ageRange[0].rank}–#${r.ageRange[1].rank}`).join(', ')}.</p>
    <p class="note"><b>Not a launch forecast:</b> s scores whether a peer <i>records</i> a token today, the quantity the held-out tests check (worst age-cohort gap ${Math.round(O.gap * 100)} pts); the snapshot has no launch dates, so no timing claim.</p>
    <p class="note">Leave-one-out miss by TVL band: ${fit.bands.map((b) => `<b>${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} ×${b.miss.toFixed(1)}</b> (${b.n} tokens; ${rows.filter((r) => r.p.tvl_usd >= b.lo && r.p.tvl_usd < b.hi).length} ranked)`).join(' · ')}.</p></div>`;
  }
 
- // The cover's self-checks, computed here on every load: the gate's rules and the screen-to-board match.
+ // Self-checks, computed on every load.
  const bRows = R.boardRows(radar), dig = R.digest(bRows), B = window.BOARD || {};
  const [flatT, spotT, sizeT] = fit.tests.terms;
  const nTr = S.protocols.filter((p) => p.mcap_usd > 0).length, nAll = rows.length + radar.products.length + nTr + radar.listed_only;
@@ -143,7 +149,7 @@
  function board(st) {
   const shown = filtered(st), fams = st.fam ? st.fam.split(',') : [];
   const watchCov = S.watchlist.filter((s) => bySlug[s]).length;
-    const farmN = rows.filter((r) => r.plan.verdict === 'farm').length;
+  const farmN = rows.filter((r) => r.plan.verdict === 'farm').length;
   const mid = (f) => rows.map(f).sort((a, b) => a - b)[rows.length >> 1];
   const chains = {}; rows.forEach((r) => r.p.chains.forEach((c) => { chains[c] = (chains[c] || 0) + 1; }));
   const famCount = {}; rows.forEach((r) => { famCount[r.v.family] = (famCount[r.v.family] || 0) + 1; });
@@ -156,7 +162,7 @@
    const on = fams.includes(f[0]), next = on ? fams.filter((x) => x !== f[0]) : fams.concat(f[0]);
    return `<a href="${link({ fam: next.join(',') })}" class="chip f-${f[0]}${on ? ' on' : ''}"><i></i>${esc(f[1])} <b>${famCount[f[0]] || 0}</b></a>`;
   }).join('');
-  // Basket (#07): shown plans with a positive net, best net per dollar first, while the budget and HOURS last.
+ // Basket: positive-net plans, best net per dollar, within budget and HOURS.
   let cap = 0, hrs = 0;
   const pick = shown.filter((r) => r.plan.net > 0).sort((a, b) => b.plan.net / b.plan.stake - a.plan.net / a.plan.stake)
    .filter((r) => cap + r.plan.stake <= +st.bud && hrs + r.plan.minutes / 60 <= HOURS && (cap += r.plan.stake, hrs += r.plan.minutes / 60));
@@ -175,7 +181,6 @@
     <td class="num apr">${(r.v.apr * 100).toFixed(1)}%</td>
     <td class="plan">${verdictTag(r.plan.verdict)} <span class="pmult">pays ${mult(r.plan.drop / r.plan.all_in)}${r.plan.verdict === 'farm' ? '' : r.plan.pay_cap ? ` · ×${M.target_cover} at ${usd(r.plan.pay_cap)}` : ` · no deposit pays ×${M.target_cover}`}</span><small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}</small></td></tr>`;
   }).join('');
-  // The controls: under the hero on the cover, beside the chart when filters are on.
   const ctl = `<div class="ctl">    <section class="filters">
    <label class="search"><input id="q" type="search" value="${esc(st.q)}" placeholder="Search name, category or chain" autocomplete="off" aria-label="Search"></label>
    <div class="field"><span>Scope</span>${seg('scope', [['all', 'All'], ['watch', 'Watchlist'], ['outside', 'Outside it'], ['early', 'Below $50M'], ['stable', 'Top 20, all variants']])}</div>
@@ -194,7 +199,6 @@
    <div><b>${radar.products.length} · ${fit.n}</b><span>set aside · trading (fit)</span></div>
    <div><b>×${sizeT.loo.toFixed(1)} · ×${sizeT.wf.toFixed(1)}</b><span>held-out miss, 2 tests</span></div>
    <div><b>${O.auc_loo.toFixed(2)} · ${O.auc_wf.toFixed(2)}</b><span>score AUC: LOO · walk-fwd</span></div>
-   <div><b>${bRows.length}/${rows.length}</b><span>plans costed and timed</span></div>
    <div><b>${farmN}</b><span>pay ×${M.target_cover} their costs</span></div>
    <div><b>${usd(mid((r) => r.plan.stake))} · ${R.mins(mid((r) => r.plan.minutes))}</b><span>median deposit · hands-on</span></div>
   </section>
@@ -212,12 +216,11 @@
    <tbody>${body || '<tr><td colspan="10" class="empty">No protocol matches these filters.</td></tr>'}</tbody></table></div>`;
  }
 
- // Red team: the ways this row's number could be wrong, each from the row's own figures.
  function redTeam(r) {
   const v = r.v, b = fit.bands.find((x) => r.p.tvl_usd >= x.lo && r.p.tvl_usd < x.hi), alt = Object.entries(r.alt).sort((a, c) => Math.abs(c[1] - r.rank) - Math.abs(a[1] - r.rank))[0];
   return [
    `<b>Value:</b> trading tokens of this size (${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} TVL) miss their real market cap by a median ×${b.miss.toFixed(1)} held out; a market cap at launch of ${usd(v.fitted * fit.band_low)} or ${usd(v.cap_high)} would not be unusual.`,
-   `<b>Score:</b> ${pc(v.time_factor)} of similar peers record a token today; that is no forecast of when, or whether, this one launches, and the fit misses one age cohort by ${Math.round(fit.odds.gap * 100)} pts.`,
+   `<b>Score:</b> ${pc(v.time_factor)} of similar peers record a token today (no launch forecast); the fit misses one age cohort by ${Math.round(fit.odds.gap * 100)} pts.`,
    `<b>Rank:</b> #${r.rank} now, ${r.rlo}–${r.rhi} across 40 refits, #${alt[1]} ${alt[0]}${v.growth_imputed ? '; its 7-day change is unreported, so 0% was used' : ''}${r.ageRange ? `; no listing date, so the median age was used: at ${r.ageRange[0].age} days it would rank #${r.ageRange[0].rank}, at ${r.ageRange[1].age} days #${r.ageRange[1].rank}` : ''}.`,
    `<b>Plan:</b> pays ×${M.target_cover} only if ≥${(r.plan.need_share * 100).toFixed(1)}% of the token reaches depositors (assumed ${M.drop_share * 100}%), and only if a token launches at all.`
   ];
@@ -231,7 +234,7 @@
   const caps = peers.map((x) => x.actual), lo = Math.log10(Math.min(v.low, ...caps) / 1.5), hi = Math.log10(Math.max(v.high, ...caps) * 1.5);
   const pos = (x) => (100 * (Math.log10(x) - lo) / (hi - lo)).toFixed(2) + '%';
   const line = (label, src, val, cls) => `<tr class="${cls || ''}"><td>${label}<small>${src}</small></td><td class="num">${val}</td></tr>`;
-  return `<a class="back" href="${link({ p: '' })}">← Back to the board</a>
+  return `<a class="back" href="${link({ p: '' })}">← Back to the board</a><label class="field vs"><span>Compare with</span><select id="vs"><option value="">another protocol…</option>${rows.filter((x) => x !== r).map((x) => `<option value="${x.p.slug}">#${x.rank} ${esc(x.p.name)}</option>`).join('')}</select></label>
   <section class="dhead">
    <div class="rankbig"><small>Rank</small><b>${r.rank}</b><small>of ${rows.length}</small></div>
    <div><h1>${esc(p.name)}</h1>
@@ -280,7 +283,6 @@
   </div>`;
  }
 
- // A plain table: heads starting with '#' are numeric columns; rows are arrays of cell HTML.
  const tbl = (cls, heads, rows) => `<table class="${cls}"><thead><tr>${heads.map((h) => `<th${h[0] === '#' ? ' class="num"' : ''}>${h.replace('#', '')}</th>`).join('')}</tr></thead><tbody>${rows.map((c) => `<tr>${c.map((v, i) => `<td${heads[i][0] === '#' ? ' class="num"' : ''}>${v}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
  const nm = (n, sub) => `<b>${esc(n)}</b><small>${esc(sub)}</small>`;
  function model() {
@@ -288,40 +290,34 @@
  }
  function aside() {
   return `<section class="intro"><h1>${radar.products.length} products set aside, not ranked</h1>
-   <p>No token of their own, but each is a wrapped, bridged, staked or exchange product, a versioned pool or a likely sibling of a trading token: the watchlist rule (productOf) applied to every protocol. Their value most likely rides on the related token's, so the board gives them none of their own.</p></section>
+   <p>No token of their own, but each is a wrapped, bridged, staked or exchange product, a versioned pool or a likely sibling of a trading token (productOf, applied to every protocol); their value rides on that token's.</p></section>
    <div class="tablewrap">${tbl('board', ['Product', 'Why set aside', '#TVL', '#7d'], radar.products.map((x) => [nm(x.p.name, x.p.chains.slice(0, 3).join(', ')), `<span class="tag">${esc(x.kind)}</span>`, usd(x.p.tvl_usd), pct(x.p.change_7d)]))}</div>`;
  }
 
  function trading() {
   return `<section class="intro"><h1>${fit.n} tokens that trade: the model's calibration set</h1>
    <p>Kept off the board: their market prices them. calibrate() pools TVL per token, leaves out exchanges and products, and fits ln(mcap ÷ TVL) on ln(TVL): value grows as TVL<sup>${fit.elasticity.toFixed(2)}</sup>. ${radar.listed_only} more record a token with no market cap.</p></section>
-   <div class="split"><div class="card"><h2>Held-out fit</h2><p class="note">Leave-one-out median miss ×${fit.median_error.toFixed(2)}. Band ×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)} holds ${fit.band_hits}/${fit.n}; ${fit.clipped} ratios clipped in the fit only.</p></div>
-   <div class="tablewrap">${tbl('board', ['Protocol', '#TVL', '#Market cap', '#÷ TVL', '#Fit without it', '#÷ market'], radar.live.map((l) => [nm(l.p.name, (l.p.symbol || '') + ' · ' + (l.p.category || '')), usd(l.tvl) + (l.members > 1 ? ` <small>${l.members} parts</small>` : ''), usd(l.actual), mult(l.actual / l.tvl), usd(l.loo), `<span class="${l.loo / l.actual > 2 || l.loo / l.actual < 0.5 ? 'down' : 'up'}">${mult(l.loo / l.actual)}</span>`]))}</div></div>`;
+   <div class="tablewrap">${tbl('board', ['Protocol', '#TVL', '#Market cap', '#÷ TVL', '#Fit without it', '#÷ market'], radar.live.map((l) => [nm(l.p.name, (l.p.symbol || '') + ' · ' + (l.p.category || '')), usd(l.tvl) + (l.members > 1 ? ` <small>${l.members} parts</small>` : ''), usd(l.actual), mult(l.actual / l.tvl), usd(l.loo), `<span class="${l.loo / l.actual > 2 || l.loo / l.actual < 0.5 ? 'down' : 'up'}">${mult(l.loo / l.actual)}</span>`]))}</div>`;
  }
 
  let planDep = '|25';
- // How many top-20 verdicts are farm at a given hourly value (and deposit), to compare with the default.
  const top20 = rows.slice(0, 20), farmAt = (h, dep) => top20.filter((r) => R.farmPlan(r.p, r.v, +dep, h).verdict === 'farm').length;
  function render() {
   const st = readHash();
   head(st);
   app.className = st.p ? 'detail' : st.view;
-  // A deposit chosen by the reader re-plans every row at that amount (farmPlan's dep).
   if (st.dep + '|' + st.hr !== planDep) { planDep = st.dep + '|' + st.hr; rows.forEach((r) => { r.plan = R.farmPlan(r.p, r.v, +st.dep, +st.hr); }); }
-  app.innerHTML = st.p ? detail(st) : st.view === 'model' ? model() : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
+  app.innerHTML = st.p ? (bySlug[st.p] && bySlug[st.vs] ? compare(bySlug[st.p], bySlug[st.vs]) : detail(st)) : st.view === 'model' ? model() : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
   document.getElementById('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied value = the radar's own value if launched × its token-record score; never make.fun's claim. A protocol may hold a token DefiLlama does not record.`;
   if (st.p) window.scrollTo(0, 0);
-  if (typing) { clearTimeout(typing); typing = null; }
  }
- let typing = null;
  app.addEventListener('input', (e) => {
-  if (e.target.id === 'q') {
-   clearTimeout(typing);
-   const val = e.target.value;
-   typing = setTimeout(() => { typing = null; history.replaceState(null, '', link({ q: val })); render(); const q = document.getElementById('q'); if (q) { q.focus(); q.setSelectionRange(val.length, val.length); } }, 160);
-  }
+  if (e.target.id !== 'q') return;
+  const val = e.target.value;
+  history.replaceState(null, '', link({ q: val })); render();
+  const q = document.getElementById('q'); q.focus(); q.setSelectionRange(val.length, val.length);
  });
- app.addEventListener('change', (e) => { if (['chain', 'dep', 'bud', 'hr'].includes(e.target.id)) go({ [e.target.id]: e.target.value }); });
+ app.addEventListener('change', (e) => { if (['chain', 'dep', 'bud', 'hr', 'vs'].includes(e.target.id)) go({ [e.target.id]: e.target.value }); });
  ['click', 'keydown'].forEach((ev) => app.addEventListener(ev, (e) => {
   const tr = e.target.closest('tr[data-slug]');
   if (tr && !e.target.closest('a') && (ev === 'click' || e.key === 'Enter')) go({ p: tr.dataset.slug });
