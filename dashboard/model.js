@@ -314,11 +314,14 @@
     var verdict = drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip';
     // Every plan opens with its decision: the numbers, and the drop share at which it pays target_cover.
     var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
-    // What would make it pay: the capital at which the drop covers costs target_cover times (fees and time held
-    // at this plan's level), and the net if the reader's time is free.
-    var payCap = Math.ceil(M.target_cover * t.all / Math.max(drop / capital, 1e-12) / 1000) * 1000;
+    // What would make it pay: the least capital, up to $1M, at which the drop covers the plan's own costs
+    // target_cover times, with every fee recomputed at that size (some grow with the deposit); 0 = none does.
+    var payCap = 0;
+    for (var c = 25000; !payCap && c <= 1000000; c = Math.round(c * 1.25)) {
+      var kk = Math.round(c / 1.25); if (eligible(kk) * perDollar >= M.target_cover * total(steps(kk)).all) payCap = Math.ceil(c / 1000) * 1000;
+    }
     st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: ' + Math.round(v.time_factor * 100) + '% of peers like it record a token, so the score-weighted drop is ' + usd(drop * v.q3) + ' (×' + (drop * v.q3 / t.all).toFixed(2) + ' the costs); if it launches, at ' + usd(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
-      ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + (verdict === 'farm' ? '' : '; before your time it nets ' + (drop >= t.cost ? '+' : '−') + usd(Math.abs(drop - t.cost)) + ', and it would pay ×' + M.target_cover + ' at about ' + usd(payCap) + ' of capital') + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
+      ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + (verdict === 'farm' ? '' : '; before your time it nets ' + (drop >= t.cost ? '+' : '−') + usd(Math.abs(drop - t.cost)) + ', and ' + (payCap ? 'it would pay ×' + M.target_cover + ' at about ' + usd(payCap) + ' of capital' : 'no deposit up to $1M pays ×' + M.target_cover + ' because its fees grow with the deposit')) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
       '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%; at 5% it pays ×' + (drop / t.all / 2).toFixed(2) + ', at 20% ×' + (drop / t.all * 2).toFixed(2) + '), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
     // A plan that does not cover its costs even once gets a $0 research plan instead of spending steps:
     // what to check, the trigger that would flip it, and when to look again.
@@ -326,7 +329,7 @@
       st = [st[0],
         { when: 'Day 0', usd: 0, min: 15, act: 'Research only, no deposit: check whether ' + ACT[kind][3].replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain) },
         { when: 'Day 0', usd: 0, min: 15, act: 'Read ' + p.name + '\'s docs and announcements for a stated user or depositor allocation; note the share, if any' },
-        { when: 'Day 0', usd: 0, min: 5, act: 'Write down the trigger that flips this plan: an announced allocation of at least ' + (needShare * 100).toFixed(0) + '% to depositors, capital of about ' + usd(payCap) + ' to commit, or TVL falling below ' + usd(p.tvl_usd * 0.5) + ' with no change in odds (a smaller pool to share)' },
+        { when: 'Day 0', usd: 0, min: 5, act: 'Write down the trigger that flips this plan: an announced allocation of at least ' + (needShare * 100).toFixed(0) + '% to depositors, ' + (payCap ? 'capital of about ' + usd(payCap) + ' to commit, ' : '') + 'or TVL falling below ' + usd(p.tvl_usd * 0.5) + ' with no change in odds (a smaller pool to share)' },
         { when: 'Day 30', usd: 0, min: 10, act: 'Look again on a new snapshot; if the plan now pays ×' + M.target_cover + ', follow the full plan (' + usd(capital) + ' capital, about ' + usd(t.cost) + ' in fees, ' + mins(Math.round(t.min)) + ' hands-on)' }];
     }
     return { chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * M.hour_usd, all_in: t.all,
