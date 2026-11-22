@@ -126,22 +126,17 @@
  const [flatT, spotT, sizeT] = fit.tests.terms;
  const nTr = S.protocols.filter((p) => p.mcap_usd > 0).length, nAll = rows.length + radar.products.length + nTr + radar.listed_only;
  const CHECKS = [
-  [nAll === S.protocols.length, `${nAll}/${S.protocols.length} protocols: ${rows.length} ranked + ${radar.products.length} set aside + ${nTr} trading + ${radar.listed_only} token, no cap`],
-  [S.watchlist.every((s) => bySlug[s]), `Watchlist covered: ${S.watchlist.filter((s) => bySlug[s]).length}/${S.watchlist.length}`],
-  [rows.every((r, i) => r.rank === i + 1 && (!i || r.v.implied <= rows[i - 1].v.implied)), `Ranks 1–${rows.length}, value never rising`],
+  [nAll === S.protocols.length, `${nAll}/${S.protocols.length} protocols: ${rows.length} ranked, ${radar.products.length} set aside, ${nTr} trading`],
+  [S.watchlist.every((s) => bySlug[s]), `watchlist ${S.watchlist.filter((s) => bySlug[s]).length}/${S.watchlist.length} covered`],
+  [rows.every((r, i) => r.rank === i + 1 && (!i || r.v.implied <= rows[i - 1].v.implied)), `ranks 1–${rows.length}, value never rising`],
   [rows.every((r) => r.p.gecko_id == null && r.p.symbol == null && r.p.mcap_usd == null), `${rows.length}/${rows.length} ranked rows record no token`],
   [bRows.every((b) => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every((t) => / Cost: .+ Time: /.test(t))), `${bRows.length}/${bRows.length} plans, every step costed and timed`],
-  [B.digest === dig && B.rows === rows.length, `Screen = board.json at the Auto deposit (rank, name, value, every plan step): digest ${dig}, ${B.rows || 0} rows`],
-  [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.auc_fam > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base && O.brier.fam < O.brier.fam_base, `Token-record score beats chance and the base rate in 3 held-out tests: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out; Brier ${O.brier.loo.toFixed(3)}/${O.brier.wf.toFixed(3)}/${O.brier.fam.toFixed(3)} vs base ${O.brier.loo_base.toFixed(3)}/${O.brier.wf_base.toFixed(3)}/${O.brier.fam_base.toFixed(3)}`],
-  [rows.slice(0, 10).every((r) => r.boot >= 0.8), `Bootstrap, 40 refits of curve and odds (fails if any top-10 row leaves the top 20 in over 20% of refits): ranks 1–${rows.findIndex((r) => r.boot < 1)} stay top 20 every time; ${rows.filter((r) => r.boot > 0 && r.boot < 1).length} rows sometimes`],
-  ((w) => [O.gap < 0.2, `Odds curve vs ${O.cohorts.length} listing-age cohorts: within ${Math.round(O.gap * 100)} pts (worst from day ${w.from}: ${pc(w.actual)} hold a token, ${pc(w.fitted)} fitted)`])(O.cohorts.reduce((a, c) => Math.abs(c.actual - c.fitted) > Math.abs(a.actual - a.fitted) ? c : a)),
-  [spotT.ok && sizeT.ok, `Size curve beats a flat multiple, and carrying TVL a week at its 7-day change beats spot TVL, in all three held-out tests: ×${flatT.loo.toFixed(2)}→×${spotT.loo.toFixed(2)}→×${sizeT.loo.toFixed(2)} leave-one-out`]
+  [B.digest === dig && B.rows === rows.length, `screen = board.json at Auto deposit, digest ${dig}`],
+  [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.auc_fam > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base && O.brier.fam < O.brier.fam_base, `score beats base rate held out 3 ways: AUC ${O.auc_loo.toFixed(2)}/${O.auc_wf.toFixed(2)}/${O.auc_fam.toFixed(2)}`],
+  [rows.slice(0, 10).every((r) => r.boot >= 0.8), `ranks 1–${rows.findIndex((r) => r.boot < 1)} top 20 in all 40 refits (fails if a top 10 drops in >20%)`],
+  [O.gap < 0.2, `score within ${Math.round(O.gap * 100)} pts of every age cohort`],
+  [spotT.ok && sizeT.ok, `value miss ×${flatT.loo.toFixed(2)} flat → ×${sizeT.loo.toFixed(2)} fitted, held out 3 ways`]
  ];
- // The cover shows each check as a short line; the Model tab shows them in full.
- const SHORT = [`${nAll}/${S.protocols.length} protocols accounted for`, `watchlist ${S.watchlist.filter((s) => bySlug[s]).length}/${S.watchlist.length}`, `ranks 1–${rows.length}, value never rising`,
-  `${rows.length}/${rows.length} record no token`, `${bRows.length}/${bRows.length} plans costed and timed`, `screen = board.json, digest ${dig}`,
-  `token-record score beats base rate in 3 held-out tests`, `ranks 1–${rows.findIndex((r) => r.boot < 1)} top 20 in all 40 refits`,
-  `score within ${Math.round(O.gap * 100)} pts of every age cohort`, `value miss ×${flatT.loo.toFixed(1)} flat → ×${sizeT.loo.toFixed(1)} fitted`];
 
  function board(st) {
   const shown = filtered(st), fams = st.fam ? st.fam.split(',') : [];
@@ -205,7 +200,7 @@
    <div class="lead">
     <h1>${rows.length} pre-token protocols, ranked by token value × token-record score</h1>
     ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link(CLEAR)}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>${ctl}` : `<p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × s</p>
-    <div class="card checks"><h2>Self-checks <span>run in this page on load · <a href="${link({ view: 'model' })}">full checks and held-out tests →</a></span></h2><ul class="grid2">${CHECKS.map(([ok], i) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${SHORT[i]}</li>`).join('')}</ul></div>`}
+    <div class="card checks"><h2>Self-checks <span>run in this page on load · <a href="${link({ view: 'model' })}">full checks and held-out tests →</a></span></h2><ul class="grid2">${CHECKS.map(([ok], i) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${CHECKS[i][1]}</li>`).join('')}</ul></div>`}
    </div>
    <div class="card chartcard"><h2>Radar <span>days without a token × airdrop yield</span></h2>${chart(shown, 214)}</div>
   </section>
@@ -277,7 +272,7 @@
     <ol class="steps">${pl.steps.map((s) => `<li><p><em>${esc(s.when)}</em>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>
     <div class="math">
      <p><b>Drop APR ${(v.apr * 100).toFixed(2)}% if it launches</b> = ${usd(v.fitted)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
-     <p>${usd(pl.eligible)} earning for ${pl.days} days: <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${pl.hour}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital carry: ${usd(pl.stake)} locked ${pl.days} days forgoes about ${usd(pl.carry)} at ${M.carry_rate * 100}% elsewhere; the deposit's own yield usually covers it, and if it earns nothing the net is ${pl.net - pl.carry >= 0 ? '+' : '−'}${usd(Math.abs(pl.net - pl.carry))}. Capital: ${st.dep ? 'your deposit' : pl.verdict === 'farm' ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}.</p>
+     <p>${usd(pl.eligible)} earning for ${pl.days} days: <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${pl.hour}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Stress (${esc(p.category || FAM[v.family])}): ${esc(pl.stress)} would cost about <b>${usd(pl.stress_usd)}</b>, ×${(pl.stress_usd / Math.max(pl.drop, 1e-9)).toFixed(1)} the modeled drop. Capital carry: ${usd(pl.stake)} locked ${pl.days} days forgoes about ${usd(pl.carry)} at ${M.carry_rate * 100}% elsewhere; the deposit's own yield usually covers it, and if it earns nothing the net is ${pl.net - pl.carry >= 0 ? '+' : '−'}${usd(Math.abs(pl.net - pl.carry))}. Capital: ${st.dep ? 'your deposit' : pl.verdict === 'farm' ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}.</p>
     </div>
    </section>
   </div>`;

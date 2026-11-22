@@ -322,8 +322,8 @@
     { when: 'Day 30', usd: 0, min: 10, act: 'Look again on a new snapshot; if the plan now pays ×' + M.target_cover + ', follow the full plan (' + usd(capital) + ' capital, about ' + usd(t.cost) + ' in fees, ' + mins(Math.round(t.min)) + ' hands-on)' }];
   }
   // Capital carry at carry_rate: shown, not charged (the deposit usually earns a yield).
-  var carry = capital * M.carry_rate * M.farm_days / 365;
-  return { carry: carry, hour: hr, chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
+  var carry = capital * M.carry_rate * M.farm_days / 365, stress = ACT[kind][4];
+  return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
    days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, verdict: verdict };
  }
  function stepText(s) {
@@ -389,7 +389,7 @@
    return { rank: r.rank, slug: r.p.slug, name: r.p.name, implied_value_usd: r.v.implied,
     farm_steps: r.plan.steps.map(stepText),
     token_status: 'pre-token', on_watchlist: r.watch, implied_low_usd: r.v.low, implied_high_usd: r.v.high,
-    farm: { capital_usd: r.plan.stake, cost_usd: +r.plan.cost.toFixed(2), minutes: r.plan.minutes, drop_usd: +r.plan.drop.toFixed(2), verdict: r.plan.verdict } };
+    farm: { capital_usd: r.plan.stake, cost_usd: +r.plan.cost.toFixed(2), minutes: r.plan.minutes, drop_usd: +r.plan.drop.toFixed(2), stress_usd: +r.plan.stress_usd.toFixed(2), verdict: r.plan.verdict } };
   });
  }
 
