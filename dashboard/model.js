@@ -346,15 +346,17 @@
     // Bootstrap: refit the value curve on resampled trading tokens and the launch odds on resampled peers,
     // 40 seeded draws (every run agrees), and count how often each row ranks in the top 20.
     var seed = 7, rnd = function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-    rows.forEach(function (r) { r.boot = 0; });
+    rows.forEach(function (r) { r.boot = 0; r.draws = []; });
     for (var d = 0; d < 40; d++) {
       var bs = fit.points.map(function () { return fit.points[Math.floor(rnd() * fit.points.length)]; }), bf = fitPoints(bs, fit.k), Fb = fit.odds.boot(rnd);
       rows.map(function (r) {
         var a = r.v.age_used, f0 = Fb(r.p, a), qb = (Fb(r.p, a + M.odds_days) - f0) / (1 - f0);
         return { r: r, s: r.v.tvl_next * Math.exp(bf.fams[r.v.family].ln + bf.b * Math.log(r.v.tvl_next / M.ref_tvl)) * qb };
       })
-        .sort(function (a, b) { return b.s - a.s || bySlug(a.r.p, b.r.p); }).slice(0, 20).forEach(function (o) { o.r.boot += 1 / 40; });
+        .sort(function (a, b) { return b.s - a.s || bySlug(a.r.p, b.r.p); }).forEach(function (o, i) { o.r.draws.push(i + 1); if (i < 20) o.r.boot += 1 / 40; });
     }
+    // Each row's 80% rank range over the 40 refits (5th lowest to 5th highest rank).
+    rows.forEach(function (r) { var d = r.draws.sort(function (a, b) { return a - b; }); r.rlo = d[4]; r.rhi = d[35]; delete r.draws; });
     rows.forEach(function (r) { r.stable = r.rank <= 20 && Object.keys(r.alt).every(function (k) { return r.alt[k] <= 20; }); });
     var live = fit.points.map(function (q) { return { p: q.p, tvl: q.tvl, members: q.members, family: q.f, fit: q.fit, loo: Math.round(q.loo), actual: q.mcap }; })
       .sort(function (a, b) { return b.actual - a.actual || bySlug(a.p, b.p); });

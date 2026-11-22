@@ -173,7 +173,7 @@
     const body = shown.map((r) => {
       const w = Math.max(1.5, 100 * Math.sqrt(r.v.implied / maxImplied));
       return `<tr data-slug="${esc(r.p.slug)}" tabindex="0">
-        <td class="rank">${r.rank}</td>
+        <td class="rank">${r.rank}<small>${r.rlo}–${r.rhi}</small></td>
         <td class="proto"><a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a>${r.watch ? '<span class="wl" title="On the snapshot watchlist">WL</span>' : ''}<small>${esc(r.p.category || 'Uncategorised')} · ${esc(r.p.chains.slice(0, 2).join(', '))}${r.p.chains.length > 2 ? ' +' + (r.p.chains.length - 2) : ''}</small></td>
         <td>${famChip(r.v.family)}</td>
         <td class="num">${usd(r.p.tvl_usd)}</td>
@@ -235,7 +235,7 @@
       <div><h1>${esc(p.name)}</h1>
         <p class="tags">${famChip(v.family)}<span class="tag">${esc(p.category || 'Uncategorised')}</span><span class="tag pre">No token on record</span>${r.watch ? '<span class="tag wlt">On the watchlist</span>' : '<span class="tag">Outside the watchlist</span>'}</p>
         <p class="sub">${esc(p.chains.join(' · '))}${p.listed_at ? ` — tracked since ${esc(p.listed_at)}` : ' — no listing date on record'}</p></div>
-      <div class="dval"><small>Implied token value</small><b>${usd(v.implied)}</b><small>50% band ${usd(v.low)} – ${usd(v.high)} · ${mult(v.multiple)} TVL</small><small>Top 20 in ${pc(r.boot)} of 40 bootstrap refits</small><small>Rank #${r.rank}; ${Object.keys(r.alt).map((k) => `#${r.alt[k]} ${k}`).join(' · ')}</small></div>
+      <div class="dval"><small>Implied token value</small><b>${usd(v.implied)}</b><small>50% band ${usd(v.low)} – ${usd(v.high)} · ${mult(v.multiple)} TVL</small><small>Rank ${r.rlo}–${r.rhi} in 80% of 40 bootstrap refits; top 20 in ${pc(r.boot)}</small><small>Rank #${r.rank}; ${Object.keys(r.alt).map((k) => `#${r.alt[k]} ${k}`).join(' · ')}</small></div>
     </section>
     <div class="dgrid">
       <div class="col">
