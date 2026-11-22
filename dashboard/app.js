@@ -197,7 +197,7 @@
       <span>Basket, best net per dollar of the ${shown.length} shown, within ${usd(+st.bud)} and ${HOURS} h: ${pick.map((r) => `<a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a> ${usd(r.plan.stake)}`).join(' · ') || 'none pays'} → <b>${usd(cap)}</b>, ${hrs.toFixed(1)} h, net <b class="up">+${usd(pick.reduce((s, r) => s + r.plan.net, 0))}</b></span></section>
     <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div></section>
     <div class="tablewrap"><table class="board">
-      <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'No token', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('odds', 'Odds 12m', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · 90 days', 'plan')}</tr></thead>
+      <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'No token', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('odds', 'Odds 12m', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · if it launches', 'plan')}</tr></thead>
       <tbody>${body || '<tr><td colspan="10" class="empty">No protocol matches these filters.</td></tr>'}</tbody></table></div>`;
   }
 
@@ -246,7 +246,7 @@
           <div><small>Gas &amp; fees</small><b>${usd(pl.cost)}</b></div>
           <div><small>Hands-on</small><b>${R.mins(pl.minutes)}</b></div>
           <div><small>Expected drop</small><b>${usd(pl.drop)}</b></div>
-          <div><small>Verdict</small>${verdictTag(pl.verdict)}</div>
+          <div><small>If it launches</small>${verdictTag(pl.verdict)}</div>
         </div>
         <div class="steph"><span></span><span>When · what to do</span><span>Cost</span><span>Time</span></div>
         <ol class="steps">${pl.steps.map((s) => `<li><p><em>${esc(s.when)}</em>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>

@@ -12,6 +12,7 @@
     growth_floor: -30, // 7-day change used for momentum, clipped (per cent)
     growth_cap: 50,
     odds_days: 365, // launch odds are for a token within this many days
+    ev_days: 1095, // each plan also weighs its drop by the odds of a token within this many days
     odds_ridge: 1, // L2 penalty of the odds fit: best-calibrated walk-forward of the leave-one-out ties
     drop_share: 0.10, // assumed share of supply sent to depositors, pro rata to TVL-days
     farm_days: 90, // the plan's holding window
@@ -235,13 +236,14 @@
     var fitted = tvlNext * fam.multiple * sizeMult;
     var age = ageDays(asOf, p.listed_at), ageUsed = age == null ? ageFallback : age;
     var o = fit.odds, f0 = o.F(p, ageUsed), f1 = o.F(p, ageUsed + M.odds_days), timeF = (f1 - f0) / (1 - f0);
+    var q3 = (o.F(p, ageUsed + M.ev_days) - f0) / (1 - f0);
     var implied = Math.max(1, Math.round(fitted * timeF));
 
     // Airdrop yield if it launches: drop_share of the value if launched, split over every dollar-day of
     // TVL in the current season (since listing, at most season_days) plus the plan's window.
     var apr = fitted * M.drop_share / (tvlNext * (Math.min(ageUsed, M.season_days) + M.farm_days)) * 365;
     return { family: fam.key, growth: growth, growth_imputed: p.change_7d == null,tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
-      fitted: Math.round(fitted), age: age, age_used: ageUsed, time_factor: timeF, f0: f0, f1: f1, implied: implied,
+      fitted: Math.round(fitted), age: age, age_used: ageUsed, time_factor: timeF, q3: q3, f0: f0, f1: f1, implied: implied,
       low: Math.round(implied * fit.band_low), high: Math.round(implied * fit.band_high), cap_high: Math.round(fitted * fit.band_high), multiple: implied / p.tvl_usd, apr: apr };
   }
 
@@ -295,7 +297,7 @@
     var verdict = drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip';
     // Every plan opens with its decision: the numbers, and the drop share at which it pays target_cover.
     var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
-    st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: launch odds are ' + Math.round(v.time_factor * 100) + '% within a year; if it launches, at ' + usd(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
+    st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: launch odds are ' + Math.round(v.time_factor * 100) + '% within a year and ' + Math.round(v.q3 * 100) + '% within 3, so the odds-weighted drop is ' + usd(drop * v.q3) + ' (×' + (drop * v.q3 / t.all).toFixed(2) + ' the costs); if it launches, at ' + usd(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
       ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
       '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%; at 5% it pays ×' + (drop / t.all / 2).toFixed(2) + ', at 20% ×' + (drop / t.all * 2).toFixed(2) + '), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
     return { chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * M.hour_usd, all_in: t.all,
