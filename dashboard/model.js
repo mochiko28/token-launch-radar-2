@@ -154,7 +154,7 @@
     var lofo = pts.map(function (q) { var f = family(q.p); return { y: q.y, s: dot(logit(pts.filter(function (o) { return family(o.p) !== f; }), w, 4), q.x) }; });
     brier.fam = bri(lofo, function (q) { return sig(q.s); });
     brier.fam_base = bri(pts, function (q) { var o = pts.filter(function (z) { return family(z.p) !== family(q.p); }); return o.reduce(function (t, z) { return t + z.y; }, 0) / o.length; });
-    return { auc_fam: auc(lofo), boot: boot, brier: brier, w: w, cohorts: cohorts, gap: Math.max.apply(null, cohorts.map(function (c) { return Math.abs(c.actual - c.fitted); })), n: pts.length, with_token: pts.filter(function (q) { return q.y; }).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
+    return { mid: mid, auc_fam: auc(lofo), boot: boot, brier: brier, w: w, cohorts: cohorts, gap: Math.max.apply(null, cohorts.map(function (c) { return Math.abs(c.actual - c.fitted); })), n: pts.length, with_token: pts.filter(function (q) { return q.y; }).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
       F: F };
   }
   function sig(z) { return 1 / (1 + Math.exp(-z)); }
@@ -251,8 +251,9 @@
     var sizeMult = Math.pow(tvlNext / M.ref_tvl, fit.slope);
     var fitted = tvlNext * fam.multiple * sizeMult;
     var age = ageDays(asOf, p.listed_at), ageUsed = age == null ? ageFallback : age;
-    var o = fit.odds, f0 = o.F(p, ageUsed), f1 = o.F(p, ageUsed + M.odds_days), timeF = (f1 - f0) / (1 - f0);
-    var q3 = (o.F(p, ageUsed + M.ev_days) - f0) / (1 - f0);
+    // Token-record score: the share of peers with this TVL, age, 7-day change and family that record a token
+    // today. It is the fitted, held-out-tested quantity itself; no conversion into a future launch rate.
+    var o = fit.odds, f0 = o.F(p, ageUsed), f1 = f0, timeF = f0, q3 = f0;
     var implied = Math.max(1, Math.round(fitted * timeF));
 
     // Airdrop yield if it launches: drop_share of the value if launched, split over every dollar-day of
@@ -313,7 +314,7 @@
     var verdict = drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip';
     // Every plan opens with its decision: the numbers, and the drop share at which it pays target_cover.
     var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
-    st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: launch odds are ' + Math.round(v.time_factor * 100) + '% within a year and ' + Math.round(v.q3 * 100) + '% within 3, so the odds-weighted drop is ' + usd(drop * v.q3) + ' (×' + (drop * v.q3 / t.all).toFixed(2) + ' the costs); if it launches, at ' + usd(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
+    st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: ' + Math.round(v.time_factor * 100) + '% of peers like it record a token, so the score-weighted drop is ' + usd(drop * v.q3) + ' (×' + (drop * v.q3 / t.all).toFixed(2) + ' the costs); if it launches, at ' + usd(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
       ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
       '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%; at 5% it pays ×' + (drop / t.all / 2).toFixed(2) + ', at 20% ×' + (drop / t.all * 2).toFixed(2) + '), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
     // A plan that does not cover its costs even once gets a $0 research plan instead of spending steps:
@@ -353,8 +354,8 @@
     rows.forEach(function (r, i) { r.rank = i + 1; });
     // Rank crossing: each row's rank under three declared alternatives, and whether it stays top 20 in all.
     var F0 = function (r, a) { return fit.odds.F(Object.assign({}, r.p, { change_7d: 0 }), a); };
-    var ALT = { 'without momentum': function (r) { var a = r.v.age_used, f0 = F0(r, a); return r.v.fitted * Math.pow(r.p.tvl_usd / r.v.tvl_next, 1 + fit.slope) * (F0(r, a + M.odds_days) - f0) / (1 - f0); },
-      'at 2-year odds': function (r) { return r.v.fitted * (fit.odds.F(r.p, r.v.age_used + 730) - r.v.f0) / (1 - r.v.f0); },
+    var ALT = { 'without momentum': function (r) { var a = r.v.age_used, f0 = F0(r, a); return r.v.fitted * Math.pow(r.p.tvl_usd / r.v.tvl_next, 1 + fit.slope) * f0; },
+      'score without age': function (r) { return r.v.fitted * fit.odds.F(r.p, fit.odds.mid); },
       'if launched': function (r) { return r.v.fitted; } };
     Object.keys(ALT).forEach(function (k) { rows.slice().sort(function (a, b) { return ALT[k](b) - ALT[k](a) || bySlug(a.p, b.p); }).forEach(function (r, i) { (r.alt = r.alt || {})[k] = i + 1; }); });
     // Bootstrap: refit the value curve on resampled trading tokens and the launch odds on resampled peers,
@@ -364,7 +365,7 @@
     for (var d = 0; d < 40; d++) {
       var bs = fit.points.map(function () { return fit.points[Math.floor(rnd() * fit.points.length)]; }), bf = fitPoints(bs, fit.k), Fb = fit.odds.boot(rnd);
       rows.map(function (r) {
-        var a = r.v.age_used, f0 = Fb(r.p, a), qb = (Fb(r.p, a + M.odds_days) - f0) / (1 - f0);
+        var qb = Fb(r.p, r.v.age_used);
         return { r: r, s: r.v.tvl_next * Math.exp(bf.fams[r.v.family].ln + bf.b * Math.log(r.v.tvl_next / M.ref_tvl)) * qb };
       })
         .sort(function (a, b) { return b.s - a.s || bySlug(a.r.p, b.r.p); }).forEach(function (o, i) { o.r.draws.push(i + 1); if (i < 20) o.r.boot += 1 / 40; });

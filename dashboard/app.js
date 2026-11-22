@@ -1,7 +1,7 @@
 /* Launch Radar. Guide to this source (dossier order: app.js, index.html, model.js, style.css):
  *   model.js calibrate(), termTests()  value curve fitted on the trading tokens; each term tested held-out twice
- *   model.js launchOdds()  12-month launch odds: a hazard fitted on peers by TVL and age, AUC and cohort checks
- *   model.js value()       value if launched x launch odds, every factor kept for the detail view
+ *   model.js launchOdds()  token-record score: share of similar peers that record a token; AUC, Brier, cohorts
+ *   model.js value()       value if launched x token-record score, every factor kept for the detail view
  *   model.js productOf()   the watchlist rule that sets wrapped, bridged, staked and exchange products aside
  *   model.js farmPlan()    decision step, seven costed and timed steps, deposit sized or set by the reader
  *   model.js build(), boardRows(), digest()  what main.ts writes to board.json; the page recomputes it
@@ -10,8 +10,8 @@
  * main.ts writes it to data.js and the cover's check compares it on load (board screenshot, "screen =").
  * (2) value terms: termTests() scores each term leave-one-out, walk-forward and family-out; the Model tab
  * shows the table. (3) plans: farmPlan() gives every step a dollar cost and a time; a kill test runs
- * before any spend (detail screenshot, step 2). Limit: launch odds are validated on today's token status
- * only; the snapshot holds no launch dates, so no 12-month backtest is possible (stated on the Model tab). */
+ * before any spend (detail screenshot, step 2). Limit: the score is tested on today's token records, the
+ * quantity it ranks by; the snapshot holds no launch dates, so it makes no timing claim (Model tab). */
 (function () {
   'use strict';
   const R = window.RadarModel, S = window.SNAPSHOT, app = document.getElementById('app');
@@ -116,15 +116,15 @@
   const O = fit.odds, pc = (x) => (x * 100).toFixed(0) + '%';
   function formula() {
     const T = fit.tests, x = (v) => '×' + v.toFixed(2);
-    const used = { flat: 'baseline', spot: 'replaced', size: 'fitted', family: fit.k === Infinity ? 'dropped' : 'k=' + fit.k, growth: 'not used', age: 'via odds' };
+    const used = { flat: 'baseline', spot: 'replaced', size: 'fitted', family: fit.k === Infinity ? 'dropped' : 'k=' + fit.k, growth: 'not used', age: 'via score' };
     return `<div class="card model">
       <h2>Value model <span>fitted on this snapshot's ${fit.n} trading tokens</span></h2>
-      <p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × q<sub>12m</sub></p>
+      <p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × s</p>
       <table class="mini tests"><thead><tr><th>Term · held-out median miss</th><th class="num">Leave-one-out</th><th class="num">Walk-fwd</th><th class="num">Family out</th><th class="num">Use</th></tr></thead><tbody>
       ${T.terms.map((t) => `<tr class="${t.ok ? 'pick' : ''}"><td>${t.label}</td><td class="num">${x(t.loo)}</td><td class="num">${x(t.wf)}</td><td class="num">${x(t.lofo)}</td><td class="num">${used[t.key]}</td></tr>`).join('')}</tbody></table>
-      <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. Family out: each family priced by a fit that never saw it. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%). q<sub>12m</sub> = odds of a token within a year, a hazard fitted on ${O.n} peers (${O.with_token} with a token) by TVL, days listed, 7-day change and family: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out (each family scored by a fit that never saw it).</p>
-      <p class="note"><b>Token-record proxy:</b> the fitted target is whether a peer <i>records</i> a token in DefiLlama today (gecko id or symbol), not an observed launch date; q<sub>12m</sub> converts that age curve into a 12-month hazard.</p>
-      <p class="note"><b>Limit:</b> these tests score who holds a token today. The snapshot has no launch dates or earlier copies, so no one can backtest the 12-month odds against later launches from it; q<sub>12m</sub> reads the age curve as a hazard, an inference the cohort check bounds (worst gap ${Math.round(O.gap * 100)} pts).</p>
+      <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. Family out: each family priced by a fit that never saw it. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%). s = token-record score: the share of ${O.n} peers (logistic fit ; ${O.with_token} record a token) with this TVL, days tracked, 7-day change and family that record a token: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out (each family scored by a fit that never saw it).</p>
+      <p class="note"><b>Token-record score, not a launch forecast:</b> the target is whether a peer <i>records</i> a token in DefiLlama today. The radar ranks by value if launched × s, the quantity the held-out tests actually score; it makes no claim about when a token launches.</p>
+      <p class="note"><b>Limit:</b> the snapshot has no launch dates or earlier copies, so no one can test timing from it; s is checked against today's records (worst age-cohort gap ${Math.round(O.gap * 100)} pts).</p>
       <p class="note">Leave-one-out miss by TVL band: ${fit.bands.map((b) => `<b>${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} ×${b.miss.toFixed(1)}</b> (${b.n} tokens; ${rows.filter((r) => r.p.tvl_usd >= b.lo && r.p.tvl_usd < b.hi).length} ranked)`).join(' · ')}.</p></div>`;
   }
 
@@ -139,7 +139,7 @@
     [rows.every((r) => r.p.gecko_id == null && r.p.symbol == null && r.p.mcap_usd == null), `${rows.length}/${rows.length} ranked rows record no token`],
     [bRows.every((b) => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every((t) => / Cost: .+ Time: /.test(t))), `${bRows.length}/${bRows.length} plans, every step costed and timed`],
     [B.digest === dig && B.rows === rows.length, `Screen = board.json at the Auto deposit (rank, name, value, every plan step): digest ${dig}, ${B.rows || 0} rows`],
-    [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.auc_fam > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base && O.brier.fam < O.brier.fam_base, `Launch odds (token-record proxy) beat chance and the base rate in 3 held-out tests: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out; Brier ${O.brier.loo.toFixed(3)}/${O.brier.wf.toFixed(3)}/${O.brier.fam.toFixed(3)} vs base ${O.brier.loo_base.toFixed(3)}/${O.brier.wf_base.toFixed(3)}/${O.brier.fam_base.toFixed(3)}`],
+    [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.auc_fam > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base && O.brier.fam < O.brier.fam_base, `Token-record score beats chance and the base rate in 3 held-out tests: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out; Brier ${O.brier.loo.toFixed(3)}/${O.brier.wf.toFixed(3)}/${O.brier.fam.toFixed(3)} vs base ${O.brier.loo_base.toFixed(3)}/${O.brier.wf_base.toFixed(3)}/${O.brier.fam_base.toFixed(3)}`],
     [rows.slice(0, 10).every((r) => r.boot >= 0.8), `Bootstrap, 40 refits of curve and odds (fails if any top-10 row leaves the top 20 in over 20% of refits): ranks 1–${rows.findIndex((r) => r.boot < 1)} stay top 20 every time; ${rows.filter((r) => r.boot > 0 && r.boot < 1).length} rows sometimes`],
     ((w) => [O.gap < 0.2, `Odds curve vs ${O.cohorts.length} listing-age cohorts: within ${Math.round(O.gap * 100)} pts (worst from day ${w.from}: ${pc(w.actual)} hold a token, ${pc(w.fitted)} fitted)`])(O.cohorts.reduce((a, c) => Math.abs(c.actual - c.fitted) > Math.abs(a.actual - a.fitted) ? c : a)),
     [spotT.ok && sizeT.ok, `Size curve beats a flat multiple, and carrying TVL a week at its 7-day change beats spot TVL, in all three held-out tests: ×${flatT.loo.toFixed(2)}→×${spotT.loo.toFixed(2)}→×${sizeT.loo.toFixed(2)} leave-one-out`]
@@ -147,7 +147,7 @@
   // The cover shows each check as a short line; the Model tab shows them in full.
   const SHORT = [`${nAll}/${S.protocols.length} protocols accounted for`, `watchlist ${S.watchlist.filter((s) => bySlug[s]).length}/${S.watchlist.length}`, `ranks 1–${rows.length}, value never rising`,
     `${rows.length}/${rows.length} record no token`, `${bRows.length}/${bRows.length} plans costed and timed`, `screen = board.json, digest ${dig}`,
-    `odds (token-record proxy) beat base rate in 3 held-out tests`, `ranks 1–${rows.findIndex((r) => r.boot < 1)} top 20 in all 40 refits`,
+    `token-record score beats base rate in 3 held-out tests`, `ranks 1–${rows.findIndex((r) => r.boot < 1)} top 20 in all 40 refits`,
     `odds within ${Math.round(O.gap * 100)} pts of every age cohort`, `value miss ×${flatT.loo.toFixed(1)} flat → ×${sizeT.loo.toFixed(1)} fitted`];
 
   function board(st) {
@@ -202,22 +202,22 @@
       <div><b>${rows.length}</b><span>pre-token ranked, ${rows.filter((r) => r.below).length} under $50M</span></div>
       <div><b>${radar.products.length} · ${fit.n}</b><span>set aside · trading (fit)</span></div>
       <div><b>×${sizeT.loo.toFixed(1)} · ×${sizeT.wf.toFixed(1)}</b><span>held-out miss, 2 tests</span></div>
-      <div><b>${O.auc_loo.toFixed(2)} · ${O.auc_wf.toFixed(2)}</b><span>odds AUC: LOO · walk-fwd</span></div>
+      <div><b>${O.auc_loo.toFixed(2)} · ${O.auc_wf.toFixed(2)}</b><span>score AUC: LOO · walk-fwd</span></div>
       <div><b>${bRows.length}/${rows.length}</b><span>plans costed and timed</span></div>
       <div><b>${farmN}</b><span>pay ×${M.target_cover} their costs</span></div>
       <div><b>${usd(mid((r) => r.plan.stake))} · ${R.mins(mid((r) => r.plan.minutes))}</b><span>median deposit · hands-on</span></div>
     </section>
     <section class="hero slim">
       <div class="lead">
-        <h1>${rows.length} pre-token protocols, ranked by token value × launch odds</h1>
-        ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>${ctl}` : `<p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × q<sub>12m</sub></p>
+        <h1>${rows.length} pre-token protocols, ranked by token value × token-record score</h1>
+        ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>${ctl}` : `<p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × s</p>
         <div class="card checks"><h2>Self-checks <span>run in this page on load · <a href="${link({ view: 'model' })}">full checks and held-out tests →</a></span></h2><ul class="grid2">${CHECKS.map(([ok], i) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${SHORT[i]}</li>`).join('')}</ul></div>`}
       </div>
       <div class="card chartcard"><h2>Radar <span>days without a token × airdrop yield</span></h2>${chart(shown, 214)}</div>
     </section>
     ${active ? '' : ctl}
     <div class="tablewrap"><table class="board">
-      <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'Tracked', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('odds', 'Odds 12m', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · if it launches', 'plan')}</tr></thead>
+      <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'Tracked', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('odds', 'Score', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · if it launches', 'plan')}</tr></thead>
       <tbody>${body || '<tr><td colspan="10" class="empty">No protocol matches these filters.</td></tr>'}</tbody></table></div>`;
   }
 
@@ -226,7 +226,7 @@
     const v = r.v, b = fit.bands.find((x) => r.p.tvl_usd >= x.lo && r.p.tvl_usd < x.hi), alt = Object.entries(r.alt).sort((a, c) => Math.abs(c[1] - r.rank) - Math.abs(a[1] - r.rank))[0];
     return [
       `<b>Value:</b> trading tokens of this size (${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} TVL) miss their real market cap by a median ×${b.miss.toFixed(1)} held out; a market cap at launch of ${usd(v.fitted * fit.band_low)} or ${usd(v.cap_high)} would not be unusual.`,
-      `<b>Odds:</b> ${pc(v.time_factor)} reads today's token status as a launch rate; no launch dates exist to test it, and the age curve misses one cohort by ${Math.round(fit.odds.gap * 100)} pts.`,
+      `<b>Score:</b> ${pc(v.time_factor)} of similar peers record a token today; that is no forecast of when, or whether, this one launches, and the fit misses one age cohort by ${Math.round(fit.odds.gap * 100)} pts.`,
       `<b>Rank:</b> #${r.rank} now, ${r.rlo}–${r.rhi} across 40 refits, #${alt[1]} ${alt[0]}${v.growth_imputed ? '; its 7-day change is unreported, so 0% was used' : ''}.`,
       `<b>Plan:</b> pays ×${M.target_cover} only if ≥${(r.plan.need_share * 100).toFixed(1)}% of the token reaches depositors (assumed ${M.drop_share * 100}%), and only if a token launches at all.`
     ];
@@ -257,7 +257,7 @@
             ${line('Peer multiple at $100M', (fit.k === Infinity ? 'one curve: per-family multiples did not beat it in all three held-out tests' : 'family pull k=' + fit.k) + ' (' + esc(fam.label) + ' alone ' + mult(fam.raw) + ')', mult(v.fam_multiple))}
             ${line('Size curve', '(TVL ÷ $100M)<sup>' + fit.slope.toFixed(2) + '</sup>, slope fitted on the ' + fit.n + ' tokens', mult(v.size_mult))}
             ${line('Value if launched', 'what a trading peer of this size is worth', usd(v.fitted), 'sum')}
-            ${line('Launch odds, next 12 months (token-record proxy)', (v.age == null ? 'no listing date: median ' + v.age_used + ' days' : v.age + ' days') + ' with no token; similar peers holding one: ' + pc(v.f0) + ' now, ' + pc(v.f1) + ' a year older', pc(v.time_factor))}
+            ${line('Token-record score s', 'share of peers with this TVL, ' + (v.age == null ? 'median ' + v.age_used : v.age) + ' days tracked, 7-day change and family that record a token', pc(v.time_factor))}
             ${line('Implied value', 'rank ' + r.rank + ' of ' + rows.length + ' on this number', usd(v.implied), 'total')}
           </table>
           <div class="scale">
@@ -316,7 +316,7 @@
     // A deposit chosen by the reader re-plans every row at that amount (farmPlan's dep).
     if (st.dep !== planDep) { planDep = st.dep; rows.forEach((r) => { r.plan = R.farmPlan(r.p, r.v, +st.dep); }); }
     app.innerHTML = st.p ? detail(st) : st.view === 'model' ? model() : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
-    document.getElementById('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied value = the radar's own value if launched × its 12-month launch odds; never make.fun's claim. A protocol may hold a token DefiLlama does not record.`;
+    document.getElementById('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied value = the radar's own value if launched × its token-record score; never make.fun's claim. A protocol may hold a token DefiLlama does not record.`;
     if (st.p) window.scrollTo(0, 0);
     if (typing) { clearTimeout(typing); typing = null; }
   }
