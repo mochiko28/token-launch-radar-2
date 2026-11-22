@@ -33,7 +33,7 @@
       if (i > 0 && own(DEF, k)) try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch (e) { /* keep the default */ }
     });
     // Unknown values fall back to the defaults, so a hand-typed link never breaks the page.
-    const ok = { view: 'board aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000', bud: '10000 25000 50000 100000' };
+    const ok = { view: 'board model aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000', bud: '10000 25000 50000 100000' };
     Object.keys(ok).forEach((k) => { if (!ok[k].split(' ').includes(st[k])) st[k] = DEF[k]; });
     if (!own(KEYS, st.sort)) st.sort = 'rank';
     return st;
@@ -63,8 +63,8 @@
   }
 
   const rOf = (v) => 1.8 + 6.5 * Math.sqrt(v / maxImplied);
-  function chart(shown) {
-    const W = 470, H = 400, L = 40, B = 26, T = 10, RR = 10;
+  function chart(shown, H) {
+    const W = 470, L = 40, B = 26, T = 10, RR = 10;
     const on = new Set(shown.map((r) => r.p.slug));
     const xmax = Math.sqrt(2400), ylo = Math.log10(0.001), yhi = Math.log10(2);
     const X = (d) => L + (W - L - RR) * Math.sqrt(Math.min(d, 2400)) / xmax;
@@ -101,8 +101,8 @@
   }
 
   function head(st) {
-    const n = (v) => (v === 'board' ? rows.length : v === 'aside' ? radar.products.length : fit.n);
-    document.getElementById('tabs').innerHTML = [['board', 'Pre-token board'], ['aside', 'Set aside'], ['trading', 'Trading tokens']]
+    const n = (v) => (v === 'board' ? rows.length : v === 'model' ? CHECKS.length : v === 'aside' ? radar.products.length : fit.n);
+    document.getElementById('tabs').innerHTML = [['board', 'Pre-token board'], ['model', 'Model & checks'], ['aside', 'Set aside'], ['trading', 'Trading tokens']]
       .map(([v, l]) => `<a href="${link({ view: v, p: '' })}" class="${st.view === v && !st.p ? 'on' : ''}">${l} <b>${n(v)}</b></a>`).join('');
     document.getElementById('meta').innerHTML = `<span>Snapshot <b>${esc(S.as_of)}</b></span><span>model <b>${esc(M.version)}</b></span>`;
   }
@@ -137,6 +137,11 @@
     ((w) => [O.gap < 0.2, `Odds curve vs ${O.cohorts.length} listing-age cohorts: within ${Math.round(O.gap * 100)} pts (worst from day ${w.from}: ${pc(w.actual)} hold a token, ${pc(w.fitted)} fitted)`])(O.cohorts.reduce((a, c) => Math.abs(c.actual - c.fitted) > Math.abs(a.actual - a.fitted) ? c : a)),
     [spotT.ok && sizeT.ok, `Size curve beats a flat multiple, and carrying TVL a week at its 7-day change beats spot TVL, in all three held-out tests: ×${flatT.loo.toFixed(2)}→×${spotT.loo.toFixed(2)}→×${sizeT.loo.toFixed(2)} leave-one-out`]
   ];
+  // The cover shows each check as a short line; the Model tab shows them in full.
+  const SHORT = [`${nAll}/${S.protocols.length} protocols accounted for`, `watchlist ${S.watchlist.filter((s) => bySlug[s]).length}/${S.watchlist.length}`, `ranks 1–${rows.length}, value never rising`,
+    `${rows.length}/${rows.length} record no token`, `${bRows.length}/${bRows.length} plans costed and timed`, `screen = board.json, digest ${dig}`,
+    `odds AUC ${O.auc_loo.toFixed(2)}/${O.auc_wf.toFixed(2)}, Brier beats base rate`, `ranks 1–${rows.findIndex((r) => r.boot < 1)} top 20 in all 40 refits`,
+    `odds within ${Math.round(O.gap * 100)} pts of every age cohort`, `value miss ×${flatT.loo.toFixed(1)} flat → ×${sizeT.loo.toFixed(1)} fitted`];
 
   function board(st) {
     const shown = filtered(st), fams = st.fam ? st.fam.split(',') : [];
@@ -195,13 +200,13 @@
       <div><b>${farmN}</b><span>pay ×${M.target_cover} their costs</span></div>
       <div><b>${usd(mid((r) => r.plan.stake))} · ${R.mins(mid((r) => r.plan.minutes))}</b><span>median deposit · hands-on</span></div>
     </section>
-    <section class="hero${active ? ' slim' : ''}">
+    <section class="hero slim">
       <div class="lead">
         <h1>${rows.length} pre-token protocols, ranked by token value × launch odds</h1>
-        ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>${ctl}` : `<div class="card checks"><h2>Self-checks <span>run in this page on load</span></h2><ul>${CHECKS.map(([ok, t]) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${t}</li>`).join('')}</ul></div>`}
+        ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>${ctl}` : `<p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × q<sub>12m</sub></p>
+        <div class="card checks"><h2>Self-checks <span>run in this page on load · <a href="${link({ view: 'model' })}">full checks and held-out tests →</a></span></h2><ul class="grid2">${CHECKS.map(([ok], i) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${SHORT[i]}</li>`).join('')}</ul></div>`}
       </div>
-      ${active ? '' : formula()}
-      <div class="card chartcard"><h2>Radar <span>days without a token × airdrop yield</span></h2>${chart(shown)}</div>
+      <div class="card chartcard"><h2>Radar <span>days without a token × airdrop yield</span></h2>${chart(shown, 214)}</div>
     </section>
     ${active ? '' : ctl}
     <div class="tablewrap"><table class="board">
@@ -269,6 +274,9 @@
   // A plain table: heads starting with '#' are numeric columns; rows are arrays of cell HTML.
   const tbl = (cls, heads, rows) => `<table class="${cls}"><thead><tr>${heads.map((h) => `<th${h[0] === '#' ? ' class="num"' : ''}>${h.replace('#', '')}</th>`).join('')}</tr></thead><tbody>${rows.map((c) => `<tr>${c.map((v, i) => `<td${heads[i][0] === '#' ? ' class="num"' : ''}>${v}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
   const nm = (n, sub) => `<b>${esc(n)}</b><small>${esc(sub)}</small>`;
+  function model() {
+    return `<section class="hero slim">${formula()}<div class="card checks"><h2>Self-checks <span>run in this page on load</span></h2><ul>${CHECKS.map(([ok, t]) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${t}</li>`).join('')}</ul></div></section>`;
+  }
   function aside() {
     return `<section class="intro"><h1>${radar.products.length} products set aside, not ranked</h1>
       <p>No token of their own, but each is a wrapped, bridged, staked or exchange product, a versioned pool or a likely sibling of a trading token: the watchlist rule (productOf) applied to every protocol. Their value is the underlying token's.</p></section>
@@ -289,7 +297,7 @@
     app.className = st.p ? 'detail' : st.view;
     // A deposit chosen by the reader re-plans every row at that amount (farmPlan's dep).
     if (st.dep !== planDep) { planDep = st.dep; rows.forEach((r) => { r.plan = R.farmPlan(r.p, r.v, +st.dep); }); }
-    app.innerHTML = st.p ? detail(st) : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
+    app.innerHTML = st.p ? detail(st) : st.view === 'model' ? model() : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
     document.getElementById('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied value = the radar's own value if launched × its 12-month launch odds; never make.fun's claim. A protocol may hold a token DefiLlama does not record.`;
     if (st.p) window.scrollTo(0, 0);
     if (typing) { clearTimeout(typing); typing = null; }
