@@ -271,11 +271,12 @@
 
  /* A farm plan from the row's own figures: steps with a dollar cost and a time each, on the cheapest of
  * its three main chains. */
- // hour: the reader's value of an hour of hands-on time (default M.hour_usd).
- function farmPlan(p, v, dep, hour) {
+ // hour: value of an hour (default M.hour_usd); on: the reader's chain filter, used when it runs there.
+ function farmPlan(p, v, dep, hour, on) {
   var hr = hour == null ? M.hour_usd : hour;
   var main = p.chains.slice(0, 3), chain = main[0] || 'its main chain';
   main.forEach(function (c) { if (gas(c) < gas(chain)) chain = c; });
+  if (on && p.chains.indexOf(on) >= 0) chain = on;
   var kind = p.category === 'Prediction Market' ? 'predict' : v.family;
   var asset = /^(Bitcoin|Lightning)/.test(chain) ? 'BTC' : 'USDC';
   var tx0 = gas(chain), weeks = Math.round(M.farm_days / 7);
@@ -284,7 +285,7 @@
    var fill = function (t) { return t.replace(/USDC/g, asset).replace(/\{S\}/g, usd(stake)).replace(/\{s\}/g, usd(side)).replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain); };
    return [
     { act: 'Kill test, go on only if all hold: ' + fill(act[3]) + '; and a deposit-and-withdraw quote totals under ' + usd(0.1 * earn(stake)) + ' (10% of the modeled drop). If any fails, stop with $0 spent', usd: 0, min: 15, when: 'Day 0' },
-    { act: 'Withdraw ' + usd(stake + side) + ' of ' + asset + ' from an exchange straight to a fresh wallet on ' + chain + (chain !== main[0] ? ' (cheaper than ' + main[0] + ', where it also runs)' : '') + '; keep only farm funds in it',
+    { act: 'Withdraw ' + usd(stake + side) + ' of ' + asset + ' from an exchange straight to a fresh wallet on ' + chain + (gas(chain) < gas(main[0]) ? ' (cheaper than ' + main[0] + ', where it also runs)' : '') + '; keep only farm funds in it',
      usd: 1 + tx, min: 15, when: 'Day 0' },
     { act: fill(act[0]), usd: 2 * tx, min: v.family === 'rwa' ? 30 : 10, when: v.family === 'rwa' ? 'Days 0-2' : 'Day 0' },
     { act: fill(act[1]), usd: WEEKLY[kind] ? weeks * (side * WEEKLY[kind][0] + WEEKLY[kind][1] * tx) : 2 * tx, min: kind in WEEKLY ? weeks * 10 : 10, when: kind in WEEKLY ? 'Weeks 1-' + weeks : 'Day 1' },

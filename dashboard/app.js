@@ -1,8 +1,6 @@
 /* Launch Radar. Audit route: (1) screen = board.json: model.js digest() hashes rank, name, value and every
-* plan step; main.ts writes it, the cover's check compares it on load. (2) model.js termTests() scores each
-* value term leave-one-out, walk-forward and family-out; launchOdds() fits the token-record score.
-* (3) farmPlan() costs and times every step, with a kill test before any spend. Limit: no launch dates in
-* the snapshot, so no timing claim. */
+* plan step; the cover compares it on load. (2) termTests() scores each value term held out three ways.
+* (3) farmPlan() costs and times every step, kill test first. No launch dates, so no timing claim. */
 (function () {
  'use strict';
  const R = window.RadarModel, S = window.SNAPSHOT, app = document.getElementById('app');
@@ -179,7 +177,7 @@
     <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small></td>
     <td class="num">${pc(r.v.time_factor)}</td>
     <td class="num apr">${(r.v.apr * 100).toFixed(1)}%</td>
-    <td class="plan">${verdictTag(r.plan.verdict)} <span class="pmult">pays ${mult(r.plan.drop / r.plan.all_in)}${r.plan.verdict === 'farm' ? '' : r.plan.pay_cap ? ` · ×${M.target_cover} at ${usd(r.plan.pay_cap)}` : ` · no deposit pays ×${M.target_cover}`}</span><small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}</small></td></tr>`;
+    <td class="plan">${verdictTag(r.plan.verdict)} <span class="pmult">pays ${mult(r.plan.drop / r.plan.all_in)}${r.plan.verdict === 'farm' ? '' : r.plan.pay_cap ? ` · ×${M.target_cover} at ${usd(r.plan.pay_cap)}` : ` · no deposit pays ×${M.target_cover}`}</span><small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} ${r.plan.verdict === 'skip' ? 'to deposit · $0 research' : `cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}`}</small></td></tr>`;
   }).join('');
   const ctl = `<div class="ctl">    <section class="filters">
    <label class="search"><input id="q" type="search" value="${esc(st.q)}" placeholder="Search name, category or chain" autocomplete="off" aria-label="Search"></label>
@@ -299,13 +297,14 @@
    <div class="tablewrap">${tbl('board', ['Protocol', '#TVL', '#Market cap', '#÷ TVL', '#Fit without it', '#÷ market'], radar.live.map((l) => [nm(l.p.name, (l.p.symbol || '') + ' · ' + (l.p.category || '')), usd(l.tvl) + (l.members > 1 ? ` <small>${l.members} parts</small>` : ''), usd(l.actual), mult(l.actual / l.tvl), usd(l.loo), `<span class="${l.loo / l.actual > 2 || l.loo / l.actual < 0.5 ? 'down' : 'up'}">${mult(l.loo / l.actual)}</span>`]))}</div>`;
  }
 
- let planDep = '|25';
+ let planDep = '|25|';
  const top20 = rows.slice(0, 20), farmAt = (h, dep) => top20.filter((r) => R.farmPlan(r.p, r.v, +dep, h).verdict === 'farm').length;
  function render() {
   const st = readHash();
   head(st);
   app.className = st.p ? 'detail' : st.view;
-  if (st.dep + '|' + st.hr !== planDep) { planDep = st.dep + '|' + st.hr; rows.forEach((r) => { r.plan = R.farmPlan(r.p, r.v, +st.dep, +st.hr); }); }
+  const k = [st.dep, st.hr, st.chain].join('|');
+  if (k !== planDep) { planDep = k; rows.forEach((r) => { r.plan = R.farmPlan(r.p, r.v, +st.dep, +st.hr, st.chain); }); }
   app.innerHTML = st.p ? (bySlug[st.p] && bySlug[st.vs] ? compare(bySlug[st.p], bySlug[st.vs]) : detail(st)) : st.view === 'model' ? model() : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
   document.getElementById('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied value = the radar's own value if launched × its token-record score; never make.fun's claim. A protocol may hold a token DefiLlama does not record.`;
   if (st.p) window.scrollTo(0, 0);
