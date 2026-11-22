@@ -85,7 +85,7 @@
       <h2>Value model <span>fitted on this snapshot</span></h2>
       <p class="eq">value = T × m<sub>fam</sub> × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × t<sub>age</sub></p>
       <dl>
-        <dt>Fit on</dt><dd>${fit.n} protocols whose token trades (mcap ÷ TVL)</dd>
+        <dt>Fit on</dt><dd>${fit.n} trading tokens in this snapshot (mcap ÷ TVL)</dd>
         <dt>Size</dt><dd>value grows as TVL<sup>${fit.elasticity.toFixed(2)}</sup>: bigger pools earn lower multiples</dd>
         <dt>T</dt><dd>TVL carried one week at its own 7-day change (${M.growth_floor}% to +${M.growth_cap}%)</dd>
         <dt>m<sub>fam</sub></dt><dd>family's fitted mcap ÷ TVL at $100M, ×${Math.min(...Object.values(fit.families).map((f) => f.multiple)).toFixed(2)} to ×${Math.max(...Object.values(fit.families).map((f) => f.multiple)).toFixed(2)}</dd>
@@ -128,7 +128,7 @@
     return `<section class="hero">
       <div class="lead">
         <h1>${rows.length} pre-token protocols, ranked by what their token would be worth today</h1>
-        <p>Each value is computed in this page from the snapshot's TVL, 7-day change and days without a token, on a curve fitted to the ${fit.n} protocols whose token trades. ${radar.products.length} wrapped, bridged and staked products are set aside.</p>
+        <p>Each value is computed in this page from the snapshot's TVL, 7-day change and days without a token, on a curve fitted to the ${fit.n} tokens in it that already trade. ${radar.products.length} wrapped, bridged and staked products are set aside.</p>
         <div class="kpis">
           <div><b>${watchCov}/${S.watchlist.length}</b><span>watchlist covered</span></div>
           <div><b>${rows.length - watchCov}</b><span>early rows beyond it</span></div>
@@ -157,7 +157,7 @@
     if (!r) return `<p class="empty">No ranked protocol is called ${esc(st.p)}. <a href="${link({ p: '' })}">Back to the board</a></p>`;
     const p = r.p, v = r.v, pl = r.plan, fam = fit.families[v.family];
     const peers = radar.live.filter((l) => l.family === v.family)
-      .sort((a, b) => Math.abs(Math.log(a.p.tvl_usd / p.tvl_usd)) - Math.abs(Math.log(b.p.tvl_usd / p.tvl_usd))).slice(0, 6);
+      .sort((a, b) => Math.abs(Math.log(a.tvl / p.tvl_usd)) - Math.abs(Math.log(b.tvl / p.tvl_usd))).slice(0, 6);
     const lo = Math.log10(Math.min(v.low, ...peers.map((x) => x.actual)) / 1.5), hi = Math.log10(Math.max(v.high, ...peers.map((x) => x.actual)) * 1.5);
     const pos = (x) => (100 * (Math.log10(x) - lo) / (hi - lo)).toFixed(2) + '%';
     const line = (label, src, val, cls) => `<tr class="${cls || ''}"><td>${label}<small>${src}</small></td><td class="num">${val}</td></tr>`;
@@ -191,7 +191,7 @@
         </section>
         <section class="card"><h2>Nearest trading peers <span>${esc(fam.label)}, closest TVL</span></h2>
           <table class="mini"><thead><tr><th>Protocol</th><th class="num">TVL</th><th class="num">Market cap</th><th class="num">÷ TVL</th><th class="num">Model fit</th></tr></thead><tbody>
-          ${peers.map((x) => `<tr><td>${esc(x.p.name)} <small>${esc(x.p.symbol || '')}</small></td><td class="num">${usd(x.p.tvl_usd)}</td><td class="num">${usd(x.actual)}</td><td class="num">${mult(x.actual / x.p.tvl_usd)}</td><td class="num">${usd(x.fit)}</td></tr>`).join('') || '<tr><td colspan="5">No trading peer in this family: the all-family multiple is used.</td></tr>'}
+          ${peers.map((x) => `<tr><td>${esc(x.p.name)} <small>${esc(x.p.symbol || '')}</small></td><td class="num">${usd(x.tvl)}</td><td class="num">${usd(x.actual)}</td><td class="num">${mult(x.actual / x.tvl)}</td><td class="num">${usd(x.fit)}</td></tr>`).join('') || '<tr><td colspan="5">No trading peer in this family: the all-family multiple is used.</td></tr>'}
           </tbody></table></section>
       </div>
       <section class="card planc"><h2>Farm plan <span>${pl.days} days on ${esc(pl.chain)}</span></h2>
@@ -220,9 +220,9 @@
 
   function trading() {
     const famRows = R.FAMILIES.map((f) => { const x = fit.families[f[0]]; return `<tr><td>${famChip(f[0])}</td><td class="num">${x.peers}</td><td class="num">${x.peers ? mult(x.raw) : '—'}</td><td class="num"><b>${mult(x.multiple)}</b></td></tr>`; }).join('');
-    const body = radar.live.map((l) => { const e = l.fit / l.actual; return `<tr><td class="proto"><span class="nm">${esc(l.p.name)}</span><small>${esc(l.p.symbol || '')} · ${esc(l.p.category || '')}</small></td><td>${famChip(l.family)}</td><td class="num">${usd(l.p.tvl_usd)}</td><td class="num">${usd(l.actual)}</td><td class="num">${mult(l.actual / l.p.tvl_usd)}</td><td class="num">${usd(l.fit)}</td><td class="num ${e > 2 || e < 0.5 ? 'down' : 'up'}">${mult(e)}</td></tr>`; }).join('');
-    return `<section class="intro"><h1>${fit.n} protocols whose token trades: the model's calibration set</h1>
-      <p>Kept apart from the board: their market already prices them. model.js calibrate() fits ln(mcap ÷ TVL) on ln(TVL) within each family (slope ${fit.slope.toFixed(3)}, so value grows as TVL<sup>${fit.elasticity.toFixed(2)}</sup>), then shrinks each family's multiple toward the all-family ${mult(fit.base)} with ${M.shrink_k} pseudo-peers. ${radar.listed_only} more protocols record a token with no market cap and are left out of both. Exchanges are excluded from the fit.</p></section>
+    const body = radar.live.map((l) => { const e = l.fit / l.actual; return `<tr><td class="proto"><span class="nm">${esc(l.p.name)}</span><small>${esc(l.p.symbol || '')} · ${esc(l.p.category || '')}</small></td><td>${famChip(l.family)}</td><td class="num">${usd(l.tvl)}${l.members > 1 ? ` <small>${l.members} parts</small>` : ''}</td><td class="num">${usd(l.actual)}</td><td class="num">${mult(l.actual / l.tvl)}</td><td class="num">${usd(l.fit)}</td><td class="num ${e > 2 || e < 0.5 ? 'down' : 'up'}">${mult(e)}</td></tr>`; }).join('');
+    return `<section class="intro"><h1>${fit.n} tokens that trade: the model's calibration set</h1>
+      <p>Kept apart from the board: their market already prices them. model.js calibrate() pools the TVL of protocols sharing one token, leaves out exchanges and wrapped, bridged or versioned products, and fits ln(mcap ÷ TVL) on ln(TVL) within each family (slope ${fit.slope.toFixed(3)}, so value grows as TVL<sup>${fit.elasticity.toFixed(2)}</sup>), then shrinks each family's multiple toward the all-family ${mult(fit.base)} with ${M.shrink_k} pseudo-peers. ${radar.listed_only} more protocols record a token with no market cap and sit on neither list.</p></section>
       <div class="split"><div class="card"><h2>Family multiples at $100M TVL</h2><table class="mini"><thead><tr><th>Family</th><th class="num">Peers</th><th class="num">Raw</th><th class="num">Used</th></tr></thead><tbody>${famRows}</tbody></table>
       <p class="note">Median miss on this set: ×${fit.median_error.toFixed(2)}; σ of ln error ${fit.sigma.toFixed(2)}.</p></div>
       <div class="tablewrap"><table class="board"><thead><tr><th>Protocol</th><th>Family</th><th class="num">TVL</th><th class="num">Market cap</th><th class="num">÷ TVL</th><th class="num">Model fit</th><th class="num">Fit ÷ market</th></tr></thead><tbody>${body}</tbody></table></div></div>`;

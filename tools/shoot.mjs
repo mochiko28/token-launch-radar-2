@@ -7,7 +7,8 @@ import { writeFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const [chrome, outDir, shotDir] = process.argv.slice(2);
-const SHOTS = [
+// An optional fourth argument, name=hash pairs split by spaces, captures other views for review.
+const SHOTS = process.argv[5] ? process.argv[5].split(' ').map((s) => [s.split('=')[0], s.slice(s.indexOf('=') + 1)]) : [
   ['1-board', ''],
   ['2-detail', '#p=saturn'],
   ['3-filtered', '#fam=lend,deriv&verdict=farm&sort=apr&dir=desc'],

@@ -77,11 +77,24 @@
   }
   function bySlug(a, b) { return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0; }
 
-  /* Fit the value curve on protocols whose token trades (exchanges left out: their token is not
-   * priced on deposits). Returns the slope, each family's multiple at $100M, and the fit's error. */
+  /* Fit the value curve on protocols whose token trades. One token is one point: protocols sharing a
+   * CoinGecko id (a v2 and v3, a lending arm and a DEX) pool their TVL, since DefiLlama hangs the
+   * whole token's market cap on each. Products and exchanges are left out by the same productOf rule
+   * that sets them aside on the board. Returns the slope, each family's multiple and the fit's error. */
   function calibrate(snap) {
-    var pts = snap.protocols.filter(function (p) { return trades(p) && p.category !== 'CEX' && p.tvl_usd > 0; }).map(function (p) {
-      return { p: p, f: family(p), x: Math.log(p.tvl_usd / M.ref_tvl), y: Math.log(clamp(p.mcap_usd / p.tvl_usd, M.ratio_floor, M.ratio_cap)) };
+    var tok = {}, order = [];
+    snap.protocols.forEach(function (p) {
+      if (!trades(p) || p.tvl_usd <= 0 || productOf(p)) return;
+      var k = p.gecko_id || p.symbol || p.slug;
+      if (!tok[k]) { tok[k] = { p: p, tvl: 0, mcap: 0, members: 0 }; order.push(k); }
+      var t = tok[k];
+      t.tvl += p.tvl_usd; t.members++;
+      t.mcap = Math.max(t.mcap, p.mcap_usd);
+      if (p.tvl_usd > t.p.tvl_usd) t.p = p;
+    });
+    var pts = order.map(function (k) {
+      var t = tok[k];
+      return { p: t.p, tvl: t.tvl, mcap: t.mcap, members: t.members, f: family(t.p), x: Math.log(t.tvl / M.ref_tvl), y: Math.log(clamp(t.mcap / t.tvl, M.ratio_floor, M.ratio_cap)) };
     });
     var g = {};
     pts.forEach(function (q) { (g[q.f] = g[q.f] || []).push(q); });
@@ -108,7 +121,7 @@
     pts.forEach(function (q) {
       var r = q.y - (fams[q.f].ln + b * q.x);
       ss += r * r; abs.push(Math.abs(r));
-      q.fit = Math.round(q.p.tvl_usd * Math.exp(fams[q.f].ln + b * q.x));
+      q.fit = Math.round(q.tvl * Math.exp(fams[q.f].ln + b * q.x));
     });
     abs.sort(function (u, v) { return u - v; });
     var sigma = Math.sqrt(ss / Math.max(1, pts.length - Object.keys(g).length - 1));
@@ -216,7 +229,7 @@
     });
     rows.sort(function (a, b) { return b.v.implied - a.v.implied || bySlug(a.p, b.p); });
     rows.forEach(function (r, i) { r.rank = i + 1; });
-    var live = fit.points.map(function (q) { return { p: q.p, family: q.f, fit: q.fit, actual: q.p.mcap_usd }; })
+    var live = fit.points.map(function (q) { return { p: q.p, tvl: q.tvl, members: q.members, family: q.f, fit: q.fit, actual: q.mcap }; })
       .sort(function (a, b) { return b.actual - a.actual || bySlug(a.p, b.p); });
     var listedOnly = snap.protocols.filter(function (p) { return hasToken(p) && !trades(p); }).length;
     return { model: M, fit: fit, rows: rows, live: live, products: products, listed_only: listedOnly, age_fallback: ageFallback, families: FAMILIES };
