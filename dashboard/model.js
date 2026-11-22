@@ -99,7 +99,7 @@
     });
     return { bands: bands, k: k, slope: full.b, elasticity: 1 + full.b, base: Math.exp(full.all), families: full.fams, n: pts.length, points: pts,
       median_error: Math.exp(quantile(absMiss, 0.5)), band_low: Math.exp(q25), band_high: Math.exp(q75), band_hits: inBand,
-      clipped: pts.filter(function (q) { var r = q.mcap / q.tvl; return r < M.ratio_floor || r > M.ratio_cap; }).length,
+      clipped: pts.filter(function (q) { var r = q.mcap / q.tc; return r < M.ratio_floor || r > M.ratio_cap; }).length,
       tests: tests, odds: launchOdds(snap) };
   }
 
@@ -114,7 +114,7 @@
       return [1, Math.log(p.tvl_usd / M.ref_tvl), Math.log(1 + a / 365), Math.log(1 + clamp(p.change_7d || 0, M.growth_floor, M.growth_cap) / 100)]
         .concat(fams.map(function (f) { return family(p) === f[0] ? 1 : 0; }));
     };
-    var pts = peers.map(function (p) { var a = ageDays(snap.as_of, p.listed_at); return { p: p, a: a, x: X(p, a == null ? mid : a), y: p.gecko_id != null || p.symbol != null ? 1 : 0 }; });
+    var pts = peers.map(function (p) { var a = ageDays(snap.as_of, p.listed_at); return { p: p, a: a, x: X(p, a == null ? mid : a), y: hasToken(p) ? 1 : 0 }; });
     // Newton steps from w0 (zeros, or the full fit's weights for a leave-one-out refit).
     function logit(T, w0, steps) {
       var n = T[0].x.length, w = [], it, i, j, k, t, g, H;
@@ -295,9 +295,9 @@
           usd: 1 + tx, min: 15, when: 'Day 0' },
         { act: fill(act[0]), usd: 2 * tx, min: v.family === 'rwa' ? 30 : 10, when: v.family === 'rwa' ? 'Days 0-2' : 'Day 0' },
         { act: fill(act[1]), usd: WEEKLY[kind] ? weeks * (side * WEEKLY[kind][0] + WEEKLY[kind][1] * tx) : 2 * tx, min: kind in WEEKLY ? weeks * 10 : 10, when: kind in WEEKLY ? 'Weeks 1-' + weeks : 'Day 1' },
-        { act: 'Once a week for ' + weeks + ' weeks, open the points or rewards page, re-check the position and top it up by one transaction', usd: weeks * tx, min: weeks * 5, when: 'Weeks 1-' + weeks },
+        { act: 'Once a week for ' + weeks + ' weeks, open the points or rewards page, re-check the position and re-deposit any claimed rewards in one transaction (no new principal)', usd: weeks * tx, min: weeks * 5, when: 'Weeks 1-' + weeks },
         { act: 'Unwind: ' + act[2] + '; do it early if TVL falls below ' + usd(p.tvl_usd * 0.75) + ' (25% under today\'s ' + usd(p.tvl_usd) + ') or the team reports an incident', usd: 2 * tx, min: 15, when: 'Day ' + M.farm_days },
-        { act: 'At launch claim only through the protocol\'s own app; the model prices it near ' + usd(v.fitted) + ' if launched, so sell the claim if the token opens above ' + usd(v.cap_high) + ' fully diluted (top of its 50% band)', usd: 2 * tx, min: 15, when: 'At launch' }
+        { act: 'At launch claim only through the protocol\'s own app; the model prices it near ' + usd(v.fitted) + ' if launched, so sell the claim if its market cap opens above ' + usd(v.cap_high) + ' (top of its 50% band; the model fits market cap, not FDV)', usd: 2 * tx, min: 15, when: 'At launch' }
       ];
     }
     function total(st) { var c = 0, t = 5; st.forEach(function (s) { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * M.hour_usd }; }
@@ -314,7 +314,7 @@
     // Every plan opens with its decision: the numbers, and the drop share at which it pays target_cover.
     var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
     st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: launch odds are ' + Math.round(v.time_factor * 100) + '% within a year and ' + Math.round(v.q3 * 100) + '% within 3, so the odds-weighted drop is ' + usd(drop * v.q3) + ' (×' + (drop * v.q3 / t.all).toFixed(2) + ' the costs); if it launches, at ' + usd(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
-      ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
+      ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
       '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%; at 5% it pays ×' + (drop / t.all / 2).toFixed(2) + ', at 20% ×' + (drop / t.all * 2).toFixed(2) + '), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
     return { chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * M.hour_usd, all_in: t.all,
       days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, verdict: verdict };
@@ -343,7 +343,8 @@
     rows.sort(function (a, b) { return b.v.implied - a.v.implied || bySlug(a.p, b.p); });
     rows.forEach(function (r, i) { r.rank = i + 1; });
     // Rank crossing: each row's rank under three declared alternatives, and whether it stays top 20 in all.
-    var ALT = { 'without momentum': function (r) { return r.v.fitted * Math.pow(r.p.tvl_usd / r.v.tvl_next, 1 + fit.slope) * r.v.time_factor; },
+    var F0 = function (r, a) { return fit.odds.F(Object.assign({}, r.p, { change_7d: 0 }), a); };
+    var ALT = { 'without momentum': function (r) { var a = r.v.age_used, f0 = F0(r, a); return r.v.fitted * Math.pow(r.p.tvl_usd / r.v.tvl_next, 1 + fit.slope) * (F0(r, a + M.odds_days) - f0) / (1 - f0); },
       'at 2-year odds': function (r) { return r.v.fitted * (fit.odds.F(r.p, r.v.age_used + 730) - r.v.f0) / (1 - r.v.f0); },
       'if launched': function (r) { return r.v.fitted; } };
     Object.keys(ALT).forEach(function (k) { rows.slice().sort(function (a, b) { return ALT[k](b) - ALT[k](a) || bySlug(a.p, b.p); }).forEach(function (r, i) { (r.alt = r.alt || {})[k] = i + 1; }); });

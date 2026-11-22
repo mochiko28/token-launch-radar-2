@@ -3,7 +3,7 @@
  *   model.js launchOdds()  12-month launch odds: a hazard fitted on peers by TVL and age, AUC and cohort checks
  *   model.js value()       value if launched x launch odds, every factor kept for the detail view
  *   model.js productOf()   the watchlist rule that sets wrapped, bridged, staked and exchange products aside
- *   model.js farmPlan()    decision step, six costed and timed steps, deposit sized or set by the reader
+ *   model.js farmPlan()    decision step, seven costed and timed steps, deposit sized or set by the reader
  *   model.js build(), boardRows(), digest()  what main.ts writes to board.json; the page recomputes it
  *   app.js CHECKS, board(), detail(), aside(), trading()  cover checks and views; state in the URL hash
  * Reviewer's audit route: (1) screen = board.json: digest() covers rank, name, value and every plan step;
@@ -138,7 +138,7 @@
     [rows.every((r, i) => r.rank === i + 1 && (!i || r.v.implied <= rows[i - 1].v.implied)), `Ranks 1–${rows.length}, value never rising`],
     [rows.every((r) => r.p.gecko_id == null && r.p.symbol == null && r.p.mcap_usd == null), `${rows.length}/${rows.length} ranked rows record no token`],
     [bRows.every((b) => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every((t) => / Cost: .+ Time: /.test(t))), `${bRows.length}/${bRows.length} plans, every step costed and timed`],
-    [B.digest === dig && B.rows === rows.length, `Screen = board.json (rank, name, value, every plan step): digest ${dig}, ${B.rows || 0} rows`],
+    [B.digest === dig && B.rows === rows.length, `Screen = board.json at the Auto deposit (rank, name, value, every plan step): digest ${dig}, ${B.rows || 0} rows`],
     [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.auc_fam > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base && O.brier.fam < O.brier.fam_base, `Launch odds (token-record proxy) beat chance and the base rate in 3 held-out tests: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out; Brier ${O.brier.loo.toFixed(3)}/${O.brier.wf.toFixed(3)}/${O.brier.fam.toFixed(3)} vs base ${O.brier.loo_base.toFixed(3)}/${O.brier.wf_base.toFixed(3)}/${O.brier.fam_base.toFixed(3)}`],
     [rows.slice(0, 10).every((r) => r.boot >= 0.8), `Bootstrap, 40 refits of curve and odds (fails if any top-10 row leaves the top 20 in over 20% of refits): ranks 1–${rows.findIndex((r) => r.boot < 1)} stay top 20 every time; ${rows.filter((r) => r.boot > 0 && r.boot < 1).length} rows sometimes`],
     ((w) => [O.gap < 0.2, `Odds curve vs ${O.cohorts.length} listing-age cohorts: within ${Math.round(O.gap * 100)} pts (worst from day ${w.from}: ${pc(w.actual)} hold a token, ${pc(w.fitted)} fitted)`])(O.cohorts.reduce((a, c) => Math.abs(c.actual - c.fitted) > Math.abs(a.actual - a.fitted) ? c : a)),
@@ -195,7 +195,7 @@
       <div class="count"><b>${shown.length}</b> of ${rows.length} shown${active ? ` · <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">clear filters</a>` : ''}</div>
     </section>
     <section class="filters basket"><label class="field"><span>Budget</span><select id="bud">${[10000, 25000, 50000, 100000].map((d) => `<option value="${d}"${String(d) === st.bud ? ' selected' : ''}>${usd(d)}</option>`).join('')}</select></label>
-      <span>Basket, best net per dollar of the ${shown.length} shown, within ${usd(+st.bud)} and ${HOURS} h: ${pick.map((r) => `<a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a> ${usd(r.plan.stake)}`).join(' · ') || 'none pays'} → <b>${usd(cap)}</b>, ${hrs.toFixed(1)} h, net <b class="up">+${usd(pick.reduce((s, r) => s + r.plan.net, 0))}</b></span></section>
+      <span>Basket, best net per dollar of the ${shown.length} shown, within ${usd(+st.bud)} and ${HOURS} h: ${pick.map((r) => `<a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a> ${usd(r.plan.stake)}`).join(' · ') || 'none pays'} → <b>${usd(cap)}</b>, ${hrs.toFixed(1)} h, net if they launch <b class="up">+${usd(pick.reduce((s, r) => s + r.plan.net, 0))}</b></span></section>
     <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div></section></div>`;
     return `<section class="strip">
       <div><b>${watchCov}/${S.watchlist.length}</b><span>watchlist covered</span></div>
@@ -217,7 +217,7 @@
     </section>
     ${active ? '' : ctl}
     <div class="tablewrap"><table class="board">
-      <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'No token', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('odds', 'Odds 12m', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · if it launches', 'plan')}</tr></thead>
+      <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'Tracked', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('odds', 'Odds 12m', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · if it launches', 'plan')}</tr></thead>
       <tbody>${body || '<tr><td colspan="10" class="empty">No protocol matches these filters.</td></tr>'}</tbody></table></div>`;
   }
 
@@ -225,7 +225,7 @@
   function redTeam(r) {
     const v = r.v, b = fit.bands.find((x) => r.p.tvl_usd >= x.lo && r.p.tvl_usd < x.hi), alt = Object.entries(r.alt).sort((a, c) => Math.abs(c[1] - r.rank) - Math.abs(a[1] - r.rank))[0];
     return [
-      `<b>Value:</b> trading tokens of this size (${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} TVL) miss their real market cap by a median ×${b.miss.toFixed(1)} held out; a token at ${usd(v.low)} or ${usd(v.high)} would not be unusual.`,
+      `<b>Value:</b> trading tokens of this size (${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} TVL) miss their real market cap by a median ×${b.miss.toFixed(1)} held out; a market cap at launch of ${usd(v.fitted * fit.band_low)} or ${usd(v.cap_high)} would not be unusual.`,
       `<b>Odds:</b> ${pc(v.time_factor)} reads today's token status as a launch rate; no launch dates exist to test it, and the age curve misses one cohort by ${Math.round(fit.odds.gap * 100)} pts.`,
       `<b>Rank:</b> #${r.rank} now, ${r.rlo}–${r.rhi} across 40 refits, #${alt[1]} ${alt[0]}${v.growth_imputed ? '; its 7-day change is unreported, so 0% was used' : ''}.`,
       `<b>Plan:</b> pays ×${M.target_cover} only if ≥${(r.plan.need_share * 100).toFixed(1)}% of the token reaches depositors (assumed ${M.drop_share * 100}%), and only if a token launches at all.`
@@ -254,7 +254,7 @@
           <table class="receipt">
             ${line('TVL', 'snapshot tvl_usd', usd(p.tvl_usd))}
             ${line('Momentum ' + pct(v.growth, 2), (v.growth_imputed ? 'change_7d not reported: 0% assumed' : 'change_7d ' + pct(p.change_7d, 2) + ' carried one week, clipped to ' + M.growth_floor + '…+' + M.growth_cap + '%'), '→ ' + usd(v.tvl_next))}
-            ${line('Peer multiple at $100M', (fit.k === Infinity ? 'one curve: it beat per-family multiples held out' : 'family pull k=' + fit.k) + ' (' + esc(fam.label) + ' alone ' + mult(fam.raw) + ')', mult(v.fam_multiple))}
+            ${line('Peer multiple at $100M', (fit.k === Infinity ? 'one curve: per-family multiples did not beat it in all three held-out tests' : 'family pull k=' + fit.k) + ' (' + esc(fam.label) + ' alone ' + mult(fam.raw) + ')', mult(v.fam_multiple))}
             ${line('Size curve', '(TVL ÷ $100M)<sup>' + fit.slope.toFixed(2) + '</sup>, slope fitted on the ' + fit.n + ' tokens', mult(v.size_mult))}
             ${line('Value if launched', 'what a trading peer of this size is worth', usd(v.fitted), 'sum')}
             ${line('Launch odds, next 12 months (token-record proxy)', (v.age == null ? 'no listing date: median ' + v.age_used + ' days' : v.age + ' days') + ' with no token; similar peers holding one: ' + pc(v.f0) + ' now, ' + pc(v.f1) + ' a year older', pc(v.time_factor))}
@@ -283,7 +283,7 @@
         <ol class="steps">${pl.steps.map((s) => `<li><p><em>${esc(s.when)}</em>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>
         <div class="math">
           <p><b>Drop APR ${(v.apr * 100).toFixed(2)}% if it launches</b> = ${usd(v.fitted)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
-          <p>${usd(pl.eligible)} earning for ${pl.days} days: <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${M.hour_usd}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital: ${st.dep ? 'your deposit' : `least that pays ×${M.target_cover} ($500–$25K)`}.</p>
+          <p>${usd(pl.eligible)} earning for ${pl.days} days: <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${M.hour_usd}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital: ${st.dep ? 'your deposit' : pl.verdict === 'farm' ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}.</p>
         </div>
       </section>
     </div>`;
@@ -297,7 +297,7 @@
   }
   function aside() {
     return `<section class="intro"><h1>${radar.products.length} products set aside, not ranked</h1>
-      <p>No token of their own, but each is a wrapped, bridged, staked or exchange product, a versioned pool or a likely sibling of a trading token: the watchlist rule (productOf) applied to every protocol. Their value is the underlying token's.</p></section>
+      <p>No token of their own, but each is a wrapped, bridged, staked or exchange product, a versioned pool or a likely sibling of a trading token: the watchlist rule (productOf) applied to every protocol. Their value most likely rides on the related token's, so the board gives them none of their own.</p></section>
       <div class="tablewrap">${tbl('board', ['Product', 'Why set aside', '#TVL', '#7d'], radar.products.map((x) => [nm(x.p.name, x.p.chains.slice(0, 3).join(', ')), `<span class="tag">${esc(x.kind)}</span>`, usd(x.p.tvl_usd), pct(x.p.change_7d)]))}</div>`;
   }
 
