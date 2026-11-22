@@ -25,7 +25,7 @@
   const maxImplied = rows[0].v.implied;
 
   /* ---------- state in the hash ---------- */
-  const DEF = { view: 'board', q: '', fam: '', chain: '', scope: 'all', verdict: '', sort: 'rank', dir: 'asc', p: '' };
+  const DEF = { view: 'board', q: '', fam: '', chain: '', scope: 'all', verdict: '', sort: 'rank', dir: 'asc', p: '', dep: '' };
   function readHash() {
     const st = Object.assign({}, DEF);
     const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
@@ -34,7 +34,7 @@
       if (i > 0 && own(DEF, k)) try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch (e) { /* keep the default */ }
     });
     // Unknown values fall back to the defaults, so a hand-typed link never breaks the page.
-    const ok = { view: 'board aside trading', scope: 'all watch early outside', verdict: ' farm marginal skip', dir: 'asc desc' };
+    const ok = { view: 'board aside trading', scope: 'all watch early outside', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000' };
     Object.keys(ok).forEach((k) => { if (!ok[k].split(' ').includes(st[k])) st[k] = DEF[k]; });
     if (!own(KEYS, st.sort)) st.sort = 'rank';
     return st;
@@ -150,7 +150,7 @@
       const on = fams.includes(f[0]), next = on ? fams.filter((x) => x !== f[0]) : fams.concat(f[0]);
       return `<a href="${link({ fam: next.join(',') })}" class="chip f-${f[0]}${on ? ' on' : ''}"><i></i>${esc(f[1])} <b>${famCount[f[0]] || 0}</b></a>`;
     }).join('');
-    const active = st.q || st.fam || st.chain || st.scope !== 'all' || st.verdict;
+    const active = st.q || st.fam || st.chain || st.scope !== 'all' || st.verdict || st.dep;
     const body = shown.map((r) => {
       const w = Math.max(1.5, 100 * Math.sqrt(r.v.implied / maxImplied));
       return `<tr data-slug="${esc(r.p.slug)}" tabindex="0">
@@ -187,8 +187,9 @@
       <label class="search"><input id="q" type="search" value="${esc(st.q)}" placeholder="Search name, category or chain" autocomplete="off" aria-label="Search"></label>
       <div class="field"><span>Scope</span>${seg('scope', [['all', 'All'], ['watch', 'Watchlist'], ['outside', 'Outside it'], ['early', 'Below $50M']])}</div>
       <div class="field"><span>Plan</span>${seg('verdict', [['', 'Any'], ['farm', 'Farm'], ['marginal', 'Marginal'], ['skip', 'Skip']])}</div>
+      <label class="field"><span>Deposit</span><select id="dep">${['', 1000, 5000, 10000, 25000].map((d) => `<option value="${d}"${String(d) === st.dep ? ' selected' : ''}>${d ? usd(d) : 'Auto: least that pays'}</option>`).join('')}</select></label>
       <label class="field"><span>Chain</span><select id="chain"><option value="">All chains</option>${Object.keys(chains).sort((a, b) => chains[b] - chains[a] || (a < b ? -1 : 1)).map((c) => `<option${c === st.chain ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
-      <div class="count"><b>${shown.length}</b> of ${rows.length} shown${active ? ` · <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '' })}">clear filters</a>` : ''}</div>
+      <div class="count"><b>${shown.length}</b> of ${rows.length} shown${active ? ` · <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">clear filters</a>` : ''}</div>
     </section>
     <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div></section>
     <div class="tablewrap"><table class="board">
@@ -249,7 +250,7 @@
         <ol class="steps">${pl.steps.map((s) => `<li><p><em>${esc(s.when)}</em>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>
         <div class="math">
           <p><b>Drop APR ${(v.apr * 100).toFixed(2)}%</b> = implied ${usd(v.implied)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
-          <p>${usd(pl.eligible)} of the ${usd(pl.stake)} sits in ${esc(p.name)} and earns; for ${pl.days} days that is about <b>${usd(pl.drop)}</b> against <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} gas and fees + ${R.mins(pl.minutes)} at $${M.hour_usd}/h): net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital: the least that covers costs ×${M.target_cover} ($500–$25K${pl.drop < M.target_cover * pl.all_in ? ', capped' : ''}); a ${M.drop_share * 50}% drop halves it.</p>
+          <p>${usd(pl.eligible)} of the ${usd(pl.stake)} sits in ${esc(p.name)} and earns; for ${pl.days} days that is about <b>${usd(pl.drop)}</b> against <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} gas and fees + ${R.mins(pl.minutes)} at $${M.hour_usd}/h): net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital: ${st.dep ? 'your deposit' : `the least that covers costs ×${M.target_cover} ($500–$25K${pl.drop < M.target_cover * pl.all_in ? ', capped' : ''})`}; a ${M.drop_share * 50}% drop halves it.</p>
         </div>
       </section>
     </div>`;
@@ -263,20 +264,21 @@
   }
 
   function trading() {
-    const kRows = fit.trials.map((t) => `<tr class="${t.k === fit.k ? 'pick' : ''}"><td>${t.k === Infinity ? 'one curve, size only' : t.k === 0 ? 'each family alone' : 'families, pull k=' + t.k}</td><td class="num">×${t.median.toFixed(2)}</td></tr>`).join('');
     const body = radar.live.map((l) => { const e = l.loo / l.actual; return `<tr><td class="proto"><span class="nm">${esc(l.p.name)}</span><small>${esc(l.p.symbol || '')} · ${esc(l.p.category || '')}</small></td><td>${famChip(l.family)}</td><td class="num">${usd(l.tvl)}${l.members > 1 ? ` <small>${l.members} parts</small>` : ''}</td><td class="num">${usd(l.actual)}</td><td class="num">${mult(l.actual / l.tvl)}</td><td class="num">${usd(l.loo)}</td><td class="num ${e > 2 || e < 0.5 ? 'down' : 'up'}">${mult(e)}</td></tr>`; }).join('');
     return `<section class="intro"><h1>${fit.n} tokens that trade: the model's calibration set</h1>
       <p>Kept off the board: their market prices them. calibrate() pools TVL per token, leaves out exchanges and products, and fits ln(mcap ÷ TVL) on ln(TVL): value grows as TVL<sup>${fit.elasticity.toFixed(2)}</sup>. ${radar.listed_only} more record a token with no market cap.</p></section>
-      <div class="split"><div class="card"><h2>Model choice <span>median out-of-sample miss</span></h2><table class="mini"><tbody>${kRows}</tbody></table>
-      <p class="note">Leave-one-out against real market caps: median miss ×${fit.median_error.toFixed(2)}; band ×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)} holds ${fit.band_hits}/${fit.n}. ${fit.clipped} ratios clipped to ×${M.ratio_floor}–×${M.ratio_cap} in the fit only.</p></div>
+      <div class="split"><div class="card"><h2>Held-out fit</h2><p class="note">Family pull k chosen from ${fit.trials.map((t) => t.k).join(', ')} by median miss (×${fit.trials[0].median.toFixed(2)} alone → ×${fit.median_error.toFixed(2)} chosen). Leave-one-out against real market caps: median miss ×${fit.median_error.toFixed(2)}; band ×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)} holds ${fit.band_hits}/${fit.n}. ${fit.clipped} ratios clipped to ×${M.ratio_floor}–×${M.ratio_cap} in the fit only.</p></div>
       <div class="tablewrap"><table class="board"><thead><tr><th>Protocol</th><th>Family</th><th class="num">TVL</th><th class="num">Market cap</th><th class="num">÷ TVL</th><th class="num">Fit without it</th><th class="num">÷ market</th></tr></thead><tbody>${body}</tbody></table></div></div>`;
   }
 
   /* ---------- render and events ---------- */
+  let planDep = '';
   function render() {
     const st = readHash();
     head(st);
     app.className = st.p ? 'detail' : st.view;
+    // A deposit chosen by the reader re-plans every row at that amount (farmPlan's dep).
+    if (st.dep !== planDep) { planDep = st.dep; rows.forEach((r) => { r.plan = R.farmPlan(r.p, r.v, +st.dep); }); }
     app.innerHTML = st.p ? detail(st) : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
     document.getElementById('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied values are this radar's estimate of a token's worth if the record stayed as it is: no launch forecast, never make.fun's claim. A protocol may hold a token DefiLlama does not record.`;
     if (st.p) window.scrollTo(0, 0);
@@ -290,7 +292,7 @@
       typing = setTimeout(() => { typing = null; history.replaceState(null, '', link({ q: val })); render(); const q = document.getElementById('q'); if (q) { q.focus(); q.setSelectionRange(val.length, val.length); } }, 160);
     }
   });
-  app.addEventListener('change', (e) => { if (e.target.id === 'chain') go({ chain: e.target.value }); });
+  app.addEventListener('change', (e) => { if (e.target.id === 'chain' || e.target.id === 'dep') go({ [e.target.id]: e.target.value }); });
   ['click', 'keydown'].forEach((ev) => app.addEventListener(ev, (e) => {
     const tr = e.target.closest('tr[data-slug]');
     if (tr && !e.target.closest('a') && (ev === 'click' || e.key === 'Enter')) go({ p: tr.dataset.slug });

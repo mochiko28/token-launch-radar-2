@@ -248,7 +248,7 @@
 
   /* A farm plan from the row's own figures: steps with a dollar cost and a time each, on the cheapest of
    * its three main chains. */
-  function farmPlan(p, v) {
+  function farmPlan(p, v, dep) {
     var main = p.chains.slice(0, 3), chain = main[0] || 'its main chain';
     main.forEach(function (c) { if (gas(c) < gas(chain)) chain = c; });
     var kind = p.category === 'Prediction Market' ? 'predict' : v.family;
@@ -271,8 +271,9 @@
     // Only capital in the protocol earns: the deposit, plus the side deposit for vaults (a second vault).
     function eligible(stake) { return kind === 'vault' ? stake + Math.round(stake / 4) : stake; }
     // The smallest deposit ($500 steps of capital, up to $25,000) whose drop covers costs target_cover times.
-    var stake = 20000;
-    for (var k = 400; k <= 20000; k += 400) {
+    // A reader's deposit (dep, total capital) fixes the stake; otherwise search for the least that pays.
+    var stake = dep ? Math.round(dep / 1.25) : 20000;
+    for (var k = 400; !dep && k <= 20000; k += 400) {
       if (eligible(k) * perDollar >= M.target_cover * total(steps(k)).all) { stake = k; break; }
     }
     var st = steps(stake), t = total(st), capital = stake + Math.round(stake / 4), drop = eligible(stake) * perDollar;
@@ -319,10 +320,8 @@
     return radar.rows.map(function (r) {
       return { rank: r.rank, slug: r.p.slug, name: r.p.name, implied_value_usd: r.v.implied,
         farm_steps: r.plan.steps.map(stepText),
-        token_status: 'pre-token', on_watchlist: r.watch, category: r.p.category, family: r.v.family, chains: r.p.chains,
-        tvl_usd: r.p.tvl_usd, change_7d: r.p.change_7d, days_without_token: r.v.age, implied_low_usd: r.v.low, implied_high_usd: r.v.high,
-        factors: { family_multiple: +r.v.fam_multiple.toFixed(4), size: +r.v.size_mult.toFixed(4), momentum_tvl: r.v.tvl_next, time: +r.v.time_factor.toFixed(4) },
-        airdrop_apr: +r.v.apr.toFixed(4), farm: { chain: r.plan.chain, capital_usd: r.plan.stake, cost_usd: +r.plan.cost.toFixed(2), minutes: r.plan.minutes, expected_drop_usd: +r.plan.drop.toFixed(2), drop_share_for_target: +r.plan.need_share.toFixed(4), verdict: r.plan.verdict } };
+        token_status: 'pre-token', on_watchlist: r.watch, implied_low_usd: r.v.low, implied_high_usd: r.v.high,
+        farm: { capital_usd: r.plan.stake, cost_usd: +r.plan.cost.toFixed(2), minutes: r.plan.minutes, drop_usd: +r.plan.drop.toFixed(2), verdict: r.plan.verdict } };
     });
   }
 

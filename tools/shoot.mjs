@@ -11,7 +11,7 @@ const [chrome, outDir, shotDir] = process.argv.slice(2);
 const SHOTS = process.argv[5] ? process.argv[5].split(' ').map((s) => [s.split('=')[0], s.slice(s.indexOf('=') + 1)]) : [
   ['1-board', '', 1340],
   ['2-detail', '#p=tulipa-capital', 1100],
-  ['3-filtered', '#scope=early&fam=lend,deriv,dex&verdict=farm&sort=apr&dir=desc', 1340],
+  ['3-filtered', '#dep=10000&verdict=farm&sort=plan&dir=desc', 1340],
 ];
 const H = Number(process.env.SHOT_H || 1340);
 const LO = 300 * 1024, HI = 350 * 1000; // inside 300-350 KB whether a KB is 1,000 or 1,024 bytes
