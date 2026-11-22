@@ -23,7 +23,8 @@
   const verdictTag = (v) => `<span class="verdict v-${v}">${v}</span>`;
   const maxImplied = rows[0].v.implied;
 
-  const DEF = { view: 'board', q: '', fam: '', chain: '', scope: 'all', verdict: '', sort: 'rank', dir: 'asc', p: '', dep: '' };
+  const DEF = { view: 'board', q: '', fam: '', chain: '', scope: 'all', verdict: '', sort: 'rank', dir: 'asc', p: '', dep: '', bud: '25000' };
+  const HOURS = 8;
   function readHash() {
     const st = Object.assign({}, DEF);
     const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
@@ -32,7 +33,7 @@
       if (i > 0 && own(DEF, k)) try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch (e) { /* keep the default */ }
     });
     // Unknown values fall back to the defaults, so a hand-typed link never breaks the page.
-    const ok = { view: 'board aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000' };
+    const ok = { view: 'board aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000', bud: '10000 25000 50000 100000' };
     Object.keys(ok).forEach((k) => { if (!ok[k].split(' ').includes(st[k])) st[k] = DEF[k]; });
     if (!own(KEYS, st.sort)) st.sort = 'rank';
     return st;
@@ -146,6 +147,10 @@
       const on = fams.includes(f[0]), next = on ? fams.filter((x) => x !== f[0]) : fams.concat(f[0]);
       return `<a href="${link({ fam: next.join(',') })}" class="chip f-${f[0]}${on ? ' on' : ''}"><i></i>${esc(f[1])} <b>${famCount[f[0]] || 0}</b></a>`;
     }).join('');
+    // Basket (#07): shown plans with a positive net, best net per dollar first, while the budget and HOURS last.
+    let cap = 0, hrs = 0;
+    const pick = shown.filter((r) => r.plan.net > 0).sort((a, b) => b.plan.net / b.plan.stake - a.plan.net / a.plan.stake)
+      .filter((r) => cap + r.plan.stake <= +st.bud && hrs + r.plan.minutes / 60 <= HOURS && (cap += r.plan.stake, hrs += r.plan.minutes / 60));
     const active = st.q || st.fam || st.chain || st.scope !== 'all' || st.verdict || st.dep;
     const body = shown.map((r) => {
       const w = Math.max(1.5, 100 * Math.sqrt(r.v.implied / maxImplied));
@@ -187,6 +192,8 @@
       <label class="field"><span>Chain</span><select id="chain"><option value="">All chains</option>${Object.keys(chains).sort((a, b) => chains[b] - chains[a] || (a < b ? -1 : 1)).map((c) => `<option${c === st.chain ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
       <div class="count"><b>${shown.length}</b> of ${rows.length} shown${active ? ` · <a href="${link({ q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' })}">clear filters</a>` : ''}</div>
     </section>
+    <section class="filters basket"><label class="field"><span>Budget</span><select id="bud">${[10000, 25000, 50000, 100000].map((d) => `<option value="${d}"${String(d) === st.bud ? ' selected' : ''}>${usd(d)}</option>`).join('')}</select></label>
+      <span>Basket, best net per dollar of the ${shown.length} shown, within ${usd(+st.bud)} and ${HOURS} h: ${pick.map((r) => `<a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a> ${usd(r.plan.stake)}`).join(' · ') || 'none pays'} → <b>${usd(cap)}</b>, ${hrs.toFixed(1)} h, net <b class="up">+${usd(pick.reduce((s, r) => s + r.plan.net, 0))}</b></span></section>
     <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div></section>
     <div class="tablewrap"><table class="board">
       <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'No token', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('odds', 'Odds 12m', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · 90 days', 'plan')}</tr></thead>
@@ -287,7 +294,7 @@
       typing = setTimeout(() => { typing = null; history.replaceState(null, '', link({ q: val })); render(); const q = document.getElementById('q'); if (q) { q.focus(); q.setSelectionRange(val.length, val.length); } }, 160);
     }
   });
-  app.addEventListener('change', (e) => { if (e.target.id === 'chain' || e.target.id === 'dep') go({ [e.target.id]: e.target.value }); });
+  app.addEventListener('change', (e) => { if (['chain', 'dep', 'bud'].includes(e.target.id)) go({ [e.target.id]: e.target.value }); });
   ['click', 'keydown'].forEach((ev) => app.addEventListener(ev, (e) => {
     const tr = e.target.closest('tr[data-slug]');
     if (tr && !e.target.closest('a') && (ev === 'click' || e.key === 'Enter')) go({ p: tr.dataset.slug });
