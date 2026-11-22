@@ -16,7 +16,7 @@ h1,h2{margin:0;letter-spacing:-.01em;}
 small{display:block;color:var(--muted);font-size:12px;}
 sub,sup{font-size:.7em;}
 .num,.apr,.pkpis b,.rank,.rankbig b,.dval b,td.val b{font-family:var(--mono);font-variant-numeric:tabular-nums;}
-.top{display:flex;align-items:center;gap:28px;padding:0 32px;height:56px;border-bottom:var(--b1);background:#0b1016e6;position:sticky;top:0;z-index:5;backdrop-filter:blur(6px);}
+.top{display:flex;align-items:center;gap:28px;padding:0 32px;height:56px;border-bottom:var(--b1);background:#0b1016e6;position:sticky;top:0;z-index:5;}
 .brand{display:flex;align-items:center;gap:10px;color:var(--accent);font-weight:700;font-size:16px;letter-spacing:.02em;}
 .brand span{color:var(--text);}
 .tabs{display:flex;gap:4px;}
@@ -56,7 +56,6 @@ main{padding:20px 32px 24px;max-width:1440px;margin:0 auto;}
 .radar .grid{stroke:var(--line);stroke-width:1;}
 .radar .ax{fill:var(--dim);font:10px var(--mono);}
 .radar .lab{fill:var(--text);font:600 9.5px var(--sans);paint-order:stroke;stroke:var(--panel);stroke-width:3px;pointer-events:none;}
-.radar .zone{fill:var(--muted);font:italic 11px var(--sans);opacity:.7;}
 .dot{fill-opacity:.55;stroke-width:1;stroke-opacity:.9;}
 .dot.off{fill-opacity:.06;stroke-opacity:.18;pointer-events:none;}
 .mini tr.pick td{color:var(--accent);font-weight:600;}
@@ -136,7 +135,7 @@ td.proto{min-width:230px;}
 .scale{position:relative;height:22px;margin:12px 0 0;border-radius:4px;background:var(--panel2);}
 .scale .band{position:absolute;top:0;bottom:0;background:#46e0a026;border-left:1px solid #46e0a066;border-right:1px solid #46e0a066;}
 .scale .peer{position:absolute;top:4px;bottom:4px;width:2px;background:var(--muted);border-radius:1px;}
-.scale .mid{position:absolute;top:-3px;bottom:-3px;width:3px;background:var(--accent);border-radius:2px;box-shadow:0 0 8px var(--accent);}
+.scale .mid{position:absolute;top:-3px;bottom:-3px;width:3px;background:var(--accent);border-radius:2px;}
 .mini th{font-size:11px;color:var(--dim);text-align:left;font-weight:600;padding:4px 0;border-bottom:var(--b2);}
 .mini td{padding:5px 0;border-bottom:var(--b1);font-size:12.5px;}
 .mini td small{display:inline;color:var(--dim);font-family:var(--mono);font-size:11px;}

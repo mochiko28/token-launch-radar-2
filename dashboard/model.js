@@ -101,11 +101,8 @@
       tests: termTests(pts, snap.as_of), odds: launchOdds(snap) };
   }
 
-  /* Launch odds from the snapshot's peers. F(p, a) = the fitted share of protocols holding a token at
-   * this TVL and a days since listing (logistic on ln TVL and ln age, over every protocol that is not an
-   * exchange or a product). A protocol still without one at age a issues one within odds_days with
-   * probability q = (F(a + odds_days) - F(a)) / (1 - F(a)): the hazard implied by the age curve. Tested
-   * by AUC (0.5 = chance) leave-one-out and walk-forward (fit the 60% listed first, score the rest). */
+  /* Launch odds. F(p, a) = fitted share of peers (not exchanges or products) holding a token at this TVL
+   * and age a (logistic on ln TVL, ln age); q = (F(a + odds_days) - F(a)) / (1 - F(a)), the hazard. */
   function launchOdds(snap) {
     var peers = snap.protocols.filter(function (p) { return p.tvl_usd > 0 && !productOf(p); });
     var known = peers.map(function (p) { return ageDays(snap.as_of, p.listed_at); }).filter(function (a) { return a != null; }).sort(function (a, b) { return a - b; });
@@ -131,9 +128,14 @@
     var dated = pts.filter(function (q) { return q.a != null; }).sort(function (u, v) { return v.a - u.a || bySlug(u.p, v.p); });
     var cut = Math.floor(dated.length * 0.6), ww = logit(dated.slice(0, cut));
     var wf = dated.slice(cut).map(function (q) { return { y: q.y, s: dot(ww, q.x) }; });
-    var w = logit(pts);
-    return { w: w, n: pts.length, with_token: pts.filter(function (q) { return q.y; }).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
-      F: function (p, a) { return sig(dot(w, X(p, a))); } };
+    var w = logit(pts), F = function (p, a) { return sig(dot(w, X(p, a))); };
+    // Cohort check: each listing-age cohort's share holding a token against the curve's mean prediction.
+    var edges = [0, 180, 365, 730, 1095, 1e9], cohorts = edges.slice(0, 5).map(function (lo, c) {
+      var m = pts.filter(function (q) { return q.a != null && q.a >= lo && q.a < edges[c + 1]; }), n = m.length || 1;
+      return { from: lo, n: m.length, actual: m.reduce(function (t, q) { return t + q.y; }, 0) / n, fitted: m.reduce(function (t, q) { return t + F(q.p, q.a); }, 0) / n };
+    });
+    return { w: w, cohorts: cohorts, gap: Math.max.apply(null, cohorts.map(function (c) { return Math.abs(c.actual - c.fitted); })), n: pts.length, with_token: pts.filter(function (q) { return q.y; }).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
+      F: F };
   }
   function sig(z) { return 1 / (1 + Math.exp(-z)); }
   function dot(w, x) { return w[0] * x[0] + w[1] * x[1] + w[2] * x[2]; }
@@ -232,7 +234,7 @@
     // Airdrop yield if it launches: drop_share of the value if launched, split over every dollar-day of
     // TVL in the current season (since listing, at most season_days) plus the plan's window.
     var apr = fitted * M.drop_share / (tvlNext * (Math.min(ageUsed, M.season_days) + M.farm_days)) * 365;
-    return { family: fam.key, growth: growth, growth_imputed: p.change_7d == null, age_imputed: age == null, tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
+    return { family: fam.key, growth: growth, growth_imputed: p.change_7d == null,tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
       fitted: Math.round(fitted), age: age, age_used: ageUsed, time_factor: timeF, f0: f0, f1: f1, implied: implied,
       low: Math.round(implied * fit.band_low), high: Math.round(implied * fit.band_high), cap_high: Math.round(fitted * fit.band_high), multiple: implied / p.tvl_usd, apr: apr };
   }
@@ -248,16 +250,9 @@
   function mins(m) { return m < 60 ? m + ' min' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' h'; }
 
 
-  // What the second action costs: one-off ones two transactions, weekly ones every week of the window.
-  var WEEKLY = { dex: 1, deriv: 1, predict: 1, infra: 1 };
-  var ACT2 = {
-    dex: function (s, tx, w) { return w * (s * 0.0005 + tx); },
-    deriv: function (s, tx, w) { return w * (s * 0.001 + 2 * tx); },
-    predict: function (s, tx, w) { return w * (s * 0.01 + 2 * tx); },
-    infra: function (s, tx, w) { return w * 2 * tx; },
-    lend: function (s, tx) { return 2 * tx; }, vault: function (s, tx) { return 2 * tx; }, stable: function (s, tx) { return 2 * tx; },
-    rwa: function (s, tx) { return 2 * tx; }, stake: function (s, tx) { return 2 * tx; }
-  };
+  // The second action's cost: weekly kinds pay [fee share of the amount, transactions] every week of the
+  // window; every other kind pays two transactions once.
+  var WEEKLY = { dex: [0.0005, 1], deriv: [0.001, 2], predict: [0.01, 2], infra: [0, 2] };
 
   /* A farm plan from the row's own figures: steps with a dollar cost and a time each, on the cheapest of
    * its three main chains. */
@@ -274,9 +269,9 @@
         { act: 'Withdraw ' + usd(stake + side) + ' of ' + asset + ' from an exchange straight to a fresh wallet on ' + chain + (chain !== main[0] ? ' (cheaper than ' + main[0] + ', where it also runs)' : '') + '; keep only farm funds in it',
           usd: 1 + tx, min: 15, when: 'Day 0' },
         { act: fill(act[0]), usd: 2 * tx, min: v.family === 'rwa' ? 30 : 10, when: v.family === 'rwa' ? 'Days 0-2' : 'Day 0' },
-        { act: fill(act[1]), usd: ACT2[kind](side, tx, weeks), min: kind in WEEKLY ? weeks * 10 : 10, when: kind in WEEKLY ? 'Weeks 1-' + weeks : 'Day 1' },
+        { act: fill(act[1]), usd: WEEKLY[kind] ? weeks * (side * WEEKLY[kind][0] + WEEKLY[kind][1] * tx) : 2 * tx, min: kind in WEEKLY ? weeks * 10 : 10, when: kind in WEEKLY ? 'Weeks 1-' + weeks : 'Day 1' },
         { act: 'Once a week for ' + weeks + ' weeks, open the points or rewards page, re-check the position and top it up by one transaction', usd: weeks * tx, min: weeks * 5, when: 'Weeks 1-' + weeks },
-        { act: 'Exit if TVL falls below ' + usd(p.tvl_usd * 0.75) + ' (25% under today\'s ' + usd(p.tvl_usd) + ') or the team reports an incident; otherwise hold the full ' + M.farm_days + ' days', usd: 2 * tx, min: 10, when: 'Day ' + M.farm_days },
+        { act: 'Unwind: ' + act[2] + '; do it early if TVL falls below ' + usd(p.tvl_usd * 0.75) + ' (25% under today\'s ' + usd(p.tvl_usd) + ') or the team reports an incident', usd: 2 * tx, min: 15, when: 'Day ' + M.farm_days },
         { act: 'At launch claim only through the protocol\'s own app; the model prices it near ' + usd(v.fitted) + ' if launched, so sell the claim if the token opens above ' + usd(v.cap_high) + ' fully diluted (top of its 50% band)', usd: 2 * tx, min: 15, when: 'At launch' }
       ];
     }
@@ -295,7 +290,7 @@
     var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
     st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: launch odds are ' + Math.round(v.time_factor * 100) + '% within a year; if it launches, at ' + usd(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
       ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
-      '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
+      '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%; at 5% it pays ×' + (drop / t.all / 2).toFixed(2) + ', at 20% ×' + (drop / t.all * 2).toFixed(2) + '), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
     return { chain: chain, gas: tx, stake: capital, eligible: eligible(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * M.hour_usd, all_in: t.all,
       days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, verdict: verdict };
   }
@@ -322,6 +317,12 @@
     });
     rows.sort(function (a, b) { return b.v.implied - a.v.implied || bySlug(a.p, b.p); });
     rows.forEach(function (r, i) { r.rank = i + 1; });
+    // Rank crossing: each row's rank under three declared alternatives, and whether it stays top 20 in all.
+    var ALT = { 'without momentum': function (r) { return r.v.fitted * Math.pow(r.p.tvl_usd / r.v.tvl_next, 1 + fit.slope) * r.v.time_factor; },
+      'at 2-year odds': function (r) { return r.v.fitted * (fit.odds.F(r.p, r.v.age_used + 730) - r.v.f0) / (1 - r.v.f0); },
+      'if launched': function (r) { return r.v.fitted; } };
+    Object.keys(ALT).forEach(function (k) { rows.slice().sort(function (a, b) { return ALT[k](b) - ALT[k](a) || bySlug(a.p, b.p); }).forEach(function (r, i) { (r.alt = r.alt || {})[k] = i + 1; }); });
+    rows.forEach(function (r) { r.stable = r.rank <= 20 && Object.keys(r.alt).every(function (k) { return r.alt[k] <= 20; }); });
     var live = fit.points.map(function (q) { return { p: q.p, tvl: q.tvl, members: q.members, family: q.f, fit: q.fit, loo: Math.round(q.loo), actual: q.mcap }; })
       .sort(function (a, b) { return b.actual - a.actual || bySlug(a.p, b.p); });
     var listedOnly = snap.protocols.filter(function (p) { return hasToken(p) && !trades(p); }).length;
