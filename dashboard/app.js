@@ -122,7 +122,8 @@
       <p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × q<sub>12m</sub></p>
       <table class="mini tests"><thead><tr><th>Term · held-out median miss</th><th class="num">Leave-one-out</th><th class="num">Walk-fwd</th><th class="num">Family out</th><th class="num">Use</th></tr></thead><tbody>
       ${T.terms.map((t) => `<tr class="${t.ok ? 'pick' : ''}"><td>${t.label}</td><td class="num">${x(t.loo)}</td><td class="num">${x(t.wf)}</td><td class="num">${x(t.lofo)}</td><td class="num">${used[t.key]}</td></tr>`).join('')}</tbody></table>
-      <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. Family out: each family priced by a fit that never saw it. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%). q<sub>12m</sub> = odds of a token within a year, a hazard fitted on ${O.n} peers (${O.with_token} with a token) by TVL, days listed, 7-day change and family: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward.</p>
+      <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. Family out: each family priced by a fit that never saw it. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%). q<sub>12m</sub> = odds of a token within a year, a hazard fitted on ${O.n} peers (${O.with_token} with a token) by TVL, days listed, 7-day change and family: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out (each family scored by a fit that never saw it).</p>
+      <p class="note"><b>Token-record proxy:</b> the fitted target is whether a peer <i>records</i> a token in DefiLlama today (gecko id or symbol), not an observed launch date; q<sub>12m</sub> converts that age curve into a 12-month hazard.</p>
       <p class="note"><b>Limit:</b> these tests score who holds a token today. The snapshot has no launch dates or earlier copies, so no one can backtest the 12-month odds against later launches from it; q<sub>12m</sub> reads the age curve as a hazard, an inference the cohort check bounds (worst gap ${Math.round(O.gap * 100)} pts).</p>
       <p class="note">Leave-one-out miss by TVL band: ${fit.bands.map((b) => `<b>${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} ×${b.miss.toFixed(1)}</b> (${b.n} tokens; ${rows.filter((r) => r.p.tvl_usd >= b.lo && r.p.tvl_usd < b.hi).length} ranked)`).join(' · ')}.</p></div>`;
   }
@@ -138,7 +139,7 @@
     [rows.every((r) => r.p.gecko_id == null && r.p.symbol == null && r.p.mcap_usd == null), `${rows.length}/${rows.length} ranked rows record no token`],
     [bRows.every((b) => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every((t) => / Cost: .+ Time: /.test(t))), `${bRows.length}/${bRows.length} plans, every step costed and timed`],
     [B.digest === dig && B.rows === rows.length, `Screen = board.json (rank, name, value, every plan step): digest ${dig}, ${B.rows || 0} rows`],
-    [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base, `Launch odds beat chance and the base rate held out: AUC ${O.auc_loo.toFixed(2)}, ${O.auc_wf.toFixed(2)}; Brier ${O.brier.loo.toFixed(3)} vs ${O.brier.loo_base.toFixed(3)}, ${O.brier.wf.toFixed(3)} vs ${O.brier.wf_base.toFixed(3)}`],
+    [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.auc_fam > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base && O.brier.fam < O.brier.fam_base, `Launch odds (token-record proxy) beat chance and the base rate in 3 held-out tests: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out; Brier ${O.brier.loo.toFixed(3)}/${O.brier.wf.toFixed(3)}/${O.brier.fam.toFixed(3)} vs base ${O.brier.loo_base.toFixed(3)}/${O.brier.wf_base.toFixed(3)}/${O.brier.fam_base.toFixed(3)}`],
     [rows.slice(0, 10).every((r) => r.boot >= 0.8), `Bootstrap, 40 refits of curve and odds (fails if any top-10 row leaves the top 20 in over 20% of refits): ranks 1–${rows.findIndex((r) => r.boot < 1)} stay top 20 every time; ${rows.filter((r) => r.boot > 0 && r.boot < 1).length} rows sometimes`],
     ((w) => [O.gap < 0.2, `Odds curve vs ${O.cohorts.length} listing-age cohorts: within ${Math.round(O.gap * 100)} pts (worst from day ${w.from}: ${pc(w.actual)} hold a token, ${pc(w.fitted)} fitted)`])(O.cohorts.reduce((a, c) => Math.abs(c.actual - c.fitted) > Math.abs(a.actual - a.fitted) ? c : a)),
     [spotT.ok && sizeT.ok, `Size curve beats a flat multiple, and carrying TVL a week at its 7-day change beats spot TVL, in all three held-out tests: ×${flatT.loo.toFixed(2)}→×${spotT.loo.toFixed(2)}→×${sizeT.loo.toFixed(2)} leave-one-out`]
@@ -146,7 +147,7 @@
   // The cover shows each check as a short line; the Model tab shows them in full.
   const SHORT = [`${nAll}/${S.protocols.length} protocols accounted for`, `watchlist ${S.watchlist.filter((s) => bySlug[s]).length}/${S.watchlist.length}`, `ranks 1–${rows.length}, value never rising`,
     `${rows.length}/${rows.length} record no token`, `${bRows.length}/${bRows.length} plans costed and timed`, `screen = board.json, digest ${dig}`,
-    `odds AUC ${O.auc_loo.toFixed(2)}/${O.auc_wf.toFixed(2)}, Brier beats base rate`, `ranks 1–${rows.findIndex((r) => r.boot < 1)} top 20 in all 40 refits`,
+    `odds (token-record proxy) beat base rate in 3 held-out tests`, `ranks 1–${rows.findIndex((r) => r.boot < 1)} top 20 in all 40 refits`,
     `odds within ${Math.round(O.gap * 100)} pts of every age cohort`, `value miss ×${flatT.loo.toFixed(1)} flat → ×${sizeT.loo.toFixed(1)} fitted`];
 
   function board(st) {
@@ -201,7 +202,7 @@
       <div><b>${rows.length}</b><span>pre-token ranked, ${rows.filter((r) => r.below).length} under $50M</span></div>
       <div><b>${radar.products.length} · ${fit.n}</b><span>set aside · trading (fit)</span></div>
       <div><b>×${sizeT.loo.toFixed(1)} · ×${sizeT.wf.toFixed(1)}</b><span>held-out miss, 2 tests</span></div>
-      <div><b>${O.auc_loo.toFixed(2)} · ${O.auc_wf.toFixed(2)}</b><span>launch-odds AUC, 2 tests</span></div>
+      <div><b>${O.auc_loo.toFixed(2)} · ${O.auc_wf.toFixed(2)}</b><span>odds AUC: LOO · walk-fwd</span></div>
       <div><b>${bRows.length}/${rows.length}</b><span>plans costed and timed</span></div>
       <div><b>${farmN}</b><span>pay ×${M.target_cover} their costs</span></div>
       <div><b>${usd(mid((r) => r.plan.stake))} · ${R.mins(mid((r) => r.plan.minutes))}</b><span>median deposit · hands-on</span></div>
@@ -256,7 +257,7 @@
             ${line('Peer multiple at $100M', (fit.k === Infinity ? 'one curve: it beat per-family multiples held out' : 'family pull k=' + fit.k) + ' (' + esc(fam.label) + ' alone ' + mult(fam.raw) + ')', mult(v.fam_multiple))}
             ${line('Size curve', '(TVL ÷ $100M)<sup>' + fit.slope.toFixed(2) + '</sup>, slope fitted on the ' + fit.n + ' tokens', mult(v.size_mult))}
             ${line('Value if launched', 'what a trading peer of this size is worth', usd(v.fitted), 'sum')}
-            ${line('Launch odds, next 12 months', (v.age == null ? 'no listing date: median ' + v.age_used + ' days' : v.age + ' days') + ' with no token; similar peers holding one: ' + pc(v.f0) + ' now, ' + pc(v.f1) + ' a year older', pc(v.time_factor))}
+            ${line('Launch odds, next 12 months (token-record proxy)', (v.age == null ? 'no listing date: median ' + v.age_used + ' days' : v.age + ' days') + ' with no token; similar peers holding one: ' + pc(v.f0) + ' now, ' + pc(v.f1) + ' a year older', pc(v.time_factor))}
             ${line('Implied value', 'rank ' + r.rank + ' of ' + rows.length + ' on this number', usd(v.implied), 'total')}
           </table>
           <div class="scale">

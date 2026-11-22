@@ -150,7 +150,11 @@
       wf: bri(wf, function (q) { return sig(q.s); }), wf_base: bri(wf, function () { return rate; }) };
     // A bootstrap refit: the odds curve fitted again on a resample of the peers.
     var boot = function (rnd) { var wb = logit(pts.map(function () { return pts[Math.floor(rnd() * n)]; }), w, 4); return function (p, a) { return sig(dot(wb, X(p, a))); }; };
-    return { boot: boot, brier: brier, w: w, cohorts: cohorts, gap: Math.max.apply(null, cohorts.map(function (c) { return Math.abs(c.actual - c.fitted); })), n: pts.length, with_token: pts.filter(function (q) { return q.y; }).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
+    // Family out: every category family's peers scored by a fit that never saw that family.
+    var lofo = pts.map(function (q) { var f = family(q.p); return { y: q.y, s: dot(logit(pts.filter(function (o) { return family(o.p) !== f; }), w, 4), q.x) }; });
+    brier.fam = bri(lofo, function (q) { return sig(q.s); });
+    brier.fam_base = bri(pts, function (q) { var o = pts.filter(function (z) { return family(z.p) !== family(q.p); }); return o.reduce(function (t, z) { return t + z.y; }, 0) / o.length; });
+    return { auc_fam: auc(lofo), boot: boot, brier: brier, w: w, cohorts: cohorts, gap: Math.max.apply(null, cohorts.map(function (c) { return Math.abs(c.actual - c.fitted); })), n: pts.length, with_token: pts.filter(function (q) { return q.y; }).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
       F: F };
   }
   function sig(z) { return 1 / (1 + Math.exp(-z)); }
