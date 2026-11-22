@@ -29,7 +29,11 @@ const Radar = createRequire(import.meta.url)('./dashboard/model.js') as {
   build(s: Snapshot): { rows: unknown[]; products: unknown[]; live: unknown[]; fit: { slope: number; n: number } };
   boardRows(r: unknown): Row[];
   digest(rows: Row[]): string;
+  use(tables: unknown): void;
 };
+// The model's data tables (category families, gas per chain, step wording), shared with the page.
+const tables = JSON.parse(readFileSync(join(here, 'lib', 'tables.json'), 'utf8'));
+Radar.use(tables);
 
 function arg(name: string, fallback: string): string {
   const at = process.argv.indexOf(`--${name}`);
@@ -93,7 +97,7 @@ if (issue !== null) fail(`the board breaks a gate rule: ${issue}`);
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'board.json'), `${JSON.stringify({ as_of: snapshot.as_of, source: snapshot.source, model: 'dashboard/model.js', rows })}\n`);
 // The board's digest goes beside the data: the page recomputes it from its own rows and shows the match.
-writeFileSync(join(out, 'data.js'), `window.SNAPSHOT=${JSON.stringify(snapshot)};\nwindow.BOARD=${JSON.stringify({ rows: rows.length, digest: Radar.digest(rows) })};\n`);
+writeFileSync(join(out, 'data.js'), `window.SNAPSHOT=${JSON.stringify(snapshot)};\nwindow.BOARD=${JSON.stringify({ rows: rows.length, digest: Radar.digest(rows) })};\nwindow.TABLES=${JSON.stringify(tables)};\n`);
 
 function copyFiles(from: string, to: string): string[] {
   mkdirSync(to, { recursive: true });

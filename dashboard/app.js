@@ -11,8 +11,9 @@
 (function () {
   'use strict';
   const R = window.RadarModel, S = window.SNAPSHOT, app = document.getElementById('app');
-  if (!R || !S) { app.innerHTML = '<p class="empty">No data: run main.ts to write data.js beside the page.</p>'; return; }
+  if (!R || !S || !window.TABLES) { app.innerHTML = '<p class="empty">No data: run main.ts to write data.js beside the page.</p>'; return; }
 
+  R.use(window.TABLES);
   const radar = R.build(S), fit = radar.fit, M = radar.model, rows = radar.rows, usd = R.usd;
   const FAM = {}; R.FAMILIES.forEach((f) => { FAM[f[0]] = f[1]; });
   const bySlug = Object.create(null); rows.forEach((r) => { bySlug[r.p.slug] = r; });
@@ -49,7 +50,7 @@
   /* ---------- filtering and sorting ---------- */
   const KEYS = {
     rank: (r) => r.rank, name: (r) => r.p.name.toLowerCase(), tvl: (r) => r.p.tvl_usd, g: (r) => r.p.change_7d,
-    age: (r) => r.v.age_used, value: (r) => r.v.implied, multiple: (r) => r.v.multiple, apr: (r) => r.v.apr, plan: (r) => r.plan.drop / r.plan.all_in
+    age: (r) => r.v.age_used, value: (r) => r.v.implied, odds: (r) => r.v.time_factor, apr: (r) => r.v.apr, plan: (r) => r.plan.drop / r.plan.all_in
   };
   function filtered(st) {
     const q = st.q.trim().toLowerCase(), fams = st.fam ? st.fam.split(',') : [];
@@ -108,15 +109,16 @@
     document.getElementById('meta').innerHTML = `<span>Snapshot <b>${esc(S.as_of)}</b></span><span>model <b>${esc(M.version)}</b></span>`;
   }
 
+  const O = fit.odds, pc = (x) => (x * 100).toFixed(0) + '%';
   function formula() {
     const T = fit.tests, x = (v) => '×' + v.toFixed(2);
-    const used = { flat: 'baseline', size: 'fitted', family: fit.k === Infinity ? 'dropped' : 'k=' + fit.k, growth: 'stated', age: 'stated' };
+    const used = { flat: 'baseline', size: 'fitted', family: fit.k === Infinity ? 'dropped' : 'k=' + fit.k, growth: 'stated', age: 'via odds' };
     return `<div class="card model">
       <h2>Value model <span>fitted on this snapshot's ${fit.n} trading tokens</span></h2>
-      <p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × t<sub>age</sub></p>
+      <p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × q<sub>12m</sub></p>
       <table class="mini tests"><thead><tr><th>Term · held-out median miss</th><th class="num">Leave-one-out</th><th class="num">Walk-forward</th><th class="num">Use</th></tr></thead><tbody>
       ${T.terms.map((t) => `<tr class="${t.ok ? 'pick' : ''}"><td>${t.label}</td><td class="num">${x(t.loo)}</td><td class="num">${x(t.wf)}</td><td class="num">${used[t.key]}</td></tr>`).join('')}</tbody></table>
-      <p class="note">Walk-forward fits the ${T.wf_train} tokens listed first and scores the ${T.wf_n} listed since ${T.wf_from}. Growth and age do not lower the miss on listed tokens, so they enter as stated pre-token terms: T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%); t<sub>age</sub> ×${M.age_low}→×${M.age_high} over ${M.age_full} days with no token.</p></div>`;
+      <p class="note">Walk-forward fits the ${T.wf_train} tokens listed first and scores the ${T.wf_n} listed since ${T.wf_from}. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%), a stated term. Age enters through q<sub>12m</sub>, the odds of a token within a year: a hazard fitted on ${O.n} peers (${O.with_token} hold a token) by TVL and days listed, AUC ${O.auc_loo.toFixed(2)} leave-one-out and ${O.auc_wf.toFixed(2)} walk-forward (0.50 = chance).</p></div>`;
   }
 
   // The cover's self-checks, computed here on every load: the gate's rules and the screen-to-board match.
@@ -130,14 +132,14 @@
     [rows.every((r) => r.p.gecko_id == null && r.p.symbol == null && r.p.mcap_usd == null), `${rows.length}/${rows.length} ranked rows record no token`],
     [bRows.every((b) => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every((t) => / Cost: .+ Time: /.test(t))), `${bRows.length}/${bRows.length} plans, every step costed and timed`],
     [B.digest === dig && B.rows === rows.length, `Screen = board.json: digest ${dig}, ${B.rows || 0} rows`],
+    [O.auc_loo > 0.5 && O.auc_wf > 0.5, `Launch odds beat chance in both held-out tests: AUC ${O.auc_loo.toFixed(2)}, ${O.auc_wf.toFixed(2)}`],
     [sizeT.ok, `Size curve beats a flat multiple in both held-out tests: ×${flatT.loo.toFixed(2)}→×${sizeT.loo.toFixed(2)}, ×${flatT.wf.toFixed(2)}→×${sizeT.wf.toFixed(2)}`]
   ];
 
   function board(st) {
     const shown = filtered(st), fams = st.fam ? st.fam.split(',') : [];
     const watchCov = S.watchlist.filter((s) => bySlug[s]).length;
-    const total = rows.reduce((s, r) => s + r.v.implied, 0);
-    const farmN = rows.filter((r) => r.plan.verdict === 'farm').length;
+        const farmN = rows.filter((r) => r.plan.verdict === 'farm').length;
     const mid = (f) => rows.map(f).sort((a, b) => a - b)[rows.length >> 1];
     const chains = {}; rows.forEach((r) => r.p.chains.forEach((c) => { chains[c] = (chains[c] || 0) + 1; }));
     const famCount = {}; rows.forEach((r) => { famCount[r.v.family] = (famCount[r.v.family] || 0) + 1; });
@@ -161,7 +163,7 @@
         <td class="num ${r.p.change_7d >= 0.05 ? 'up' : r.p.change_7d <= -0.05 ? 'down' : ''}">${pct(r.p.change_7d)}</td>
         <td class="num${r.v.age == null ? ' est' : ''}" title="${r.v.age == null ? 'No listing date: the median age is used' : 'Listed ' + esc(r.p.listed_at)}">${r.v.age == null ? '~' : ''}${days(r.v.age_used)}</td>
         <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small></td>
-        <td class="num">${mult(r.v.multiple)}</td>
+        <td class="num">${pc(r.v.time_factor)}</td>
         <td class="num apr">${(r.v.apr * 100).toFixed(1)}%</td>
         <td class="plan">${verdictTag(r.plan.verdict)} <span class="pmult">pays ${mult(r.plan.drop / r.plan.all_in)}</span><small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}</small></td></tr>`;
     }).join('');
@@ -170,14 +172,14 @@
       <div><b>${rows.length}</b><span>pre-token ranked, ${rows.filter((r) => r.below).length} under $50M</span></div>
       <div><b>${radar.products.length} · ${fit.n}</b><span>set aside · trading (fit)</span></div>
       <div><b>×${sizeT.loo.toFixed(1)} · ×${sizeT.wf.toFixed(1)}</b><span>held-out miss, 2 tests</span></div>
-      <div><b>${usd(total)}</b><span>implied, all rows</span></div>
+      <div><b>${O.auc_loo.toFixed(2)} · ${O.auc_wf.toFixed(2)}</b><span>launch-odds AUC, 2 tests</span></div>
       <div><b>${bRows.length}/${rows.length}</b><span>plans costed and timed</span></div>
       <div><b>${farmN}</b><span>pay ×${M.target_cover} their costs</span></div>
       <div><b>${usd(mid((r) => r.plan.stake))} · ${R.mins(mid((r) => r.plan.minutes))}</b><span>median deposit · hands-on</span></div>
     </section>
     <section class="hero">
       <div class="lead">
-        <h1>${rows.length} pre-token protocols, ranked by what their token would be worth today</h1>
+        <h1>${rows.length} pre-token protocols, ranked by token value × launch odds</h1>
         <div class="card checks"><h2>Self-checks <span>run in this page on load</span></h2><ul>${CHECKS.map(([ok, t]) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${t}</li>`).join('')}</ul></div>
       </div>
       ${formula()}
@@ -193,7 +195,7 @@
     </section>
     <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div></section>
     <div class="tablewrap"><table class="board">
-      <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'No token', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('multiple', '÷ TVL', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · 90 days', 'plan')}</tr></thead>
+      <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'No token', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('odds', 'Odds 12m', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · 90 days', 'plan')}</tr></thead>
       <tbody>${body || '<tr><td colspan="10" class="empty">No protocol matches these filters.</td></tr>'}</tbody></table></div>`;
   }
 
@@ -222,8 +224,8 @@
             ${line('Momentum ' + pct(v.growth, 2), (v.growth_imputed ? 'change_7d not reported: 0% assumed' : 'change_7d ' + pct(p.change_7d, 2) + ' carried one week, clipped to ' + M.growth_floor + '…+' + M.growth_cap + '%'), '→ ' + usd(v.tvl_next))}
             ${line('Peer multiple at $100M', (fit.k === Infinity ? 'one curve: it beat per-family multiples held out' : 'family pull k=' + fit.k) + ' (' + esc(fam.label) + ' alone ' + mult(fam.raw) + ')', mult(v.fam_multiple))}
             ${line('Size curve', '(TVL ÷ $100M)<sup>' + fit.slope.toFixed(2) + '</sup>, slope fitted on the ' + fit.n + ' tokens', mult(v.size_mult))}
-            ${line('Fitted token value', 'what a trading peer of this size is worth', usd(v.fitted), 'sum')}
-            ${line('Time without a token', (v.age == null ? 'no listing date: median ' + v.age_used + ' days used' : v.age + ' days since listing') + '; ×' + M.age_low + '→×' + M.age_high + ' over ' + M.age_full + ' days', mult(v.time_factor))}
+            ${line('Value if launched', 'what a trading peer of this size is worth', usd(v.fitted), 'sum')}
+            ${line('Launch odds, next 12 months', (v.age == null ? 'no listing date: median ' + v.age_used + ' days' : v.age + ' days') + ' with no token; peers at this TVL holding one: ' + pc(v.f0) + ' now, ' + pc(v.f1) + ' a year older', pc(v.time_factor))}
             ${line('Implied value', 'rank ' + r.rank + ' of ' + rows.length + ' on this number', usd(v.implied), 'total')}
           </table>
           <div class="scale">
@@ -249,7 +251,7 @@
         <div class="steph"><span></span><span>When · what to do</span><span>Cost</span><span>Time</span></div>
         <ol class="steps">${pl.steps.map((s) => `<li><p><em>${esc(s.when)}</em>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>
         <div class="math">
-          <p><b>Drop APR ${(v.apr * 100).toFixed(2)}%</b> = implied ${usd(v.implied)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
+          <p><b>Drop APR ${(v.apr * 100).toFixed(2)}% if it launches</b> = ${usd(v.fitted)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
           <p>${usd(pl.eligible)} of the ${usd(pl.stake)} sits in ${esc(p.name)} and earns; for ${pl.days} days that is about <b>${usd(pl.drop)}</b> against <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} gas and fees + ${R.mins(pl.minutes)} at $${M.hour_usd}/h): net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>. Capital: ${st.dep ? 'your deposit' : `the least that covers costs ×${M.target_cover} ($500–$25K${pl.drop < M.target_cover * pl.all_in ? ', capped' : ''})`}; a ${M.drop_share * 50}% drop halves it.</p>
         </div>
       </section>
