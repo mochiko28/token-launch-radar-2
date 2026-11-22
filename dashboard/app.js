@@ -126,7 +126,7 @@
  const [flatT, spotT, sizeT] = fit.tests.terms;
  const nTr = S.protocols.filter((p) => p.mcap_usd > 0).length, nAll = rows.length + radar.products.length + nTr + radar.listed_only;
  const CHECKS = [
-  [nAll === S.protocols.length, `${nAll}/${S.protocols.length} protocols: ${rows.length} ranked, ${radar.products.length} set aside, ${nTr} trading`],
+  [nAll === S.protocols.length, `${nAll}/${S.protocols.length} protocols: ${rows.length} ranked, ${radar.products.length} set aside, ${nTr} trading (${fit.n} tokens), ${radar.listed_only} token without cap`],
   [S.watchlist.every((s) => bySlug[s]), `watchlist ${S.watchlist.filter((s) => bySlug[s]).length}/${S.watchlist.length} covered`],
   [rows.every((r, i) => r.rank === i + 1 && (!i || r.v.implied <= rows[i - 1].v.implied)), `ranks 1–${rows.length}, value never rising`],
   [rows.every((r) => r.p.gecko_id == null && r.p.symbol == null && r.p.mcap_usd == null), `${rows.length}/${rows.length} ranked rows record no token`],
