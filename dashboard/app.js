@@ -220,6 +220,16 @@
       <tbody>${body || '<tr><td colspan="10" class="empty">No protocol matches these filters.</td></tr>'}</tbody></table></div>`;
   }
 
+  // Red team: the ways this row's number could be wrong, each from the row's own figures.
+  function redTeam(r) {
+    const v = r.v, b = fit.bands.find((x) => r.p.tvl_usd >= x.lo && r.p.tvl_usd < x.hi), alt = Object.entries(r.alt).sort((a, c) => Math.abs(c[1] - r.rank) - Math.abs(a[1] - r.rank))[0];
+    return [
+      `<b>Value:</b> trading tokens of this size (${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} TVL) miss their real market cap by a median ×${b.miss.toFixed(1)} held out; a token at ${usd(v.low)} or ${usd(v.high)} would not be unusual.`,
+      `<b>Odds:</b> ${pc(v.time_factor)} reads today's token status as a launch rate; no launch dates exist to test it, and the age curve misses one cohort by ${Math.round(fit.odds.gap * 100)} pts.`,
+      `<b>Rank:</b> #${r.rank} now, ${r.rlo}–${r.rhi} across 40 refits, #${alt[1]} ${alt[0]}${v.growth_imputed ? '; its 7-day change is unreported, so 0% was used' : ''}.`,
+      `<b>Plan:</b> pays ×${M.target_cover} only if ≥${(r.plan.need_share * 100).toFixed(1)}% of the token reaches depositors (assumed ${M.drop_share * 100}%), and only if a token launches at all.`
+    ];
+  }
   function detail(st) {
     const r = bySlug[st.p];
     if (!r) return `<p class="empty">No ranked protocol is called ${esc(st.p)}. <a href="${link({ p: '' })}">Back to the board</a></p>`;
@@ -258,6 +268,7 @@
         </section>
         <section class="card"><h2>Nearest trading peers <span>${esc(fam.label)}, closest TVL</span></h2>
           ${tbl('mini', ['Protocol', '#TVL', '#Market cap', '#÷ TVL'], peers.map((x) => [`${esc(x.p.name)} <small>${esc(x.p.symbol || '')}</small>`, usd(x.tvl), usd(x.actual), mult(x.actual / x.tvl)]))}</section>
+        <section class="card risk"><h2>Why this could be wrong <span>computed for this row</span></h2><ul>${redTeam(r).map((t) => `<li>${t}</li>`).join('')}</ul></section>
       </div>
       <section class="card planc"><h2>Farm plan <span>${pl.days} days on ${esc(pl.chain)}</span></h2>
         <div class="pkpis">
