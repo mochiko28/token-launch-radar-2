@@ -78,7 +78,7 @@
     if (VERSIONED.test(p.name)) return 'versioned pool';
     if (WRAPPED.test(p.name)) return 'wrapped or staked';
     if (EXCHANGE.test(p.name)) return 'exchange product';
-    if (words && !hasToken(p) && Object.prototype.hasOwnProperty.call(words, firstWord(p.name))) return 'sibling of ' + words[firstWord(p.name)];
+    if (words && !hasToken(p) && Object.prototype.hasOwnProperty.call(words, firstWord(p.name))) return 'likely sibling of ' + words[firstWord(p.name)];
     return null;
   }
   function bySlug(a, b) { return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0; }
@@ -190,9 +190,9 @@
     dex: ['Add {S} to a stablecoin or ETH pair on {N} on {C}, with a wide range if the pool is concentrated', 'Make one swap of about {s} a week through {N} so the wallet logs volume as well as liquidity'],
     deriv: ['Deposit {S} of USDC as margin on {N} on {C}', 'Each week open and close a small hedged trade of about {s} notional (long and short at 1-2x), fees near 0.05% a side'],
     predict: ['Deposit {S} of USDC on {N} on {C} and hold it as the account balance', 'Each week buy and later sell about {s} of shares across two or three liquid markets, so the wallet logs trading volume'],
-    stable: ['Mint or deposit {S} into {N}\'s yield-bearing dollar on {C}', 'Deposit {s} of the receipt into a pool or money market that lists it, which many points programs count twice'],
-    rwa: ['Complete {N}\'s onboarding (KYC where it asks; review often takes 1-2 days) and subscribe {S} to its tokenized yield product on {C}', 'Hold the token in the wallet the issuer whitelisted; use {s} of it as collateral where a market accepts it'],
-    stake: ['Stake {S} worth of the native asset through {N} on {C} and keep the liquid receipt', 'Deposit {s} of the receipt into a DeFi pool that accepts it, so the stake counts in two places'],
+    stable: ['Mint or deposit {S} into {N}\'s yield-bearing dollar on {C}', 'If {N}\'s app lists a pool or money market for the receipt, move {s} there (many points programs count it twice); if none, keep it all in step 2'],
+    rwa: ['Complete {N}\'s onboarding (KYC where it asks; review often takes 1-2 days) and subscribe {S} to its tokenized yield product on {C}', 'Hold the token in the wallet the issuer whitelisted; only if {N} names a market that takes it as collateral, post {s} there'],
+    stake: ['Stake {S} worth of the native asset through {N} on {C} and keep the liquid receipt', 'If {N} lists a DeFi pool that accepts the receipt, deposit {s} there so the stake counts twice; if none, hold the receipt'],
     infra: ['Move {S} onto {C} through {N} (bridge, deposit or channel, whichever it offers) and keep it there', 'Use {s} of it in two other apps on {C} each week, so the wallet looks like a user, not a one-off deposit']
   };
 
