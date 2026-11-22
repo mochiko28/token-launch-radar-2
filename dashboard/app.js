@@ -98,7 +98,7 @@
         <dt>T</dt><dd>TVL carried one week at its own 7-day change (${M.growth_floor}% to +${M.growth_cap}%)</dd>
         <dt>m<sub>fam</sub></dt><dd>family's fitted mcap ÷ TVL at $100M, ×${Math.min(...Object.values(fit.families).map((f) => f.multiple)).toFixed(2)} to ×${Math.max(...Object.values(fit.families).map((f) => f.multiple)).toFixed(2)}</dd>
         <dt>t<sub>age</sub></dt><dd>×${M.age_low} at day 0 to ×${M.age_high} at ${M.age_full}+ days with no token</dd>
-        <dt>Error</dt><dd>median miss ×${fit.median_error.toFixed(1)} on the fit set; band = middle 50%</dd>
+        <dt>Error</dt><dd>out-of-sample median miss ×${fit.median_error.toFixed(1)}; band holds ${fit.band_hits}/${fit.n} tokens</dd>
       </dl></div>`;
   }
 
@@ -195,7 +195,7 @@
             ${peers.map((x) => `<span class="peer" style="left:${pos(x.actual)}" title="${esc(x.p.name)} ${usd(x.actual)}"></span>`).join('')}
             <span class="mid" style="left:${pos(v.implied)}"></span>
           </div>
-          <p class="note">Shaded: the 50% band (×${Math.exp(M.band_z * fit.sigma).toFixed(1)} each way, from the fit's own error). Ticks: market caps of the peers below. This is the model's claim, not a price.</p>
+          <p class="note">Shaded: the 50% band (×${fit.band_low.toFixed(2)} to ×${fit.band_high.toFixed(2)} of the value): the middle half of the model's out-of-sample misses on trading tokens. Ticks: market caps of the peers below. This is the model's claim, not a price.</p>
         </section>
         <section class="card"><h2>Nearest trading peers <span>${esc(fam.label)}, closest TVL</span></h2>
           <table class="mini"><thead><tr><th>Protocol</th><th class="num">TVL</th><th class="num">Market cap</th><th class="num">÷ TVL</th><th class="num">Model fit</th></tr></thead><tbody>
@@ -228,12 +228,12 @@
 
   function trading() {
     const famRows = R.FAMILIES.map((f) => { const x = fit.families[f[0]]; return `<tr><td>${famChip(f[0])}</td><td class="num">${x.peers}</td><td class="num">${x.peers ? mult(x.raw) : '—'}</td><td class="num"><b>${mult(x.multiple)}</b></td></tr>`; }).join('');
-    const body = radar.live.map((l) => { const e = l.fit / l.actual; return `<tr><td class="proto"><span class="nm">${esc(l.p.name)}</span><small>${esc(l.p.symbol || '')} · ${esc(l.p.category || '')}</small></td><td>${famChip(l.family)}</td><td class="num">${usd(l.tvl)}${l.members > 1 ? ` <small>${l.members} parts</small>` : ''}</td><td class="num">${usd(l.actual)}</td><td class="num">${mult(l.actual / l.tvl)}</td><td class="num">${usd(l.fit)}</td><td class="num ${e > 2 || e < 0.5 ? 'down' : 'up'}">${mult(e)}</td></tr>`; }).join('');
+    const body = radar.live.map((l) => { const e = l.loo / l.actual; return `<tr><td class="proto"><span class="nm">${esc(l.p.name)}</span><small>${esc(l.p.symbol || '')} · ${esc(l.p.category || '')}</small></td><td>${famChip(l.family)}</td><td class="num">${usd(l.tvl)}${l.members > 1 ? ` <small>${l.members} parts</small>` : ''}</td><td class="num">${usd(l.actual)}</td><td class="num">${mult(l.actual / l.tvl)}</td><td class="num">${usd(l.fit)}</td><td class="num">${usd(l.loo)}</td><td class="num ${e > 2 || e < 0.5 ? 'down' : 'up'}">${mult(e)}</td></tr>`; }).join('');
     return `<section class="intro"><h1>${fit.n} tokens that trade: the model's calibration set</h1>
       <p>Kept apart from the board: their market already prices them. model.js calibrate() pools the TVL of protocols sharing one token, leaves out exchanges and wrapped, bridged or versioned products, and fits ln(mcap ÷ TVL) on ln(TVL) within each family (slope ${fit.slope.toFixed(3)}, so value grows as TVL<sup>${fit.elasticity.toFixed(2)}</sup>), then shrinks each family's multiple toward the all-family ${mult(fit.base)} with ${M.shrink_k} pseudo-peers. ${radar.listed_only} more protocols record a token with no market cap and sit on neither list.</p></section>
       <div class="split"><div class="card"><h2>Family multiples at $100M TVL</h2><table class="mini"><thead><tr><th>Family</th><th class="num">Peers</th><th class="num">Raw</th><th class="num">Used</th></tr></thead><tbody>${famRows}</tbody></table>
-      <p class="note">Median miss on this set: ×${fit.median_error.toFixed(2)}; σ of ln error ${fit.sigma.toFixed(2)}.</p></div>
-      <div class="tablewrap"><table class="board"><thead><tr><th>Protocol</th><th>Family</th><th class="num">TVL</th><th class="num">Market cap</th><th class="num">÷ TVL</th><th class="num">Model fit</th><th class="num">Fit ÷ market</th></tr></thead><tbody>${body}</tbody></table></div></div>`;
+      <p class="note">Out of sample (each token predicted by a fit without it, against its real market cap): median miss ×${fit.median_error.toFixed(2)}; the 50% band ×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)} holds ${fit.band_hits} of ${fit.n}. ${fit.clipped} extreme ratios are clipped to ×${M.ratio_floor}–×${M.ratio_cap} inside the fit only.</p></div>
+      <div class="tablewrap"><table class="board"><thead><tr><th>Protocol</th><th>Family</th><th class="num">TVL</th><th class="num">Market cap</th><th class="num">÷ TVL</th><th class="num">Model fit</th><th class="num">Left-out fit</th><th class="num">÷ market</th></tr></thead><tbody>${body}</tbody></table></div></div>`;
   }
 
   /* ---------- render and events ---------- */

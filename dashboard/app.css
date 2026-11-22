@@ -1,4 +1,12 @@
-/* Launch Radar: night-scope palette. Ink background, one phosphor accent for value, amber for the
+/* Launch Radar, source guide (files are read in this order: app.css, app.js, index.html, model.js).
+ *   model.js calibrate()  fits mcap/TVL on the snapshot's trading tokens; leave-one-out error and band
+ *   model.js value()      TVL x family multiple x size curve, momentum from change_7d, time without a token
+ *   model.js productOf()  the watchlist rule that sets wrapped, bridged and staked products aside
+ *   model.js farmPlan()   six steps, each with a dollar cost and a time; stake sized to cover costs x2
+ *   model.js build()      the same function main.ts runs to write board.json, so page and board agree
+ *   app.js board(), detail(), aside(), trading(), filtered()  the three views, sorting and filters
+ *
+ * Night-scope palette. Ink background, one phosphor accent for value, amber for the
  * watchlist, a fixed hue per family. Spacing on a 4px grid; numbers set in tabular mono. */
 :root {
   --bg: #0b1016; --panel: #111922; --panel2: #16212c; --line: #1f2c3a; --line2: #2a3a4c;

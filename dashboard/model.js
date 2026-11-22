@@ -18,7 +18,6 @@
     ref_tvl: 1e8,            // the fit's reference size: $100M of TVL
     ratio_floor: 0.02,       // mcap/TVL outliers are clipped before the fit
     ratio_cap: 20,
-    band_z: 0.674,           // the shown band holds the middle 50% of the fit's errors
     shrink_k: 4,             // pseudo-peers pulling a thin family toward the all-family mean
     growth_floor: -30,       // 7-day change used for momentum, clipped (per cent)
     growth_cap: 50,
@@ -106,6 +105,28 @@
       var t = tok[k];
       return { p: t.p, tvl: t.tvl, mcap: t.mcap, members: t.members, f: family(t.p), x: Math.log(t.tvl / M.ref_tvl), y: Math.log(clamp(t.mcap / t.tvl, M.ratio_floor, M.ratio_cap)) };
     });
+    var full = fitPoints(pts);
+    // Error is measured out of sample and against the real market cap: each token is predicted by a
+    // fit that leaves it out (leave-one-out), and its miss is ln(actual mcap / prediction), unclipped.
+    var miss = pts.map(function (q, i) {
+      q.fit = Math.round(predict(full, q));
+      q.loo = predict(fitPoints(pts.filter(function (o, j) { return j !== i; })), q);
+      return Math.log(q.mcap / q.loo);
+    });
+    var sorted = miss.slice().sort(function (u, v) { return u - v; });
+    var absMiss = miss.map(Math.abs).sort(function (u, v) { return u - v; });
+    var inBand = 0, q25 = quantile(sorted, 0.25), q75 = quantile(sorted, 0.75);
+    miss.forEach(function (m) { if (m >= q25 && m <= q75) inBand++; });
+    return { slope: full.b, elasticity: 1 + full.b, base: Math.exp(full.all), families: full.fams, n: pts.length, points: pts,
+      median_error: Math.exp(quantile(absMiss, 0.5)), band_low: Math.exp(q25), band_high: Math.exp(q75), band_hits: inBand,
+      clipped: pts.filter(function (q) { var r = q.mcap / q.tvl; return r < M.ratio_floor || r > M.ratio_cap; }).length };
+  }
+  function quantile(a, t) { var i = (a.length - 1) * t, lo = Math.floor(i); return a[lo] + (a[Math.min(lo + 1, a.length - 1)] - a[lo]) * (i - lo); }
+  function predict(f, q) { return q.tvl * Math.exp(f.fams[q.f].ln + f.b * q.x); }
+
+  /* The least-squares core: a slope pooled within families, then family intercepts shrunk toward the
+   * all-family mean with shrink_k pseudo-peers. */
+  function fitPoints(pts) {
     var g = {};
     pts.forEach(function (q) { (g[q.f] = g[q.f] || []).push(q); });
     var sxy = 0, sxx = 0;
@@ -127,16 +148,7 @@
       var shrunk = (a.length * raw + M.shrink_k * all) / (a.length + M.shrink_k);
       fams[fd[0]] = { key: fd[0], label: fd[1], peers: a.length, raw: Math.exp(raw), multiple: Math.exp(shrunk), ln: shrunk };
     });
-    var ss = 0, abs = [];
-    pts.forEach(function (q) {
-      var r = q.y - (fams[q.f].ln + b * q.x);
-      ss += r * r; abs.push(Math.abs(r));
-      q.fit = Math.round(q.tvl * Math.exp(fams[q.f].ln + b * q.x));
-    });
-    abs.sort(function (u, v) { return u - v; });
-    var sigma = Math.sqrt(ss / Math.max(1, pts.length - Object.keys(g).length - 1));
-    return { slope: b, elasticity: 1 + b, base: Math.exp(all), families: fams, sigma: sigma,
-      median_error: Math.exp(abs[abs.length >> 1]), n: pts.length, points: pts };
+    return { b: b, all: all, fams: fams };
   }
 
   /* The implied value of one protocol under the fit, with each factor kept for the detail view. */
@@ -149,13 +161,13 @@
     var age = ageDays(asOf, p.listed_at), ageUsed = age == null ? ageFallback : age;
     var timeF = M.age_low + (M.age_high - M.age_low) * Math.min(ageUsed, M.age_full) / M.age_full;
     var implied = Math.max(1, Math.round(fitted * timeF));
-    var band = Math.exp(M.band_z * fit.sigma);
+
     // Airdrop yield: a drop of drop_share of the implied value, split over every dollar-day of TVL in
     // the current season (since listing, at most season_days) plus the plan's window.
     var apr = implied * M.drop_share / (tvlNext * (Math.min(ageUsed, M.season_days) + M.farm_days)) * 365;
     return { family: fam.key, growth: growth, growth_imputed: p.change_7d == null, age_imputed: age == null, tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
       fitted: Math.round(fitted), age: age, age_used: ageUsed, time_factor: timeF, implied: implied,
-      low: Math.round(implied / band), high: Math.round(implied * band), multiple: implied / p.tvl_usd, apr: apr };
+      low: Math.round(implied * fit.band_low), high: Math.round(implied * fit.band_high), multiple: implied / p.tvl_usd, apr: apr };
   }
 
   function usd(n) {
@@ -251,7 +263,7 @@
     });
     rows.sort(function (a, b) { return b.v.implied - a.v.implied || bySlug(a.p, b.p); });
     rows.forEach(function (r, i) { r.rank = i + 1; });
-    var live = fit.points.map(function (q) { return { p: q.p, tvl: q.tvl, members: q.members, family: q.f, fit: q.fit, actual: q.mcap }; })
+    var live = fit.points.map(function (q) { return { p: q.p, tvl: q.tvl, members: q.members, family: q.f, fit: q.fit, loo: Math.round(q.loo), actual: q.mcap }; })
       .sort(function (a, b) { return b.actual - a.actual || bySlug(a.p, b.p); });
     var listedOnly = snap.protocols.filter(function (p) { return hasToken(p) && !trades(p); }).length;
     return { model: M, fit: fit, rows: rows, live: live, products: products, listed_only: listedOnly, age_fallback: ageFallback, families: FAMILIES };
