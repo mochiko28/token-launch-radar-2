@@ -124,6 +124,7 @@
       ${T.terms.map((t) => `<tr class="${t.ok ? 'pick' : ''}"><td>${t.label}</td><td class="num">${x(t.loo)}</td><td class="num">${x(t.wf)}</td><td class="num">${x(t.lofo)}</td><td class="num">${used[t.key]}</td></tr>`).join('')}</tbody></table>
       <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. Family out: each family priced by a fit that never saw it. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%). s = token-record score: the share of ${O.n} peers (logistic fit ; ${O.with_token} record a token) with this TVL, days tracked, 7-day change and family that record a token: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out (each family scored by a fit that never saw it).</p>
       <p class="note"><b>Token-record score, not a launch forecast:</b> the target is whether a peer <i>records</i> a token in DefiLlama today. The radar ranks by value if launched × s, the quantity the held-out tests actually score; it makes no claim about when a token launches.</p>
+      <p class="note"><b>Missing ages:</b> ${rows.filter((r) => r.ageRange).length} ranked rows have no listing date and use the median age; re-ranked at the 25th and 75th percentile of observed ages they move: ${rows.filter((r) => r.ageRange).map((r) => `${esc(r.p.name)} #${r.ageRange[0].rank}–#${r.ageRange[1].rank}`).join(', ')}.</p>
       <p class="note"><b>Limit:</b> the snapshot has no launch dates or earlier copies, so no one can test timing from it; s is checked against today's records (worst age-cohort gap ${Math.round(O.gap * 100)} pts).</p>
       <p class="note">Leave-one-out miss by TVL band: ${fit.bands.map((b) => `<b>${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} ×${b.miss.toFixed(1)}</b> (${b.n} tokens; ${rows.filter((r) => r.p.tvl_usd >= b.lo && r.p.tvl_usd < b.hi).length} ranked)`).join(' · ')}.</p></div>`;
   }
@@ -228,7 +229,7 @@
     return [
       `<b>Value:</b> trading tokens of this size (${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} TVL) miss their real market cap by a median ×${b.miss.toFixed(1)} held out; a market cap at launch of ${usd(v.fitted * fit.band_low)} or ${usd(v.cap_high)} would not be unusual.`,
       `<b>Score:</b> ${pc(v.time_factor)} of similar peers record a token today; that is no forecast of when, or whether, this one launches, and the fit misses one age cohort by ${Math.round(fit.odds.gap * 100)} pts.`,
-      `<b>Rank:</b> #${r.rank} now, ${r.rlo}–${r.rhi} across 40 refits, #${alt[1]} ${alt[0]}${v.growth_imputed ? '; its 7-day change is unreported, so 0% was used' : ''}.`,
+      `<b>Rank:</b> #${r.rank} now, ${r.rlo}–${r.rhi} across 40 refits, #${alt[1]} ${alt[0]}${v.growth_imputed ? '; its 7-day change is unreported, so 0% was used' : ''}${r.ageRange ? `; no listing date, so the median age was used: at ${r.ageRange[0].age} days it would rank #${r.ageRange[0].rank}, at ${r.ageRange[1].age} days #${r.ageRange[1].rank}` : ''}.`,
       `<b>Plan:</b> pays ×${M.target_cover} only if ≥${(r.plan.need_share * 100).toFixed(1)}% of the token reaches depositors (assumed ${M.drop_share * 100}%), and only if a token launches at all.`
     ];
   }

@@ -380,6 +380,15 @@
     }
     // Each row's 80% rank range over the 40 refits (5th lowest to 5th highest rank).
     rows.forEach(function (r) { var d = r.draws.sort(function (a, b) { return a - b; }); r.rlo = d[4]; r.rhi = d[35]; delete r.draws; });
+    // Missing listing dates: rows whose age was imputed get their rank re-taken at the 25th and 75th
+    // percentile of observed ages, every other row held fixed, so the reader sees what the guess moves.
+    var q = function (t) { return ages[Math.floor((ages.length - 1) * t)]; };
+    rows.filter(function (r) { return r.v.age == null; }).forEach(function (r) {
+      r.ageRange = [q(0.25), q(0.75)].map(function (a) {
+        var val = r.v.fitted * fit.odds.F(r.p, a);
+        return { age: a, rank: 1 + rows.filter(function (o) { return o !== r && o.v.implied > val; }).length };
+      });
+    });
     rows.forEach(function (r) { r.stable = r.rank <= 20 && Object.keys(r.alt).every(function (k) { return r.alt[k] <= 20; }); });
     var live = fit.points.map(function (q) { return { p: q.p, tvl: q.tvl, members: q.members, family: q.f, fit: q.fit, loo: Math.round(q.loo), actual: q.mcap }; })
       .sort(function (a, b) { return b.actual - a.actual || bySlug(a.p, b.p); });
