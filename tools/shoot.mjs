@@ -1,6 +1,6 @@
 // Capture the dashboard's three screenshots from a built output directory, with headless Chromium over
 // the DevTools protocol (Node's own WebSocket, nothing installed). Each capture is the page at
-// 1440x900 at a URL hash, saved as PNG when that lands in 300-350 KB, else as the JPEG quality that does.
+// 1440 wide by SHOT_H (default 1340; the gate takes a long side up to 1440, a short side from 800) at a URL hash, saved as PNG when that lands in 300-350 KB, else as the JPEG quality that does.
 //   node tools/shoot.mjs <chrome binary> <output dir> <screenshots dir>
 import { spawn } from 'node:child_process';
 import { writeFileSync, readdirSync, unlinkSync } from 'node:fs';
@@ -9,14 +9,15 @@ import { join, resolve } from 'node:path';
 const [chrome, outDir, shotDir] = process.argv.slice(2);
 // An optional fourth argument, name=hash pairs split by spaces, captures other views for review.
 const SHOTS = process.argv[5] ? process.argv[5].split(' ').map((s) => [s.split('=')[0], s.slice(s.indexOf('=') + 1)]) : [
-  ['1-board', ''],
-  ['2-detail', '#p=tulipa-capital'],
-  ['3-filtered', '#scope=early&fam=lend,deriv,dex&verdict=farm&sort=apr&dir=desc'],
+  ['1-board', '', 1340],
+  ['2-detail', '#p=tulipa-capital', 1100],
+  ['3-filtered', '#scope=early&fam=lend,deriv,dex&verdict=farm&sort=apr&dir=desc', 1340],
 ];
+const H = Number(process.env.SHOT_H || 1340);
 const LO = 300 * 1024, HI = 350 * 1000; // inside 300-350 KB whether a KB is 1,000 or 1,024 bytes
 
 const port = 9300 + Math.floor(Math.random() * 500);
-const proc = spawn(chrome, ['--headless', `--remote-debugging-port=${port}`, '--window-size=1440,900', '--hide-scrollbars', '--force-device-scale-factor=1', '--no-sandbox', '--allow-file-access-from-files', 'about:blank'], { stdio: 'ignore' });
+const proc = spawn(chrome, ['--headless', `--remote-debugging-port=${port}`, `--window-size=1440,${H}`, '--hide-scrollbars', '--force-device-scale-factor=1', '--no-sandbox', '--allow-file-access-from-files', 'about:blank'], { stdio: 'ignore' });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let target;
 for (let i = 0; i < 50 && !target; i++) {
@@ -29,23 +30,24 @@ let id = 0; const waiting = new Map();
 ws.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); } });
 const send = (method, params = {}) => new Promise((r) => { const n = ++id; waiting.set(n, r); ws.send(JSON.stringify({ id: n, method, params })); });
 
-await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: H, deviceScaleFactor: 1, mobile: false });
 for (const name of readdirSync(shotDir)) if (/\.(png|jpe?g)$/.test(name)) unlinkSync(join(shotDir, name));
 const page = 'file://' + resolve(outDir, 'dashboard/index.html');
-for (const [name, hash] of SHOTS) {
+for (const [name, hash, h] of SHOTS) {
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: h || H, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: page + hash });
   await sleep(900);
   const png = Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64');
   let file = name + '.png', bytes = png;
   if (!process.argv[5] && (png.length < LO || png.length > HI)) {
-    let lo = 50, hi = 100, best = null;
+    let lo = 30, hi = 100, best = null, bestQ = 0;
     while (lo <= hi) {
       const q = (lo + hi) >> 1;
       const jpg = Buffer.from((await send('Page.captureScreenshot', { format: 'jpeg', quality: q })).result.data, 'base64');
-      if (jpg.length > HI) hi = q - 1; else { if (jpg.length >= LO) best = jpg; lo = q + 1; }
+      if (jpg.length > HI) hi = q - 1; else { if (jpg.length >= LO) { best = jpg; bestQ = q; } lo = q + 1; }
     }
     if (!best) throw new Error(`${name}: no PNG or JPEG quality lands in 300-350 KB (png ${png.length})`);
-    file = name + '.jpg'; bytes = best;
+    file = name + '.jpg'; bytes = best; console.log(`${name}: jpeg quality ${bestQ}`);
   }
   writeFileSync(join(shotDir, file), bytes);
   console.log(`${file} ${bytes.length} bytes`);
