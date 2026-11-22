@@ -62,8 +62,9 @@
     return out.sort((a, b) => { const x = key(a), y = key(b); if (x == null || y == null) return (x == null) - (y == null) || a.rank - b.rank; return (x < y ? -1 : x > y ? 1 : 0) * sign || a.rank - b.rank; });
   }
 
+  const rOf = (v) => 1.8 + 6.5 * Math.sqrt(v / maxImplied);
   function chart(shown) {
-    const W = 470, H = 214, L = 40, B = 26, T = 10, RR = 10;
+    const W = 470, H = 400, L = 40, B = 26, T = 10, RR = 10;
     const on = new Set(shown.map((r) => r.p.slug));
     const xmax = Math.sqrt(2400), ylo = Math.log10(0.001), yhi = Math.log10(2);
     const X = (d) => L + (W - L - RR) * Math.sqrt(Math.min(d, 2400)) / xmax;
@@ -73,7 +74,7 @@
     [[0.001, '0.1%'], [0.01, '1%'], [0.1, '10%'], [1, '100%']].forEach(([a, l]) => { g += `<line class="grid" x1="${L}" x2="${W - RR}" y1="${Y(a)}" y2="${Y(a)}"/><text class="ax" x="${L - 6}" y="${Y(a) + 3}" text-anchor="end">${l}</text>`; });
     let dots = '';
     rows.slice().reverse().forEach((r) => {
-      const rad = 2.2 + 9 * Math.sqrt(r.v.implied / maxImplied);
+      const rad = rOf(r.v.implied);
       dots += `<a href="${link({ p: r.p.slug })}"><circle class="dot f-${r.v.family}${on.has(r.p.slug) ? '' : ' off'}" cx="${X(r.v.age_used).toFixed(1)}" cy="${Y(r.v.apr).toFixed(1)}" r="${rad.toFixed(1)}"><title>${esc(r.p.name)} ${usd(r.v.implied)}</title></circle></a>`;
     });
     // Label the 3 largest values and 3 best yields shown, beside each dot where no label overlaps.
@@ -92,6 +93,9 @@
       boxes.push([spot[0], spot[1], w, h]);
       labels += `<text class="lab" x="${(spot[0] + 3).toFixed(1)}" y="${(spot[1] + 9).toFixed(1)}">${esc(r.p.name)}</text>`;
     });
+    // Axis titles and a size legend: two reference dots at round implied values.
+    g += `<text class="ax" x="${W - RR}" y="${H - 18}" text-anchor="end">days without a token →</text><text class="ax" x="${L + 4}" y="${T + 8}">airdrop APR if it launches ↑</text>`;
+    [[1e6, '$1M'], [3e7, '$30M']].forEach(([v, l], i) => { g += `<circle class="dot f-infra" cx="${W - 120 + i * 50}" cy="${T + 12}" r="${rOf(v).toFixed(1)}"/><text class="ax" x="${W - 112 + i * 50}" y="${T + 15}">${l}</text>`; });
     return `<svg viewBox="0 0 ${W} ${H}" class="radar">${g}
       ${dots}${labels}</svg>`;
   }
