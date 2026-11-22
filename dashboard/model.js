@@ -89,7 +89,12 @@
     var absMiss = miss.map(Math.abs).sort(function (u, v) { return u - v; });
     var inBand = 0, q25 = quantile(sorted, 0.25), q75 = quantile(sorted, 0.75);
     miss.forEach(function (m) { if (m >= q25 && m <= q75) inBand++; });
-    return { k: k, slope: full.b, elasticity: 1 + full.b, base: Math.exp(full.all), families: full.fams, n: pts.length, points: pts,
+    // Held-out miss by TVL band, so the reader sees where the curve is weak.
+    var cuts = [0, 1e7, 3e7, 1e8, 1e15], bands = cuts.slice(0, 4).map(function (lo, b) {
+      var m = pts.map(function (q, i) { return q.tvl >= lo && q.tvl < cuts[b + 1] ? Math.abs(miss[i]) : -1; }).filter(function (x) { return x >= 0; }).sort(function (u, v) { return u - v; });
+      return { lo: lo, hi: cuts[b + 1], n: m.length, miss: Math.exp(quantile(m, 0.5)) };
+    });
+    return { bands: bands, k: k, slope: full.b, elasticity: 1 + full.b, base: Math.exp(full.all), families: full.fams, n: pts.length, points: pts,
       median_error: Math.exp(quantile(absMiss, 0.5)), band_low: Math.exp(q25), band_high: Math.exp(q75), band_hits: inBand,
       clipped: pts.filter(function (q) { var r = q.mcap / q.tvl; return r < M.ratio_floor || r > M.ratio_cap; }).length,
       tests: tests, odds: launchOdds(snap) };

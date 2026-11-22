@@ -112,7 +112,8 @@
       <p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × q<sub>12m</sub></p>
       <table class="mini tests"><thead><tr><th>Term · held-out median miss</th><th class="num">Leave-one-out</th><th class="num">Walk-forward</th><th class="num">Use</th></tr></thead><tbody>
       ${T.terms.map((t) => `<tr class="${t.ok ? 'pick' : ''}"><td>${t.label}</td><td class="num">${x(t.loo)}</td><td class="num">${x(t.wf)}</td><td class="num">${used[t.key]}</td></tr>`).join('')}</tbody></table>
-      <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%), stated. q<sub>12m</sub> = odds of a token within a year, a hazard fitted on ${O.n} peers (${O.with_token} with a token) by TVL, days listed, 7-day change and family: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward.</p></div>`;
+      <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%), stated. q<sub>12m</sub> = odds of a token within a year, a hazard fitted on ${O.n} peers (${O.with_token} with a token) by TVL, days listed, 7-day change and family: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward.</p>
+      <p class="note">Leave-one-out miss by TVL band: ${fit.bands.map((b) => `<b>${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} ×${b.miss.toFixed(1)}</b> (${b.n} tokens; ${rows.filter((r) => r.p.tvl_usd >= b.lo && r.p.tvl_usd < b.hi).length} ranked)`).join(' · ')}.</p></div>`;
   }
 
   // The cover's self-checks, computed here on every load: the gate's rules and the screen-to-board match.
