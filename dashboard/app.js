@@ -106,19 +106,19 @@
   const O = fit.odds, pc = (x) => (x * 100).toFixed(0) + '%';
   function formula() {
     const T = fit.tests, x = (v) => '×' + v.toFixed(2);
-    const used = { flat: 'baseline', size: 'fitted', family: fit.k === Infinity ? 'dropped' : 'k=' + fit.k, growth: 'stated', age: 'via odds' };
+    const used = { flat: 'baseline', spot: 'replaced', size: 'fitted', family: fit.k === Infinity ? 'dropped' : 'k=' + fit.k, growth: 'not used', age: 'via odds' };
     return `<div class="card model">
       <h2>Value model <span>fitted on this snapshot's ${fit.n} trading tokens</span></h2>
       <p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × q<sub>12m</sub></p>
-      <table class="mini tests"><thead><tr><th>Term · held-out median miss</th><th class="num">Leave-one-out</th><th class="num">Walk-forward</th><th class="num">Use</th></tr></thead><tbody>
-      ${T.terms.map((t) => `<tr class="${t.ok ? 'pick' : ''}"><td>${t.label}</td><td class="num">${x(t.loo)}</td><td class="num">${x(t.wf)}</td><td class="num">${used[t.key]}</td></tr>`).join('')}</tbody></table>
-      <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%), stated. q<sub>12m</sub> = odds of a token within a year, a hazard fitted on ${O.n} peers (${O.with_token} with a token) by TVL, days listed, 7-day change and family: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward.</p>
+      <table class="mini tests"><thead><tr><th>Term · held-out median miss</th><th class="num">Leave-one-out</th><th class="num">Walk-fwd</th><th class="num">Family out</th><th class="num">Use</th></tr></thead><tbody>
+      ${T.terms.map((t) => `<tr class="${t.ok ? 'pick' : ''}"><td>${t.label}</td><td class="num">${x(t.loo)}</td><td class="num">${x(t.wf)}</td><td class="num">${x(t.lofo)}</td><td class="num">${used[t.key]}</td></tr>`).join('')}</tbody></table>
+      <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. Family out: each family priced by a fit that never saw it. T = TVL carried a week at its 7-day change (${M.growth_floor}…+${M.growth_cap}%). q<sub>12m</sub> = odds of a token within a year, a hazard fitted on ${O.n} peers (${O.with_token} with a token) by TVL, days listed, 7-day change and family: AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward.</p>
       <p class="note">Leave-one-out miss by TVL band: ${fit.bands.map((b) => `<b>${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} ×${b.miss.toFixed(1)}</b> (${b.n} tokens; ${rows.filter((r) => r.p.tvl_usd >= b.lo && r.p.tvl_usd < b.hi).length} ranked)`).join(' · ')}.</p></div>`;
   }
 
   // The cover's self-checks, computed here on every load: the gate's rules and the screen-to-board match.
   const bRows = R.boardRows(radar), dig = R.digest(bRows), B = window.BOARD || {};
-  const sizeT = fit.tests.terms[1], flatT = fit.tests.terms[0];
+  const [flatT, spotT, sizeT] = fit.tests.terms;
   const nTr = S.protocols.filter((p) => p.mcap_usd > 0).length, nAll = rows.length + radar.products.length + nTr + radar.listed_only;
   const CHECKS = [
     [nAll === S.protocols.length, `${nAll}/${S.protocols.length} protocols: ${rows.length} ranked + ${radar.products.length} set aside + ${nTr} trading + ${radar.listed_only} token, no cap`],
@@ -130,7 +130,7 @@
     [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base, `Launch odds beat chance and the base rate held out: AUC ${O.auc_loo.toFixed(2)}, ${O.auc_wf.toFixed(2)}; Brier ${O.brier.loo.toFixed(3)} vs ${O.brier.loo_base.toFixed(3)}, ${O.brier.wf.toFixed(3)} vs ${O.brier.wf_base.toFixed(3)}`],
     [true, `Bootstrap, 40 refits of curve and odds: ranks 1–${rows.findIndex((r) => r.boot < 1)} stay top 20 every time; ${rows.filter((r) => r.boot > 0 && r.boot < 1).length} rows sometimes`],
     ((w) => [O.gap < 0.2, `Odds curve vs ${O.cohorts.length} listing-age cohorts: within ${Math.round(O.gap * 100)} pts (worst from day ${w.from}: ${pc(w.actual)} hold a token, ${pc(w.fitted)} fitted)`])(O.cohorts.reduce((a, c) => Math.abs(c.actual - c.fitted) > Math.abs(a.actual - a.fitted) ? c : a)),
-    [sizeT.ok, `Size curve beats a flat multiple in both held-out tests: ×${flatT.loo.toFixed(2)}→×${sizeT.loo.toFixed(2)}, ×${flatT.wf.toFixed(2)}→×${sizeT.wf.toFixed(2)}`]
+    [spotT.ok && sizeT.ok, `Size curve beats a flat multiple, and carrying TVL a week at its 7-day change beats spot TVL, in all three held-out tests: ×${flatT.loo.toFixed(2)}→×${spotT.loo.toFixed(2)}→×${sizeT.loo.toFixed(2)} leave-one-out`]
   ];
 
   function board(st) {

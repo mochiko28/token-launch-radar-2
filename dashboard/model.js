@@ -77,11 +77,14 @@
     });
     var pts = order.map(function (k) {
       var t = tok[k];
-      return { p: t.p, tvl: t.tvl, mcap: t.mcap, members: t.members, f: family(t.p), x: Math.log(t.tvl / M.ref_tvl), y: Math.log(clamp(t.mcap / t.tvl, M.ratio_floor, M.ratio_cap)) };
+      // tc = TVL carried a week at its 7-day change, the same T the board values; spot TVL kept as a rival.
+      var tc = t.tvl * (1 + clamp(t.p.change_7d || 0, M.growth_floor, M.growth_cap) / 100);
+      return { p: t.p, tvl: t.tvl, tc: tc, mcap: t.mcap, members: t.members, f: family(t.p), x: Math.log(tc / M.ref_tvl), y: Math.log(clamp(t.mcap / tc, M.ratio_floor, M.ratio_cap)),
+        sx: Math.log(t.tvl / M.ref_tvl), sy: Math.log(clamp(t.mcap / t.tvl, M.ratio_floor, M.ratio_cap)) };
     });
     // Category families enter the curve (k = 0) only if they lower the miss in both held-out tests, else
     // one size curve (k = Infinity). Misses: leave-one-out, against the real, unclipped market cap.
-    var tests = termTests(pts, snap.as_of), k = tests.terms[2].ok ? 0 : Infinity;
+    var tests = termTests(pts, snap.as_of), k = tests.terms[3].ok ? 0 : Infinity;
     var miss = pts.map(function (q, i) { return Math.log(q.mcap / predict(fitPoints(pts.filter(function (o, j) { return j !== i; }), k), q)); });
     var full = fitPoints(pts, k);
     pts.forEach(function (q, i) { q.fit = Math.round(predict(full, q)); q.loo = q.mcap / Math.exp(miss[i]); });
@@ -163,33 +166,37 @@
     });
     var dated = pts.filter(function (q) { return q.p.listed_at; }).sort(function (a, b) { return a.p.listed_at < b.p.listed_at ? -1 : a.p.listed_at > b.p.listed_at ? 1 : bySlug(a.p, b.p); });
     var cut = Math.floor(dated.length * 0.6);
-    function score(make) {
-      var err = function (m, q) { return Math.abs(Math.log(q.mcap / q.tvl) - m(q)); };
-      var loo = pts.map(function (q, i) { return err(make(pts.filter(function (o, j) { return j !== i; })), q); });
-      var m = make(dated.slice(0, cut));
-      var wf = dated.slice(cut).map(function (q) { return err(m, q); });
+    // Each term predicts ln(market cap) on its own size input (spot or carried TVL); scored leave-one-out,
+    // walk-forward, and leave-one-family-out (every family priced by a fit that never saw it).
+    function score(make, spot) {
+      var err = function (m, q) { return Math.abs(Math.log(q.mcap / (spot ? q.tvl : q.tc)) - m(q)); };
       var med = function (a) { return Math.exp(quantile(a.sort(function (u, v) { return u - v; }), 0.5)); };
-      return { loo: med(loo), wf: med(wf), w: make(pts).w };
+      var loo = pts.map(function (q, i) { return err(make(pts.filter(function (o, j) { return j !== i; })), q); });
+      var m = make(dated.slice(0, cut)), wf = dated.slice(cut).map(function (q) { return err(m, q); });
+      var lofo = pts.map(function (q) { return err(make(pts.filter(function (o) { return o.f !== q.f; })), q); });
+      return { loo: med(loo), wf: med(wf), lofo: med(lofo) };
     }
     var T = [
-      ['flat', 'one multiple, no size term', function (q) { return [1]; }],
-      ['size', 'size curve, ln TVL', function (q) { return [1, q.x]; }],
+      ['flat', 'one multiple, spot TVL', function (q) { return [1]; }, 1],
+      ['spot', 'size curve, spot TVL', function (q) { return [1, q.sx]; }, 1],
+      ['size', 'size curve, TVL carried a week', function (q) { return [1, q.x]; }],
       ['family', '+ category family', null],
-      ['growth', '+ 7-day change', function (q) { return [1, q.x, Math.log(1 + q.g)]; }],
+      ['growth', '+ 7-day change, own weight', function (q) { return [1, q.x, Math.log(1 + q.g)]; }],
       ['age', '+ days since listing', function (q) { return [1, q.x, Math.log(1 + q.age / 365)]; }]
     ].map(function (t) {
-      var r = score(t[2] ? function (tr) { return ols(tr, t[2]); } : function (tr) { var f = fitPoints(tr, 0); var m = function (q) { return f.fams[q.f].ln + f.b * q.x; }; m.w = []; return m; });
+      var r = score(t[2] ? function (tr) { return ols(tr, t[2], t[3] ? 'sy' : 'y'); } : function (tr) { var f = fitPoints(tr, 0); return function (q) { return (f.fams[q.f].peers ? f.fams[q.f].ln : f.all) + f.b * q.x; }; }, t[3]);
       r.key = t[0]; r.label = t[1];
       return r;
     });
-    T.forEach(function (t) { t.ok = t.key === 'flat' ? null : t.loo < T[t.key === 'size' ? 0 : 1].loo && t.wf < T[t.key === 'size' ? 0 : 1].wf; });
+    // ok = beats its rival (flat for spot, spot for carried, carried for the rest) in all three tests.
+    T.forEach(function (t, i) { var b = T[i < 3 ? i - 1 : 2]; t.ok = i ? t.loo < b.loo && t.wf < b.wf && t.lofo < b.lofo : null; });
     return { terms: T, wf_n: dated.length - cut, wf_train: cut, wf_from: dated[cut].p.listed_at };
   }
   // Least squares by the normal equations; returns the predictor, its weights on .w.
-  function ols(pts, feats) {
+  function ols(pts, feats, yk) {
     var n = feats(pts[0]).length, A = [], v = [], i, j, r, t;
     for (i = 0; i < n; i++) { A.push([]); v.push(0); for (j = 0; j < n; j++) A[i].push(0); }
-    pts.forEach(function (q) { var f = feats(q); for (i = 0; i < n; i++) { v[i] += f[i] * q.y; for (j = 0; j < n; j++) A[i][j] += f[i] * f[j]; } });
+    pts.forEach(function (q) { var f = feats(q); for (i = 0; i < n; i++) { v[i] += f[i] * q[yk || 'y']; for (j = 0; j < n; j++) A[i][j] += f[i] * f[j]; } });
     for (i = 0; i < n; i++) for (r = 0; r < n; r++) if (r !== i) { t = A[r][i] / A[i][i]; for (j = 0; j < n; j++) A[r][j] -= t * A[i][j]; v[r] -= t * v[i]; }
     var w = v.map(function (x, k) { return x / A[k][k]; });
     var m = function (q) { return feats(q).reduce(function (s, x, k) { return s + x * w[k]; }, 0); };
@@ -203,7 +210,7 @@
     return ('0000000' + h.toString(16)).slice(-8);
   }
   function quantile(a, t) { var i = (a.length - 1) * t, lo = Math.floor(i); return a[lo] + (a[Math.min(lo + 1, a.length - 1)] - a[lo]) * (i - lo); }
-  function predict(f, q) { return q.tvl * Math.exp(f.fams[q.f].ln + f.b * q.x); }
+  function predict(f, q) { return q.tc * Math.exp(f.fams[q.f].ln + f.b * q.x); }
 
   /* Least squares: slope pooled within families, family intercepts pulled to the mean by k pseudo-peers
    * (k = Infinity: one curve for all). */
