@@ -46,7 +46,6 @@
   snap.protocols.forEach((p) => { if (hasToken(p) && firstWord(p.name).length >= 3) w[firstWord(p.name)] = p.name; });
   return w;
  }
- // The fits use the original product exclusions.
  function productOf(p, forBoard) {
   if (p.category === 'CEX') return 'exchange';
   if (p.category === 'Restaked BTC' || /bridge/i.test(p.category || '') || (!forBoard && LIQUID.test(p.category))) return p.category.toLowerCase();
@@ -62,7 +61,7 @@
  }
  function bySlug(a, b) { return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0; }
 
- // The value curve, fitted on trading tokens: one point per CoinGecko id.
+ // One fit point per traded token.
  function calibrate(snap) {
   var tok = {}, order = [];
   snap.protocols.forEach((p) => {
@@ -87,7 +86,7 @@
   var full = fitPoints(pts, k);
   pts.forEach((q, i) => { q.fit = Math.round(predict(full, q)); q.loo = q.mcap / Math.exp(miss[i]); });
   var sorted = miss.slice().sort((u, v) => u - v);
-  // Held-out coverage of the 50% band.
+  // Held-out band coverage.
   var hold = (cal, te) => { cal = cal.slice().sort((u, v) => u - v); var a = quantile(cal, 0.25), b = quantile(cal, 0.75); return [te.filter((m) => m >= a && m <= b).length, te.length]; };
   var di = pts.map((q, i) => i).filter((i) => pts[i].p.listed_at).sort((i, j) => pts[i].p.listed_at < pts[j].p.listed_at ? -1 : pts[i].p.listed_at > pts[j].p.listed_at ? 1 : bySlug(pts[i].p, pts[j].p)), dc = Math.floor(di.length * 0.6);
   var bandWf = hold(di.slice(0, dc).map((i) => miss[i]), di.slice(dc).map((i) => miss[i]));
@@ -102,7 +101,7 @@
    tests: tests, odds: launchOdds(snap) };
  }
 
- // Token-record score F(p, a): logistic fit on ln TVL, ln age, 7d change, family.
+ // Logistic token-record score.
  function launchOdds(snap) {
   var peers = snap.protocols.filter((p) => p.tvl_usd > 0 && !productOf(p));
   var known = peers.map((p) => ageDays(snap.as_of, p.listed_at)).filter((a) => a != null).sort((a, b) => a - b);
@@ -133,7 +132,7 @@
   var loo = pts.map((q, i) => ({ y: q.y, s: dot(logit(pts.filter((o, j) => j !== i), w, 3), q.x) }));
   var dated = pts.filter((q) => q.a != null).sort((u, v) => v.a - u.a || bySlug(u.p, v.p));
   var cut = Math.floor(dated.length * 0.6);
-  // Held out, some inputs zeroed: walk-forward and family-out.
+  // Holdouts with inputs zeroed.
   function held(cols) {
    var z = (q) => ({ y: q.y, x: q.x.map((v, i) => cols.indexOf(i) < 0 ? v : 0) }), wd = logit(dated.slice(0, cut).map(z)), fw = {};
    return { wf: dated.slice(cut).map((q) => ({ y: q.y, s: dot(wd, z(q).x) })),
@@ -159,7 +158,7 @@
  function sig(z) { return 1 / (1 + Math.exp(-z)); }
  function dot(w, x) { return x.reduce((s, v, i) => s + v * w[i], 0); }
 
- // Each value term tested on real market caps, leave-one-out and walk-forward.
+ // Held-out value term tests.
  function termTests(pts, asOf) {
   var ages = pts.map((q) => ageDays(asOf, q.p.listed_at));
   var mid = ages.filter((a) => a != null).sort((a, b) => a - b);
@@ -204,7 +203,7 @@
   m.w = w;
   return m;
  }
- // FNV-1a of each row: main.ts writes it, the cover recomputes and compares.
+ // Shared FNV-1a board digest.
  function digest(rows) {
   var h = 2166136261;
   rows.forEach((r) => { var s = [r.rank, r.slug, r.name, r.implied_value_usd].concat(r.farm_steps).join('|'); for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } });
@@ -213,8 +212,7 @@
  function quantile(a, t) { var i = (a.length - 1) * t, lo = Math.floor(i); return a[lo] + (a[Math.min(lo + 1, a.length - 1)] - a[lo]) * (i - lo); }
  function predict(f, q) { return q.tc * Math.exp(f.fams[q.f].ln + f.b * q.x); }
 
- /* Least squares: slope pooled within families, family intercepts pulled to the mean by k pseudo-peers
- * (k = Infinity: one curve for all). */
+ // Pooled slope with k pseudo-peers shrinking family intercepts.
  function fitPoints(pts, k) {
   var g = {}, one = k === Infinity;
   pts.forEach((q) => { var f = one ? 'all' : q.f; (g[f] = g[f] || []).push(q); });
@@ -243,7 +241,7 @@
  function value(p, fit, asOf, ageFallback, haircut) {
   var fam = fit.families[family(p)];
   var growth = clamp(p.change_7d == null ? 0 : p.change_7d, M.growth_floor, M.growth_cap);
-  var tvlNext = p.tvl_usd * (1 + growth / 100);
+  var drift = 1 + growth / 100, tvlNext = p.tvl_usd * drift;
   var sizeMult = Math.pow(tvlNext / M.ref_tvl, fit.slope);
   var fitted = tvlNext * fam.multiple * sizeMult;
   var age = ageDays(asOf, p.listed_at), ageUsed = age == null ? ageFallback : age;
@@ -253,7 +251,7 @@
 
   // Drop APR: drop_share of the value over the season's dollar-days.
   var apr = fitted * M.drop_share / (tvlNext * (Math.min(ageUsed, M.season_days) + M.farm_days)) * 365;
-  return { slope: fit.slope, family: fam.key, growth: growth, growth_imputed: p.change_7d == null,tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
+  return { slope: fit.slope, family: fam.key, growth: growth, drift: drift, growth_imputed: p.change_7d == null, tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
    fitted: Math.round(fitted), age: age, age_used: ageUsed, time_factor: timeF, f0: f0, implied: implied, haircut: haircut,
    low: Math.round(implied * fit.band_low), high: Math.round(implied * fit.band_high), cap_high: Math.round(fitted * fit.band_high), multiple: implied / p.tvl_usd, apr: apr };
  }
@@ -299,7 +297,7 @@
   function tranches(stake) { return kind === 'vault' ? [[stake, 0], [Math.round(stake / 4), 1]] : [[stake, kind === 'rwa' ? 2 : 0]]; }
   function eligible(stake) { return tranches(stake).reduce((a, t) => a + t[0], 0); }
   function earn(stake) { return tranches(stake).reduce((a, t) => a + t[0] * (M.farm_days - t[1]), 0) * v.apr / 365; }
-  // Break-even certificate: least passing capital and the failing step below it.
+  // Certify the first passing capital.
   var cov = (k) => earn(k) / total(steps(k)).all, cap = (k) => k + Math.round(k / 4), cert = null;
   var stake = dep ? Math.round(dep / 1.25) : 20000;
   for (var k = 400; !dep && k <= 20000; k += 400) if (cov(k) >= M.target_cover) { stake = k; if (k > 400) cert = [cap(k - 400), cov(k - 400), cap(k), cov(k)]; break; }
@@ -333,7 +331,6 @@
   return (head.length + tail.length > 600 ? head.slice(0, 597 - tail.length) + '...' : head) + tail;
  }
 
- // Fit the model and rank the board.
  function build(snap) {
   var fit = calibrate(snap);
   var watch = {};
@@ -352,7 +349,7 @@
   });
   rows.sort((a, b) => b.v.implied - a.v.implied || bySlug(a.p, b.p));
   rows.forEach((r, i) => { r.rank = i + 1; });
-  // Flip threshold: the TVL multiple, others fixed, at which a row would pass the one above it.
+  // TVL multiple needed to pass the preceding rank.
   rows.forEach((r, i) => {
    var up = i && rows[i - 1].v.implied, at = (f) => value(Object.assign({}, r.p, { tvl_usd: r.p.tvl_usd * f }), fit, snap.as_of, ageFallback, r.v.haircut).implied, lo = 1, hi = 2, k;
    if (!up) return;
@@ -361,7 +358,7 @@
    for (k = 0; k < 30; k++) { var m = Math.sqrt(lo * hi); if (at(m) > up) hi = m; else lo = m; }
    r.flip = hi;
   });
-  // Rank crossing: each row's rank under three declared alternatives.
+  // Ranks under alternative models.
   var F0 = (r, a) => fit.odds.F(Object.assign({}, r.p, { change_7d: 0 }), a);
   var ALT = { 'without momentum': (r) => r.v.fitted * Math.pow(r.p.tvl_usd / r.v.tvl_next, 1 + fit.slope) * F0(r, r.v.age_used) * r.v.haircut,
    'score without age': (r) => r.v.fitted * fit.odds.F(r.p, fit.odds.mid) * r.v.haircut,
@@ -394,7 +391,7 @@
   return { model: M, fit: fit, rows: rows, live: live, products: products, listed_only: listedOnly, families: FAMILIES };
  }
 
- /* board.json's rows: the gate's five fields plus the figures behind them. */
+ // Board gate fields and supporting figures.
  function boardRows(radar) {
   return radar.rows.map((r) => {
    return { rank: r.rank, slug: r.p.slug, name: r.p.name, implied_value_usd: r.v.implied,

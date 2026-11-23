@@ -147,6 +147,9 @@ td.proto{min-width:230px;}
 .dhead .sub{color:var(--dim);font-size:12px;margin:0;}
 .dval{text-align:right;}
 .dval b{display:block;font-size:34px;color:var(--accent);font-weight:600;line-height:1.15;}
+.value-eq{font:12px/1.6 var(--mono);color:var(--accent);background:var(--panel2);border:var(--b2);border-radius:var(--r);padding:8px 12px;margin:0 0 16px;}
+.value-eq span{display:inline-block;vertical-align:top;white-space:nowrap;}
+.value-eq small{font:11px var(--sans);}
 .dgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
 .col{display:grid;gap:16px;align-content:start;}
 .receipt td{padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px;}

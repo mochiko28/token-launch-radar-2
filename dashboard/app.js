@@ -1,4 +1,3 @@
-/* Audit: digest() checks board.json, termTests() tests value, farmPlan() costs and times steps. */
 (function () {
  'use strict';
  const R = window.RadarModel, S = window.SNAPSHOT, app = document.getElementById('app');
@@ -26,7 +25,7 @@
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   location.hash.slice(1).split('&').forEach((kv) => {
    const i = kv.indexOf('='), k = kv.slice(0, i);
-   if (i > 0 && own(DEF, k)) try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch (e) { /* keep the default */ }
+   if (i > 0 && own(DEF, k)) try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch (e) {}
   });
   const ok = { view: 'board model aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000 100000 250000', hr: '0 10 25 50 100', bud: '10000 25000 50000 100000 250000 1000000' };
   Object.keys(ok).forEach((k) => { if (!ok[k].split(' ').includes(st[k])) st[k] = DEF[k]; });
@@ -162,7 +161,7 @@
    const on = fams.includes(f[0]), next = on ? fams.filter((x) => x !== f[0]) : fams.concat(f[0]);
    return `<a href="${link({ fam: next.join(',') })}" class="chip f-${f[0]}${on ? ' on' : ''}"><i></i>${esc(f[1])} <b>${famCount[f[0]] || 0}</b></a>`;
   }).join('');
- // Basket: positive-net plans, best net per dollar, within budget and HOURS.
+ // Basket by net per dollar.
   let cap = 0, hrs = 0;
   const pick = shown.filter((r) => r.plan.net > 0).sort((a, b) => b.plan.net / b.plan.stake - a.plan.net / a.plan.stake)
    .filter((r) => cap + r.plan.stake <= +st.bud && hrs + r.plan.minutes / 60 <= HOURS && (cap += r.plan.stake, hrs += r.plan.minutes / 60));
@@ -224,6 +223,12 @@
    `<b>Plan:</b> pays ×${M.target_cover} only if ≥${(r.plan.need_share * 100).toFixed(1)}% of the token reaches depositors (assumed ${M.drop_share * 100}%), and only if a token launches at all.`
   ];
  }
+ function valueEquation(p, v) {
+  const dollars = (n) => '$' + n.toLocaleString('en-US', { maximumFractionDigits: 20 });
+  const terms = [[dollars(p.tvl_usd), 'Snapshot TVL'], [v.drift, '7d drift'], [v.fam_multiple, 'Peer multiple'],
+   [v.size_mult, 'Size curve'], [v.time_factor, 'Token-record score'], [v.haircut, 'Haircut']];
+  return `<p class="value-eq">max($1, round( ${terms.map(([n, l]) => `<span>${n}<small>${l}</small></span>`).join(' × ')} )) = <span><b>${dollars(v.implied)}</b><small>Implied value</small></span></p>`;
+ }
  function detail(st) {
   const r = bySlug[st.p];
   if (!r) return `<p class="empty">No ranked protocol is called ${esc(st.p)}. <a href="${link({ p: '' })}">Back to the board</a></p>`;
@@ -241,6 +246,7 @@
     <p class="sub">${esc(p.chains.join(' · '))}${p.listed_at ? ` — tracked since ${esc(p.listed_at)}` : ' — no listing date on record'}</p>${nameFlag(r)}</div>
    <div class="dval"><small>Implied token value</small><b>${usd(v.implied)}</b><small>50% band ${usd(v.low)} – ${usd(v.high)} · ${mult(v.multiple)} TVL</small><small>Rank ${r.rlo}–${r.rhi} in 80% of 40 bootstrap refits; top 20 in ${pc(r.boot)}</small><small>Rank #${r.rank}; ${Object.keys(r.alt).map((k) => `#${r.alt[k]} ${k}`).join(' · ')}</small></div>
   </section>
+  ${valueEquation(p, v)}
   <div class="dgrid">
    <div class="col">
     <section class="card"><h2>How the value is built <span>model.js value()</span></h2>
