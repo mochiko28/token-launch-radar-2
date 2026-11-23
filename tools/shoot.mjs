@@ -231,7 +231,7 @@ function readPage() {
   const integrity = chips.map(chip => chip.textContent);
   const integrityLines = new Set(chips.map(chip => chip.offsetTop)).size;
   const integrityWidth = chips.length ? [chips[0].parentElement.clientWidth, chips.reduce((sum, chip) => sum + chip.offsetWidth, 0)] : [];
-  const integrityPass = chips.length === 10 && visible(".integrity")
+  const integrityPass = chips.length === 12 && visible(".integrity")
     && integrityLines === 1
     && chips.every(chip => chip.dataset.pass === "true" && chip.textContent.startsWith("✓ "));
   const helpPass = chips.every(chip => {
@@ -245,10 +245,13 @@ function readPage() {
     window.scrollTo(0, 0);
   }
   return {
+    loadMs: performance.getEntriesByType("navigation")[0].domContentLoadedEventEnd,
     checks: read("#checks"), checksPass: document.querySelector("#checks")?.dataset.pass,
     integrity, integrityPass, integrityLines, integrityWidth, helpPass, title: read("h1"), count: read("#shown"), first: read("tbody tr th a"),
     portfolio: read(".portfolio"),
     summary: read(".verdict"), defaultHalfOdds,
+    coverage: read(".coverage"), nested: read(".nested"),
+    valueRange: read(".value-range"), rangeFarm: read(".range-farm"),
     oddsNote: read(".pay + p"), pay: read(".pay"), payVisible: visible(".pay"),
     farms: read(".best-plans"), farmsVisible: visible(".best-plans"),
     farmLinks: [...document.querySelectorAll(".best-plans a")].map(a => a.getAttribute("href")),
@@ -452,7 +455,9 @@ async function shoot(output, destination) {
         throw new Error(`${name}: ${info.rowCheck}`);
       }
       if (["1-board.jpg", "calibration"].includes(name) && (!/carried TVL.*n=\d+/.test(info.curve)
-        || !["Leave-one-out", "Walk-forward", "Family hold-out"].every(label => info.heldOut?.includes(label)))) {
+        || !["Leave-one-out", "Walk-forward", "Family hold-out"].every(label => info.heldOut?.includes(label))
+        || ![80, 50].every(level => info.coverage?.includes(`${level}% range ${(value.ranges.heldOut[level] * 100).toFixed(0)}%`))
+        || !info.nested?.includes(`Nested walk-forward ${value.nested.miss.toFixed(2)}×`))) {
         throw new Error(`${name}: calibration summary is incomplete.`);
       }
       if (name === "1-board.jpg" && (info.rows.length !== board.length || !info.chart)) throw new Error("The full board did not render.");
@@ -477,6 +482,8 @@ async function shoot(output, destination) {
         for (const row of info.termRows) console.log(`  ${row.join(" | ")}`);
       }
       if (name === "2-detail.jpg" && (info.steps.length < 3
+        || !/^80% \$.*–\$.* · 50% \$.*–\$/u.test(info.valueRange)
+        || !/Expected net.*(robust across 80% range|flips to .+ at the (low|high) end)/iu.test(info.rangeFarm)
         || info.labels.map(label => label.split(" ")[0]).join() !== "1,2a,2b,2c,3a,3b,3c,4,5,6,7"
         || !/Launch within (30|90|180|365) d: [\d.]+% \(q\) vs p\*/.test(info.summary)
         || !info.oddsNote?.includes("no launch dates") || !info.oddsNote.includes("F walk-forward AUC")
@@ -505,6 +512,8 @@ async function shoot(output, destination) {
       writeFileSync(join(destination, name), bytes);
       const content = [info.title, info.count, info.rowCheck, info.first, info.chart, info.summary, info.defaultHalfOdds, info.portfolio].filter(Boolean).join(" · ");
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
+      if (name === "1-board.jpg") console.log(`  DOM ready in ${info.loadMs} ms · ${info.coverage} · ${info.nested}`);
+      if (info.valueRange) console.log(`  ${info.valueRange} · ${info.rangeFarm}`);
       if (info.integrity.length) console.log(`  ${info.integrityLines} integrity line · ${info.integrity.join(" · ")}`);
     }
     console.log("Firefox reported no console errors or uncaught exceptions.");
