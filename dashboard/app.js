@@ -28,14 +28,13 @@ const { counts, verdicts, stress, portfolio, value, odds, assumptions } = model;
 const { baseline, selected, trials } = value.validation;
 const families = [...new Set(model.rows.map(row => row.family))].sort();
 const chains = [...new Set(model.rows.flatMap(row => row.chains))].sort();
-const verdictOrder = { FARM: 0, MARGINAL: 1, SKIP: 2 };
-const ratings = Object.keys(verdictOrder);
+const ratings = ["FARM", "MARGINAL", "SKIP"];
 const scenarios = [["doubleCost", "2× all-in cost", "2× cost"], ["halfShare", "½ depositor share", "½ share"]];
 const columns = {
 	rank: ["Rank", row => row.rank, "asc"], name: ["Protocol", row => row.name, "asc"],
-	value: ["Implied value", row => row.score, "desc"], odds: ["12m odds", row => row.s, "desc"],
+	value: ["Implied value", row => row.score, "desc"], odds: ["Token odds", row => row.tokenOdds, "desc"],
 	tvl: ["TVL", row => row.tvl_usd, "desc"], growth: ["7d TVL", row => row.change_7d, "desc"],
-	days: ["Days listed", row => row.ageDays, "desc"], verdict: ["Verdict", row => verdictOrder[row.plan.verdict], "asc"],
+	days: ["Days listed", row => row.ageDays, "desc"], verdict: ["Verdict", row => ratings.indexOf(row.plan.verdict), "asc"],
 	net: ["Expected net", row => row.plan.net, "desc"]
 };
 const filters = [
@@ -88,19 +87,15 @@ function kpis() {
 		[counts.setAside, "products set aside"], [counts.ranked, "pre-token ranked"]];
 	const tests = get => `<div class="readings">${["loo", "walk"].map((key, i) =>
 		`<div>${get(key)}<span>${i ? "Walk-forward" : "Leave-one-out"}</span></div>`).join("")}</div>`;
-	return `<section class="kpis" aria-label="Snapshot and model validation">
+	return `<section class=kpis aria-label="Model validation">
 		<div class="kpi"><h2>Snapshot universe</h2><strong>${counts.total}</strong>
 			<div class="group-bar" aria-hidden="true">${groups.map(([n]) => `<span style="flex:${n}"></span>`).join("")}</div>
 			<div class="groups">${groups.map(([n, label]) => `<span><b>${n}</b> ${label}</span>`).join("")}</div></div>
 		<div class="kpi"><h2>Held-out value miss</h2>
 			${tests(key => `<strong>${multiple(selected[key].miss)}</strong><small> vs ${multiple(baseline[key].miss)}</small>`)}
 			<p>Median miss vs flat TVL ratio</p></div>
-		<div class="kpi"><h2>Token-status AUC</h2>
-			${tests(key => {
-				const test = odds.validation[key];
-				return `<strong>${auc(odds.useHazard ? test.hazardAuc : test.auc)}</strong><small> / ${auc(odds.useHazard ? test.auc : test.hazardAuc)}</small>`;
-			})}
-		<p>${odds.useHazard ? "Daily hazard / logistic" : `Logistic / hazard trial · ${odds.exposure.toFixed(1)}d exposure`}</p></div>
+		<div class="kpi"><h2>Token odds · held-out AUC</h2>${tests(key => `<strong>${auc(odds.validation[key].auc)}</strong>`)}
+			<p>Token record from TVL + listing age</p></div>
 		<div class="kpi coverage"><h2>Watchlist coverage</h2><strong>${counts.watchlistCovered}<small> / ${counts.watchlistTotal}</small></strong>
 			<p>TVL floor ${shortUsd(snapshot.floor_usd)}</p></div></section>`;
 }
@@ -123,37 +118,33 @@ function portfolioStrip(state) {
 		${metric("Expected net", net(gain), "", tone(gain))}</dl></section>`;
 }
 
-function board(state) {
-	return `${heading("Pre-token rankings", "Token values and 12-month farm plans.")}
+function boardShell(state) {
+	return `${heading("Pre-token rankings", "Token values · 365-day farm budgets")}
 		${kpis()}
 		${state.scope === "watchlist" ? portfolioStrip(state) : ""}
-		<div class="board-grid"><section class="panel">
-				<div class="section-head"><h2>Ranked protocols</h2><div id="row-count" role="status"></div></div>
-				<div class="filters">
-					<label>Search<input id="filter-q" name="q" type="search" value="${esc(state.q)}" placeholder="Name or slug" autocomplete="off"></label>
-					${filters.map(spec => filter(spec, state)).join("")}
-				</div>
-				<div id="comparison"></div>
-				<div id="results"></div>
-			</section>
-			<aside class="board-aside">
-				<section class="panel yield-panel">
-					<h2>Airdrop yield by age</h2><p>12-month net at chosen capital</p>
-					<div id="yield-chart"></div>
-					<div class="chart-key"><span class="farm-dot">FARM</span><span class="marginal-dot">MARGINAL</span><span class="skip-dot">SKIP</span></div>
-				</section>
-				<section class="stress-panel"><h2>Farm sensitivity</h2><p>Capital re-sized on the same ladder</p>
-				${facts(["Scenario", ...ratings], [
-					["Base", ...Object.values(verdicts)], ...scenarios.map(([key, , label]) =>
-						[label, ...ratings.map(v => `${stress[key].all[v]} <small>(${stress[key].farm[v]})</small>`)])
-					])}<p>All rows. Counts in parentheses start at FARM.</p></section>
-			</aside>
-		</div>`;
+	<div class="board-grid"><section class="panel">
+		<div class="section-head"><h2>Ranked protocols</h2><div class="board-status" role="status"><span id="row-count"></span><span id="row-check"></span></div></div>
+		<div class="filters">
+			<label>Search<input id="filter-q" type="search" value="${esc(state.q)}" placeholder="Name or slug" autocomplete="off"></label>
+			${filters.map(spec => filter(spec, state)).join("")}
+		</div>
+		<div id="comparison"></div><div id="results"></div>
+	</section><aside class="board-aside">
+		<section class="panel yield-panel">
+			<h2>Airdrop yield by age</h2><p>Odds-weighted net at modeled capital</p>
+			<div id="yield-chart"></div>
+			<div class="chart-key">${ratings.map(v => `<span class="${v.toLowerCase()}-dot">${v}</span>`).join("")}</div>
+		</section>
+		<section class="stress-panel"><h2>Farm sensitivity</h2><p>Capital re-sized on the same ladder</p>
+		${facts(["Scenario", ...ratings], [
+			["Base", ...Object.values(verdicts)], ...scenarios.map(([key, , label]) =>
+				[label, ...ratings.map(v => `${stress[key].all[v]} <small>(${stress[key].farm[v]})</small>`)])
+		])}<p>All rows. Counts in parentheses start at FARM.</p></section>
+	</aside></div>`;
 }
 
 function matchingRows(state) {
 	const query = state.q.trim().toLowerCase();
-	const key = columns[state.sort][1];
 	return model.rows.filter(row => (!query || `${row.name} ${row.slug}`.toLowerCase().includes(query))
 		&& (state.scope !== "watchlist" || row.watchlist)
 		&& (!state.family || row.family === state.family)
@@ -161,24 +152,29 @@ function matchingRows(state) {
 		&& (!state.verdict || row.plan.verdict === state.verdict)
 		&& row.tvl_usd >= Number(state.tvl)
 		&& (!state.flag || Boolean(row.flags.length) === (state.flag === "flagged"))
-	).sort((a, b) => {
-		const x = key(a), y = key(b);
-		if (x == null || y == null) return Number(x == null) - Number(y == null) || a.rank - b.rank;
-		const order = typeof x === "string" ? x.localeCompare(y) : x - y;
-		return order * (state.dir === "asc" ? 1 : -1) || a.rank - b.rank;
-	});
+	).sort((a, b) => compareRows(a, b, state));
 }
+
+function compareRows(a, b, state) {
+	const key = columns[state.sort][1];
+	const x = key(a), y = key(b);
+	if (x == null || y == null) return Number(x == null) - Number(y == null) || a.rank - b.rank;
+	const order = typeof x === "string" ? x.localeCompare(y) : x - y;
+	return order * (state.dir === "asc" ? 1 : -1) || a.rank - b.rank;
+}
+
+const factorText = (value, odds, issuer) => `${shortUsd(value)} × ${pct(odds, 1)} × ${issuer}`;
 
 function tableRow(row, state) {
 	const plan = row.plan;
 	const picked = state.compare.includes(row.slug);
-	return `<tr data-slug="${esc(row.slug)}" data-value="${row.score}">
+	return `<tr data-slug="${esc(row.slug)}" data-value="${row.score}" data-launch="${row.launchValue}" data-odds="${row.tokenOdds}" data-issuer="${row.haircut}">
 		<td class="rank">${row.rank}</td>
 		<th scope="row">${taggedLink(row, state)}${row.flags.length ? ' <span title="Issuer flag">!</span>' : ""}
 			<small>${esc(row.category || row.family)}${row.watchlist ? ' <span class="watch-label" title="Watchlist" aria-label="Watchlist">◆</span>' : ""}</small></th>
 		<td class="value" title="${usd(row.score)}"><b>${shortUsd(row.score)}</b>
-			<small>${shortUsd(row.launchValue)} × ${pct(row.s, 1)}${row.haircut !== 1 ? " × " + row.haircut : ""}</small></td>
-		<td>${pct(row.s, 1)}</td><td>${shortUsd(row.tvl_usd)}</td>
+			<small>${factorText(row.launchValue, row.tokenOdds, row.haircut)}</small></td>
+		<td>${pct(row.tokenOdds, 1)}</td><td>${shortUsd(row.tvl_usd)}</td>
 		<td class="${tone(row.change_7d)}">${change(row.change_7d)}</td>
 		<td>${days(row)}</td>
 		<td>${badge(plan.verdict)}</td><td class="${tone(plan.net)}">${net(plan.net)}</td>
@@ -188,35 +184,60 @@ function tableRow(row, state) {
 
 function comparison(state) {
 	const picks = state.compare.map(slug => bySlug.get(slug));
-	if (!picks.length) return '<p class="compare-hint">Use the Compare column to select 2–3 protocols.</p>';
+	if (!picks.length) return '<p class="compare-hint">Select 2–3 protocols to compare.</p>';
 	const update = (items, label) => `<a class="button" href="${esc(link("board", { ...state, compare: items }))}">${label}</a>`;
 	const headers = picks.map(row => taggedLink(row, state) + " " +
 		update(state.compare.filter(slug => slug !== row.slug), `<span title="Remove ${esc(row.name)}">×</span>`));
 	const metrics = [
-		["Implied value", row => shortUsd(row.score)], ["12-month odds (s)", row => pct(row.s)],
+		["Implied value", row => shortUsd(row.score)], ["Token odds (s)", row => pct(row.tokenOdds)],
 		["TVL", row => shortUsd(row.tvl_usd)], ["7d TVL", row => change(row.change_7d)],
 		["Days listed", days], ["Verdict", row => badge(row.plan.verdict)],
-		["Capital", row => usd(row.plan.capital)], ["Expected net", row => net(row.plan.net)]
+		["Modeled capital", row => usd(row.plan.capital)], ["Modeled net", row => net(row.plan.net)]
 	];
 	return `<section class="compare-panel"><div class="section-head"><h2>Compare protocols</h2>${update([], "Clear")}</div>
 		${picks.length > 1 ? facts(["Metric", ...headers], metrics.map(([label, read]) => [label, ...picks.map(read)]))
 			: `<p class="compare-hint">${headers[0]} · Select another protocol.</p>`}</section>`;
 }
 
-function drawRankings(state) {
+function verifyRows(rows, state) {
+	const rendered = [...document.querySelectorAll("#results tbody tr")];
+	const digest = api.digest(model.board.rows);
+	const expectedHeader = state.dir === "asc" ? "ascending" : "descending";
+	const sortHeader = $("#results [aria-sort]");
+	let sorted = rendered.length === rows.length && (!rows.length ||
+		sortHeader?.firstElementChild.id === `sort-${state.sort}` && sortHeader.getAttribute("aria-sort") === expectedHeader);
+	const matched = rendered.filter((tr, i) => {
+		const { slug, value, launch, odds, issuer } = tr.dataset;
+		const row = bySlug.get(slug), board = model.board.rows[row?.rank - 1];
+		sorted &&= row === rows[i] && (!i || compareRows(rows[i - 1], row, state) <= 0);
+		if (!board || board.slug !== slug) return false;
+		const { rank, implied_value_usd: score, launch_value_usd: base, token_odds: s, issuer_factor: factor } = board;
+		return tr.cells[0]?.textContent === String(rank) && +value === score
+			&& tr.cells[2]?.title === usd(score) && tr.querySelector(".value b")?.textContent === shortUsd(score)
+			&& +launch === base && +odds === s && +issuer === factor
+			&& tr.querySelector(".value small")?.textContent === factorText(base, s, factor)
+			&& tr.cells[3]?.textContent === pct(s, 1);
+	}).length;
+	const check = $("#row-check");
+	const sameDigest = digest === boardDigest;
+	check.dataset.pass = String(sameDigest && sorted && matched === rendered.length);
+	check.textContent = `${matched}/${rows.length} rows match board.json · digest ${sameDigest ? digest : "mismatch"}${sorted ? "" : " · sort mismatch"}`;
+}
+
+function renderBoard(state) {
 	const rows = matchingRows(state);
 	$("#row-count").textContent = `${rows.length} of ${state.scope === "watchlist" ? counts.watchlistCovered : counts.ranked} shown`;
 	$("#results").innerHTML = rows.length ? `
-		<div class="scroll" tabindex="0" role="region" aria-label="Rankings">
-		<table class="rankings"><thead><tr>${Object.entries(columns).map(([key, [label]]) => {
+		<div class=scroll tabindex=0 role=region aria-label="Rankings"><table class=rankings>
+		<thead><tr>${Object.entries(columns).map(([key, [label]]) => {
 			const active = key === state.sort;
 			const dir = active ? state.dir === "asc" ? "desc" : "asc" : columns[key][2];
 			const next = esc(link("board", { ...state, sort: key, dir }));
-			return `<th scope="col"${active ? ` aria-sort="${state.dir === "asc" ? "ascending" : "descending"}"` : ""}>
-				<a id="sort-${key}" href="${next}">${label}${active ? ` <span aria-hidden="true">${state.dir === "asc" ? "↑" : "↓"}</span>` : ""}</a></th>`;
-		}).join("")}<th scope="col">Compare</th></tr></thead>
-		<tbody>${rows.map(row => tableRow(row, state)).join("")}</tbody></table></div>`
-		: '<p class="empty">No protocols match these filters.</p>';
+			return `<th scope=col${active ? ` aria-sort=${state.dir === "asc" ? "ascending" : "descending"}` : ""}>
+				<a id="sort-${key}" href="${next}">${label}${active ? ` <span aria-hidden=true>${state.dir === "asc" ? "↑" : "↓"}</span>` : ""}</a></th>`;
+		}).join("")}<th scope=col>Compare</th></tr></thead><tbody>${rows.map(row => tableRow(row, state)).join("")}</tbody></table></div>`
+		: '<p class=empty>No protocols match these filters.</p>';
+	verifyRows(rows, state);
 	$("#yield-chart").innerHTML = yieldChart(rows);
 	$("#comparison").innerHTML = comparison(state);
 }
@@ -233,11 +254,12 @@ function yieldChart(rows) {
 	const interval = Math.ceil((maxYield - minYield) * 100 / 6) / 100;
 	const ticks = [];
 	for (let rate = minYield; rate <= maxYield + 1e-9; rate += interval) ticks.push(rate);
-	return `<svg viewBox="0 0 288 170" role="img" aria-label="Days without a recorded token vs expected net airdrop yield">
-		${ticks.map(rate => `<path class="gridline" d="M${left},${y(rate)}H${right}"/>
-			<text x="${left - 7}" y="${y(rate) + 4}" text-anchor="end">${pct(rate, 0)}</text>`).join("")}
-		${[0, maxDays / 3, maxDays * 2 / 3, maxDays].map(days => `<path class="gridline" d="M${x(days)},${top}V${bottom}"/>
-			<text x="${x(days)}" y="148" text-anchor="${days === 0 ? "start" : days === maxDays ? "end" : "middle"}">${integer(days)}</text>`).join("")}
+	return `<svg viewBox="0 0 288 170" role=img aria-label="Listing age vs expected airdrop yield">
+		${ticks.map(rate => `<path d="M${left},${y(rate)}H${right}"/><text x="${left - 7}" y="${y(rate) + 4}" text-anchor="end">${pct(rate, 0)}</text>`).join("")}
+		${[0, 1, 2, 3].map(i => {
+			const days = i * maxDays / 3;
+			return `<path d="M${x(days)},${top}V${bottom}"/><text x="${x(days)}" y="148" text-anchor="${["start", "middle", "middle", "end"][i]}">${integer(days)}</text>`;
+		}).join("")}
 		${[...points].reverse().map(row => `<circle class="point-${row.plan.verdict.toLowerCase()}" cx="${x(row.ageDays)}" cy="${y(row.plan.expectedYield)}" r="3.1">
 			<title>${esc(row.name)} · ${row.ageDays} days · ${pct(row.plan.expectedYield)}</title></circle>`).join("")}
 		<text x="${(left + right) / 2}" y="167" text-anchor="middle">Days without a recorded token</text>
@@ -248,9 +270,9 @@ const metric = (label, reading, note = "", style = "") =>
 	`<div><dt>${label}</dt><dd class="${style}">${reading}</dd>${note ? `<small>${note}</small>` : ""}</div>`;
 
 function facts(headers, rows) {
-	return `<div class="scroll" tabindex="0"><table class="facts">
-		<thead><tr>${headers.map(title => `<th scope="col">${title}</th>`).join("")}</tr></thead>
-		<tbody>${rows.map(([first, ...cells]) => `<tr><th scope="row">${first}</th>${cells.map(cell => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody>
+	return `<div class=scroll tabindex=0><table class=facts>
+		<thead><tr>${headers.map(title => `<th scope=col>${title}</th>`).join("")}</tr></thead>
+		<tbody>${rows.map(([first, ...cells]) => `<tr><th scope=row>${first}</th>${cells.map(cell => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody>
 		</table></div>`;
 }
 
@@ -260,47 +282,44 @@ function detail(row, state) {
 	const back = `<a class="back-link" href="${esc(link("board", state))}">← Back to rankings</a>`;
 	if (!row) return back + heading("Protocol unavailable");
 	const plan = row.plan;
-	const stepLabels = ["Decision", "Eligibility check", "Fund route", "Deposit", "Weekly upkeep", "Exit rule", "Claim & sell"];
+	const farm = plan.verdict === "FARM";
+	const stepLabels = farm ? ["Eligibility", "Fund route", "Deposit", "Weekly upkeep", "Stop conditions", "Claim & sell"]
+		: ["Token status", "Terms and fees", "Revisit trigger"];
 	const summary = [esc(row.category || row.family), shortUsd(row.tvl_usd) + " TVL",
 		row.ageDays == null ? "Listing date unavailable" : `${days(row)} days listed`, "No token recorded"];
 	const label = `<div class="detail-label">Rank ${row.rank} / ${counts.ranked}${row.watchlist ? " · ◆ Watchlist" : ""}</div>`;
 	const stressRows = [["Base", plan], ...scenarios.map(([key, label]) => [label, plan.stress[key]])]
 		.map(([label, result]) => [label, usd(result.capital), badge(result.verdict), net(result.net)]);
-	const oddsEquation = odds.useHazard
-		? `s = 1 − exp(−365 × ${row.rate.toPrecision(4)}) = ${pct(row.s)}`
-		: `s = 1 − (1 − ${pct(row.observed)})<sup>365 / ${odds.exposure.toFixed(1)}</sup> = ${pct(row.s)}`;
 	const range = (low, high) => `${shortUsd(low)}–${shortUsd(high)}`;
-	const factors = [[usd(row.launchValue), "Value if launched"], [pct(row.s), "12-month odds"], [row.haircut.toFixed(2), "Issuer factor"]];
+	const factors = [[usd(row.launchValue), "Value if launched"], [pct(row.tokenOdds), "Token odds (s)"], [row.haircut.toFixed(2), "Issuer factor"]];
 	return `${back}${heading(esc(row.name), summary.join(" · "), label)}
-		<div class="detail-grid">
-			<section class="panel plan-panel">
-				<div class="section-head"><div><h2>Farm plan</h2><p>${row.family} on ${esc(plan.chain.name)} · ${plan.handsOnMinutes} min hands-on</p></div>${badge(plan.verdict)}</div>
-				<dl class="metrics">
-					${metric("Capital", usd(plan.capital))}${metric("Expected drop", money(plan.expectedGross))}
-					${metric("All-in cost", money(plan.cost), `${money(plan.timeCost)} time included`)}
-					${metric("Expected net", net(plan.net), `${pct(plan.conditionalApr)} net APR if launched`, tone(plan.net))}
-				</dl>
-				<ol class="plan-steps">${plan.steps.map((step, i) =>
-					`<li><h3>${stepLabels[i]}</h3><p>${esc(step)}</p></li>`).join("")}</ol>
-			</section>
-			<div class="detail-aside">
-				<section class="panel valuation">
-					<h2>Implied token value</h2>
-					<div class="large-value">${usd(row.score)}</div>
-					<div class="equation">${factors.map(([n, label]) => `<div><b>${n}</b><small>${label}</small></div>`).join("<span>×</span>")}</div>
-					<p class="odds-equation">${oddsEquation} <small>· ${odds.useHazard ? "TVL hazard/day" : "TVL + listing-age status odds"}</small></p>
-					<dl class="band">
-						${metric("Launch value · p10–p90", range(row.band.low, row.band.high))}
-						${metric("Odds-weighted band", range(row.band.weightedLow, row.band.weightedHigh))}
-					</dl>
-					<p class="flag-note">${row.flags.length ? row.flags.map(esc).join(" · ") + ". Verdict capped at MARGINAL." : "No issuer flags in the snapshot."}</p>
-				</section>
-				${inset("Stress · re-sized capital", facts(["Scenario", "Capital", "Verdict", "Expected net"], stressRows))}
-				${inset("Nearest traded peers", facts(["Protocol", "TVL", "Market cap"], row.peers.map(peer => [
-						esc(peer.name), shortUsd(peer.tvl_usd), shortUsd(peer.mcap_usd)
-					])))}
-			</div>
-		</div>`;
+	<div class="detail-grid"><section class="panel plan-panel">
+		<div class="section-head"><div><h2>${farm ? "Farm plan" : "Research plan"}</h2><p>${row.family} on ${esc(plan.chain.name)} · ${farm
+			? `${plan.handsOnMinutes} min hands-on` : `$0 deposited · ${plan.researchTime} min · ${money(plan.researchCost)} time`}</p></div>${badge(plan.verdict)}</div>
+		<dl class=metrics>
+			${metric(farm ? "Capital" : "Modeled ticket", usd(plan.capital))}
+			${metric(farm ? "Expected drop" : "Modeled drop", money(plan.expectedGross))}
+			${metric(farm ? "All-in cost" : "Modeled cost", money(plan.cost), `${money(plan.timeCost)} time included`)}
+			${metric(farm ? "Expected net" : "Modeled net", net(plan.net), `${pct(plan.conditionalApr)} net APR if launched`, tone(plan.net))}
+		</dl>
+		<ol class=plan-steps>${plan.steps.map((step, i) =>
+			`<li><h3>${stepLabels[i]}</h3><p>${esc(step)}</p></li>`).join("")}</ol>
+	</section><div class="detail-aside">
+		<section class="panel valuation">
+			<h2>Implied token value</h2><div class="large-value">${usd(row.score)}</div>
+			<div class="equation">${factors.map(([n, label]) => `<div><b>${n}</b><small>${label}</small></div>`).join("<span>×</span>")}</div>
+			<p class=odds-equation>Validated on snapshot token records. No launch dates in the snapshot.</p>
+			<dl class="band">
+				${metric("Launch value · p10–p90", range(row.band.low, row.band.high))}
+				${metric("Odds-weighted band", range(row.band.weightedLow, row.band.weightedHigh))}
+			</dl>
+			<p class="flag-note">${row.flags.length ? row.flags.map(esc).join(" · ") + ". Verdict capped at MARGINAL." : "No issuer flags."}</p>
+		</section>
+		${inset("Stress · re-sized capital", facts(["Scenario", "Capital", "Verdict", "Expected net"], stressRows))}
+		${inset("Nearest traded peers", facts(["Protocol", "TVL", "Market cap"], row.peers.map(peer => [
+			esc(peer.name), shortUsd(peer.tvl_usd), shortUsd(peer.mcap_usd)
+		])))}
+	</div></div>`;
 }
 
 function calibration() {
@@ -336,7 +355,7 @@ function audit(state) {
 
 function assumptionsDrawer() {
 	const labels = { year: "Plan days", growthClip: "Growth clip (%)", missingGrowth: "Missing growth (%)",
-		hourlyUsd: "Hands-on time (USD/hour)", haircut: "Flagged issuer factor", capitalLadder: "Capital ladder (USD)" };
+		hourlyUsd: "Time (USD/hour)", haircut: "Issuer factor", capitalLadder: "Capital ladder (USD)" };
 	const label = key => labels[key] || key.replace(/[A-Z]/g, c => " " + c.toLowerCase()).replace(/^./, c => c.toUpperCase());
 	const display = value => (Array.isArray(value) ? value : [value]).map(n => typeof n === "number" && Number.isInteger(n)
 		? integer(n) : esc(n)).join(" · ");
@@ -348,7 +367,7 @@ function assumptionsDrawer() {
 				[chain, money(gas), money(fund), min + " min"])],
 		["Mechanisms", ["Family", "Actions", "Fees", "Enter", "Deposit"], Object.entries(mechanisms)
 			.map(([family, [actions, bps, min, action]]) => [family, actions, bps + " bps", min + " min", action])],
-		["Category families", ["Family", "Categories"], Object.entries(families).map(([f, cats]) => [f, cats.join(", ")])]
+		["Category families", ["Family", "Categories"], Object.entries(families).map(([f, cats]) => [f, cats.replaceAll("|", ", ")])]
 	];
 	return `<div class="drawer"><ul>${notes.map(note => `<li>${esc(note)}</li>`).join("")}</ul>
 		${blocks.map(([title, headers, rows]) => `<h3>${title}</h3>` + facts(headers, rows)).join("")}</div>`;
@@ -360,12 +379,12 @@ function render() {
 	const state = readRoute();
 	const activeId = document.activeElement?.id;
 	const { route, slug } = state;
-	const row = route === "detail" ? model.rows.find(p => encodeURIComponent(p.slug) === slug) : null;
+	const row = route === "detail" && model.rows.find(p => encodeURIComponent(p.slug) === slug);
 	renderNavigation(state);
 	document.title = `${row?.name ?? routes[route]} · Launch Radar`;
-	view.innerHTML = route === "detail" ? detail(row, state) : route === "audit" ? audit(state)
-		: route === "calibration" ? calibration() : board(state);
-	if (route === "board") drawRankings(state);
+	view.innerHTML = route === "detail" ? detail(row, state) : route === "audit" ? audit(state) :
+		route === "calibration" ? calibration() : boardShell(state);
+	if (route === "board") renderBoard(state);
 	if (activeId) document.getElementById(activeId)?.focus();
 	if (activeRoute !== route) window.scrollTo(0, 0);
 	activeRoute = route;
@@ -381,7 +400,7 @@ $("#open-assumptions").addEventListener("click", () => $("#assumptions").showMod
 function updateBoard(state) {
 	history.replaceState(null, "", link("board", state));
 	renderNavigation(state);
-	drawRankings(state);
+	renderBoard(state);
 }
 
 view.addEventListener("input", ({ target }) => {
@@ -390,9 +409,10 @@ view.addEventListener("input", ({ target }) => {
 
 function renderNavigation(state) {
 	$("#home-link").href = link("board", state);
+	const active = state.route === "detail" ? "board" : state.route;
 	document.querySelectorAll("#nav a").forEach(a => {
 		a.href = link(a.dataset.route, state);
-		if (a.dataset.route === (state.route === "detail" ? "board" : state.route)) a.setAttribute("aria-current", "page");
+		if (a.dataset.route === active) a.setAttribute("aria-current", "page");
 		else a.removeAttribute("aria-current");
 	});
 }

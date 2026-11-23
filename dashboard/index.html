@@ -10,26 +10,24 @@
 	<script src="app.js" defer></script>
 </head>
 <body>
-	<header class="site-header">
-		<div class="frame header-inner">
-			<a class="brand" id="home-link" href="#board"><span class="radar" aria-hidden="true"></span>Launch Radar</a>
-			<nav id="nav" aria-label="Primary">
-				<a data-route="board" href="#board">Rankings</a>
-				<a data-route="calibration" href="#calibration">Calibration</a>
-				<a data-route="audit" href="#audit">Top-20 audit</a>
-			</nav>
-			<span id="checks" role="status">Checking model…</span>
-			<button class="button" id="open-assumptions" aria-haspopup="dialog">Assumptions ↗</button>
-		</div>
-	</header>
-	<main id="view" class="frame"></main>
-	<footer class="frame" id="source"></footer>
-	<dialog id="assumptions" aria-label="Model assumptions">
-		<div class="dialog-head">
-			<h2>Model assumptions</h2>
-			<form method="dialog"><button class="button" autofocus>Close</button></form>
-		</div>
-		<div id="assumption-content"></div>
-	</dialog>
+<header class="site-header"><div class="frame header-inner">
+	<a class="brand" id="home-link" href="#board"><span class="radar" aria-hidden="true"></span>Launch Radar</a>
+	<nav id="nav" aria-label="Primary">
+		<a data-route="board" href="#board">Rankings</a>
+		<a data-route="calibration" href="#calibration">Calibration</a>
+		<a data-route="audit" href="#audit">Top-20 audit</a>
+	</nav>
+	<span id="checks" role="status">Checking model…</span>
+	<button class="button" id="open-assumptions" aria-haspopup="dialog">Assumptions ↗</button>
+</div></header>
+<main id="view" class="frame"></main>
+<footer class="frame" id="source"></footer>
+<dialog id="assumptions" aria-label="Model assumptions">
+	<div class="dialog-head">
+		<h2>Model assumptions</h2>
+		<form method="dialog"><button class="button" autofocus>Close</button></form>
+	</div>
+	<div id="assumption-content"></div>
+</dialog>
 </body>
 </html>

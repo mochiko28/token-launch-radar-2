@@ -7,13 +7,14 @@
 	const DAY = 86_400_000;
 	const A = {
 		growthClip: [-30, 30], missingGrowth: 0, haircut: 0.65, year: 365,
-		tvlReference: 100_000_000, missingAgeFallback: 365, minOddsAuc: [0.716, 0.697],
+		tvlReference: 100_000_000, missingAgeFallback: 365,
 		familyPenalty: 2, oddsPenalty: 1, valueWarmup: 25, oddsWarmup: 60,
 		bootstrapDraws: 192, bootstrapSeed: 918273, bandQuantiles: [0.1, 0.9],
 		hourlyUsd: 20, depositorShare: 0.05, competingTvlShare: 0.20,
 		capitalLadder: [1_000, 2_500, 5_000, 10_000, 25_000, 50_000], portfolioCapital: 10_000,
 		farmMultiple: 2, stressCost: 2, stressShare: 0.5, weeklyMinutes: 2,
 		routeHandsOnMinutes: 6, eligibilityMinutes: 2, exitTvlShare: 0.75, exitMinutes: 10,
+		weeklyLossBuffer: 10, researchMinutes: [5, 8, 4], reviewDays: 7,
 		claimMinutes: 8, claimActions: 2,
 		firstSaleShare: 0.5, peerCount: 3,
 		peerCategoryPenalty: 1, peerFamilyPenalty: 0.45
@@ -41,31 +42,31 @@
 	const FALLBACK_CHAIN = [1.5, 5, 30];
 
 	const MECHANISMS = {
-		Lending: [3, 4, 9, "Supply a supported stablecoin to a liquid lending market. Leave borrowing disabled"],
-		Vault: [3, 12, 12, "Verify strategy and redemption terms, then deposit a supported stablecoin"],
-		LP: [4, 30, 14, "Enter a liquid pair with balanced assets and verify the LP receipt"],
-		Perps: [4, 25, 14, "Post collateral if it earns credit without leverage"],
-		Staking: [3, 12, 11, "Verify withdrawal delays and slashing terms before staking"],
-		RWA: [3, 25, 16, "Verify eligibility and redemption windows, then subscribe to a liquid share"],
-		Stablecoin: [4, 18, 13, "Check collateral and peg liquidity, then use unlevered savings or mint-and-redeem"],
-		Network: [3, 15, 13, "Use a documented deposit or delegation and test a small withdrawal"],
-		Insurance: [3, 25, 14, "Check claim exposure and the queue, then use an open liquidity pool"],
-		Other: [3, 20, 13, "Use a documented redeemable deposit and log the receipt, or leave funds unallocated"]
+		Lending: [3, 4, 9, "Supply a supported stablecoin to a liquid market without borrowing"],
+		Vault: [3, 12, 12, "Check strategy and redemptions, then deposit a supported stablecoin"],
+		LP: [4, 30, 14, "Enter a liquid pair with balanced assets and check the LP receipt"],
+		Perps: [4, 25, 14, "Post collateral only if unlevered credit qualifies"],
+		Staking: [3, 12, 11, "Check withdrawal delays and slashing before staking"],
+		RWA: [3, 25, 16, "Check eligibility and redemptions, then subscribe to a liquid share"],
+		Stablecoin: [4, 18, 13, "Check collateral and peg liquidity, then use unlevered savings or mint and redeem"],
+		Network: [3, 15, 13, "Use a documented deposit or delegation and test withdrawal"],
+		Insurance: [3, 25, 14, "Check claim risk and the queue, then use an open pool"],
+		Other: [3, 20, 13, "Log a documented, redeemable deposit or leave funds unallocated"]
 	};
 	const FAMILIES = {
-		Lending: ["Lending", "Uncollateralized Lending", "Collateral Markets", "Collateral Management"],
-		Vault: ["Yield", "Yield Aggregator", "Risk Curators", "Onchain Capital Allocator", "Basis Trading", "Leveraged Farming", "Farm", "Indexes", "Options Vault", "CeDeFi"],
-		LP: ["Dexs", "Liquidity Manager"],
-		Perps: ["Derivatives", "Synthetics", "Options", "Interest Rate Derivatives", "Prediction Market"],
-		Staking: ["Liquid Staking", "Liquid Restaking", "Staking Pool", "Restaking", "Token Locker", "Governance Incentives"],
-		RWA: ["RWA"],
-		Stablecoin: ["CDP", "CDP Manager", "Algo-Stables", "Dual-Token Stablecoin", "Stablecoin Wrapper", "Stablecoin Issuer", "Reserve Currency"],
-		Network: ["Chain", "Payments", "Decentralized BTC", "Anchor BTC", "Cross Chain Bridge"],
-		Insurance: ["Insurance"]
+		Lending: "Lending|Uncollateralized Lending|Collateral Markets|Collateral Management",
+		Vault: "Yield|Yield Aggregator|Risk Curators|Onchain Capital Allocator|Basis Trading|Leveraged Farming|Farm|Indexes|Options Vault|CeDeFi",
+		LP: "Dexs|Liquidity Manager",
+		Perps: "Derivatives|Synthetics|Options|Interest Rate Derivatives|Prediction Market",
+		Staking: "Liquid Staking|Liquid Restaking|Staking Pool|Restaking|Token Locker|Governance Incentives",
+		RWA: "RWA",
+		Stablecoin: "CDP|CDP Manager|Algo-Stables|Dual-Token Stablecoin|Stablecoin Wrapper|Stablecoin Issuer|Reserve Currency",
+		Network: "Chain|Payments|Decentralized BTC|Anchor BTC|Cross Chain Bridge",
+		Insurance: "Insurance"
 	};
 	const FAMILY_NAMES = Object.keys(FAMILIES).concat("Other");
 	const familyByCategory = new Map(Object.entries(FAMILIES).flatMap(([family, categories]) =>
-		categories.map(category => [category, family])));
+		categories.split("|").map(category => [category, family])));
 	const productCategories = new Set(["Bridge", "Canonical Bridge", "Cross Chain Bridge", "Restaked BTC", "CEX"]);
 	const liquid = new Set(["Liquid Staking", "Liquid Restaking"]);
 	const version = /\s+(?:v\s*\d+(?:\.\d+)*|\d+\.\d+(?:\.\d+)*)$/i;
@@ -74,7 +75,6 @@
 	const limit = (value, low, high) => Math.min(high, Math.max(low, value));
 	const count = (rows, test) => rows.filter(test).length;
 	const firstWord = name => name.toLowerCase().match(/[\p{L}\p{N}]+/u)?.[0];
-	// Traded has positive cap. Recorded-only has an ID or symbol.
 	const hasToken = p => p.mcap_usd > 0 || Boolean(p.gecko_id || p.symbol);
 	const usd = n => "$" + n.toFixed(2);
 	const whole = n => "$" + Math.round(n).toLocaleString("en-US");
@@ -96,14 +96,15 @@
 		return snapshot.protocols.map(p => {
 			const family = familyByCategory.get(p.category) || "Other";
 			const isLiquid = liquid.has(p.category);
-			const date = Number.isFinite(Date.parse(p.listed_at)) ? Date.parse(p.listed_at) : null;
+			const parsedDate = Date.parse(p.listed_at);
+			const date = Number.isFinite(parsedDate) ? parsedDate : null;
 			const ageDays = date === null ? null : Math.max(1, Math.floor((asOf - date) / DAY));
 			const growth = limit(p.change_7d ?? A.missingGrowth, ...A.growthClip);
 			const carriedTvl = p.tvl_usd * (1 + growth / 100);
 			const flags = [];
-			if (recordedWords.has(firstWord(p.name))) flags.push("First name word matches a recorded-token protocol");
-			if (isLiquid) flags.push("Liquid staking or liquid restaking issuer");
-			if (version.test(p.name)) flags.push("Version marker at the end of the protocol name");
+			if (recordedWords.has(firstWord(p.name))) flags.push("First word matches a recorded-token protocol");
+			if (isLiquid) flags.push("Liquid staking or restaking issuer");
+			if (version.test(p.name)) flags.push("Name ends in a version marker");
 			const productReason = productCategories.has(p.category) ? p.category + " product"
 				: exchange.test(p.name) ? "Exchange-branded product"
 				: /\b(?:wrapped|bridged|staked)\b/i.test(p.name) || (!isLiquid && /\bstaking\b/i.test(p.name))
@@ -240,48 +241,34 @@
 	const sigmoid = x => 1 / (1 + Math.exp(-limit(x, -35, 35)));
 	const oddsFeatures = (p, medianDays) => [1, p.rawSize, ageFeature(p, medianDays)];
 
-	function fitStatus(points, features, beta, hazard = false) {
-		const n = beta.length;
-		const penalties = [1e-6, A.oddsPenalty, A.oddsPenalty].slice(0, n);
-		const inputs = points.map(features);
-		for (let i = 0; i < (hazard ? 30 : 20); i++) {
-			const system = normalEquations(n, penalties);
+	// Fit snapshot token status from TVL and listing age.
+	function fitTokenOdds(points) {
+		const age = medianAge(points);
+		const inputs = points.map(p => oddsFeatures(p, age));
+		const penalties = [1e-6, A.oddsPenalty, A.oddsPenalty];
+		let beta = zero(3);
+		for (let i = 0; i < 20; i++) {
+			const system = normalEquations(beta.length, penalties);
 			system.target = beta.map((c, j) => -c * penalties[j]);
 			for (let j = 0; j < points.length; j++) {
-				const p = points[j], x = inputs[j], score = dot(x, beta);
-				if (hazard) {
-					// P(recorded by age d) = 1 − exp(−λd), h = λd.
-					const h = Math.exp(limit(score, -20, 10)) * p.ageDays / A.year;
-					const w = h / Math.expm1(h);
-					accumulate(system, x, p.recorded ? w : -h, h * w);
-				} else {
-					const prob = sigmoid(score);
-					accumulate(system, x, Number(p.recorded) - prob, prob * (1 - prob));
-				}
+				const x = inputs[j], prob = sigmoid(dot(x, beta));
+				accumulate(system, x, Number(points[j].recorded) - prob, prob * (1 - prob));
 			}
 			const delta = solve(system.matrix, system.target);
-			beta = beta.map((c, j) => c + (hazard ? limit(delta[j], -1, 1) : delta[j]));
+			beta = beta.map((c, j) => c + delta[j]);
 			if (Math.max(...delta.map(Math.abs)) < 1e-8) break;
 		}
-		return beta;
+		return { age, beta };
 	}
 
-	function fitOdds(points) {
-		const age = medianAge(points);
-		return { age, beta: fitStatus(points, p => oddsFeatures(p, age), zero(3)) };
-	}
+	const tokenOdds = (fit, p) => sigmoid(dot(oddsFeatures(p, fit.age), fit.beta));
 
-	const datedOnly = points => points.filter(p => p.ageDays !== null);
-	const fitHazard = (points, size) => fitStatus(datedOnly(points), p => size ? [1, p.rawSize] : [1], size ? [-1, 0] : [-1], true);
-	const logistic = (fit, p) => sigmoid(dot(oddsFeatures(p, fit.age), fit.beta));
-	const dailyRate = (fit, p) => Math.exp(fit[0] + fit[1] * p.rawSize) / A.year;
-
-	function auc(scored, key) {
-		const sorted = [...scored].sort((a, b) => a[key] - b[key]);
+	function auc(scored) {
+		const sorted = [...scored].sort((a, b) => a.score - b.score);
 		let wins = 0, negative = 0;
 		for (let i = 0; i < sorted.length;) {
 			let next = i, groupPositive = 0;
-			while (next < sorted.length && sorted[next][key] === sorted[i][key]) {
+			while (next < sorted.length && sorted[next].score === sorted[i].score) {
 				groupPositive += Number(sorted[next++].recorded);
 			}
 			const groupNegative = next - i - groupPositive;
@@ -293,30 +280,13 @@
 		return pairs ? wins / pairs : null;
 	}
 
-	function testOdds(points, walk) {
+	function testTokenOdds(points, walk) {
 		const scored = [];
 		for (const { train, test } of folds(points, walk, A.oddsWarmup)) {
-			const fit = fitOdds(train), hazard = fitHazard(train, true);
-			for (const p of test) scored.push({ recorded: p.recorded, score: logistic(fit, p), rate: dailyRate(hazard, p) });
+			const fit = fitTokenOdds(train);
+			for (const p of test) scored.push({ recorded: p.recorded, score: tokenOdds(fit, p) });
 		}
-		return { auc: auc(scored, "score"), hazardAuc: auc(scored, "rate"), n: scored.length };
-	}
-
-	function chooseOdds(points) {
-		const validation = { loo: testOdds(points, false), walk: testOdds(points, true) };
-		const useHazard = Object.values(validation).every((test, i) => test.hazardAuc >= A.minOddsAuc[i]);
-		const dated = datedOnly(points);
-		const prevalence = count(dated, p => p.recorded) / dated.length;
-		const pooledRate = Math.exp(fitHazard(dated, false)[0]) / A.year;
-		// Effective exposure matches dated prevalence under the pooled hazard.
-		const exposure = prevalence > 0 && prevalence < 1 ? -Math.log1p(-prevalence) / pooledRate : medianAge(points);
-		return { fit: fitOdds(points), hazard: fitHazard(points, true), exposure, pooledRate, prevalence, validation, useHazard };
-	}
-
-	function launchOdds(odds, p) {
-		const observed = logistic(odds.fit, p);
-		const rate = odds.useHazard ? dailyRate(odds.hazard, p) : -Math.log1p(-observed) / odds.exposure;
-		return { observed, rate, s: -Math.expm1(-rate * A.year) };
+		return { auc: auc(scored), n: scored.length };
 	}
 
 	function bootstrap(points, terms) {
@@ -368,6 +338,20 @@
 			?? ladder.reduce((best, step) => step.multiple > best.multiple ? step : best);
 	}
 
+	const budgetStep = (min, fees = 0) => `${min} min · ${usd(wage(min) + fees)}`;
+
+	function researchPlan(p, plan, result) {
+		const [status, terms, review] = A.researchMinutes;
+		const revisit = Math.ceil(p.score * A.farmMultiple / result.multiple);
+		const steps = [
+			`Check ${p.name} for a token announcement or record. Stop on either. ${plan.capped ? "Verify flagged issuer IDs. " : ""}${budgetStep(status)} (time).`,
+			`Read ${p.family.toLowerCase()} docs for ${plan.chain.name}. Check rewards, caps and redemptions. Quote gas and fees against the ${usd(result.cost - plan.timeCost)} budget. ${budgetStep(terms)} (time).`,
+			`Revisit in ${A.reviewDays} days at ${whole(revisit)} implied for ${whole(result.capital)} capital and ${whole(p.tvl_usd)} TVL. Re-size if costs or TVL change. ${plan.capped ? "Clear issuer flags. " : ""}Stop below ${A.farmMultiple}× cost. ${budgetStep(review)} (time).`
+		];
+		const researchTime = status + terms + review;
+		return { steps, researchTime, researchCost: wage(researchTime), revisit };
+	}
+
 	function farmPlan(p) {
 		const [actions, feeBps, depositMinutes, depositAction] = MECHANISMS[p.family];
 		const chain = cheapestChain(p.chains, actions);
@@ -381,28 +365,26 @@
 		};
 		const result = sizeFarm(plan);
 		const stress = { doubleCost: sizeFarm(plan, A.stressCost), halfShare: sizeFarm(plan, 1, A.stressShare) };
-		const revisit = Math.ceil(p.score * A.farmMultiple / result.multiple);
-		const decision = result.verdict === "FARM" ? "" : ` Hold. Revisit at ${whole(revisit)} implied value at this ticket and TVL${plan.capped ? " after flags clear" : ""}.`;
+		if (result.verdict !== "FARM") return { ...plan, ...result, stress, ...researchPlan(p, plan, result) };
 		const exitFloor = p.tvl_usd * A.exitTvlShare;
+		const exitGrowth = Math.min(0, p.growth) - A.weeklyLossBuffer;
 		const depositCost = chain.gas * actions + result.capital * plan.feeRate;
-		const routeCheck = chain.estimated ? " Verify fallback quote." : "";
 		const steps = [
-			`${result.verdict} at ${whole(result.capital)}. ${year}-day drop ${usd(result.expectedGross)} vs ${usd(result.cost)} all-in. Break-even pool ${pct(result.breakEvenShare)} of launch value.${decision}`,
-			`On the protocol’s app, verify deposit caps, points or rewards, KYC or region limits, and the redemption queue. Budget ${eligibilityMinutes} min (${usd(wage(eligibilityMinutes))}).`,
-			`Fund ${chain.name} after checks. Budget ${usd(chain.bridge)} round trip, ${chain.bridgeMinutes} min elapsed and ${routeHandsOnMinutes} min hands-on.${routeCheck}`,
-			`${depositAction} on ${chain.name}. Allow ${usd(depositCost)} round-trip gas and fees and ${depositMinutes} min to enter.`,
-			`Log eligibility, position and TVL weekly. Budget ${weeklyMinutes} min (${usd(wage(weeklyMinutes))}) and $0 gas per check.`,
-			`Redeem below ${whole(exitFloor)} TVL or after ${year} days. Budget ${exitMinutes} min. Gas is in the ${usd(depositCost)} round trip.`,
-			`When claimable, budget ${claimMinutes} min and ${usd(chain.gas * A.claimActions)} to claim and sell. Check liquidity. Sell ${pct(A.firstSaleShare)} at ${whole(p.band.low)} circulating cap and the rest near ${whole(p.band.high)}.`
+			`Check deposit caps, points, KYC, redemptions and stop rules. Break-even at ${whole(result.capital)} needs a ${pct(result.breakEvenShare)} depositor pool. ${budgetStep(eligibilityMinutes)} (time).`,
+			`Fund ${chain.name}. ${chain.estimated ? "Verify fallback quote. " : ""}${chain.bridgeMinutes} min elapsed · ${budgetStep(routeHandsOnMinutes, chain.bridge)} with round-trip funding.`,
+			`${depositAction} on ${chain.name}. ${budgetStep(depositMinutes, depositCost)} with round-trip gas and fees.`,
+			`Log eligibility, position and TVL weekly. ${budgetStep(weeklyMinutes)} per check (time, $0 gas).`,
+			`Exit if TVL < ${whole(exitFloor)} or 7d change < ${exitGrowth.toFixed(2)}%, on token announcement or record, or at day ${year}. ${budgetStep(exitMinutes)} (time, gas in deposit budget).`,
+			`Claim when eligible. Check liquidity and sell ${pct(A.firstSaleShare)} at ${whole(p.band.low)} circulating cap and the rest near ${whole(p.band.high)}. ${budgetStep(claimMinutes, chain.gas * A.claimActions)} with gas.`
 		];
-		return { ...plan, ...result, steps, stress, revisit };
+		return { ...plan, ...result, steps, stress };
 	}
 
 	function portfolio(rows) {
 		const eligible = rows.filter(p => p.watchlist && p.plan.verdict === "FARM");
 		const budget = A.portfolioCapital;
 		const upkeepCost = wage(upkeep);
-		// Split one weekly check across positions.
+		// Share weekly checks.
 		for (let n = Math.min(eligible.length, Math.floor(budget / A.capitalLadder[0])); n > 0; n--) {
 			const picks = eligible.map(p => {
 				const plan = { ...p.plan, fixedCost: p.plan.fixedCost - upkeepCost + upkeepCost / n };
@@ -426,7 +408,8 @@
 
 	function boardRows(rows) {
 		return rows.map(p => ({ slug: p.slug, name: p.name, rank: p.rank,
-			implied_value_usd: p.score, farm_steps: p.plan.steps }));
+			implied_value_usd: p.score, launch_value_usd: p.launchValue, token_odds: p.tokenOdds,
+			issuer_factor: p.haircut, farm_steps: p.plan.steps }));
 	}
 
 	function digest(rows) {
@@ -464,8 +447,8 @@
 		return [...boardChecks(board, snapshot), ...Object.entries({
 			"group counts": counts.traded + counts.recorded + counts.setAside + counts.ranked === counts.total
 				&& counts.ranked === rows.length && model.calibration.every(p => p.mcap_usd > 0),
-			"value factors": rows.every(p => Math.max(1, Math.round(p.launchValue * p.s * p.haircut)) === p.score),
-			"bootstrap bands": rows.every(p => p.band.low > 0 && p.band.low <= p.band.high && p.s > 0 && p.s < 1),
+			"value factors": rows.every(p => Math.max(1, Math.round(p.launchValue * p.tokenOdds * p.haircut)) === p.score),
+			"bootstrap bands": rows.every(p => p.band.low > 0 && p.band.low <= p.band.high && p.tokenOdds > 0 && p.tokenOdds < 1),
 			"flagged plans": rows.every(p => p.flags.length ? p.haircut === A.haircut && p.plan.verdict !== "FARM" : p.haircut === 1),
 			"stress counts": Object.entries(stress).every(([key, { all, farm }]) =>
 				Object.keys(all).every(v => all[v] === count(rows, p => p.plan.stress[key].verdict === v)
@@ -483,14 +466,15 @@
 		const value = chooseValue(points);
 		const resamples = bootstrap(points, value.fit.terms);
 		const oddsPoints = records.filter(p => !p.productReason);
-		const odds = chooseOdds(oddsPoints);
+		const oddsFit = fitTokenOdds(oddsPoints);
+		const odds = { validation: { loo: testTokenOdds(oddsPoints, false), walk: testTokenOdds(oddsPoints, true) } };
 		const rows = records.filter(p => p.status === "ranked").map(p => {
 			const launchValue = Math.exp(logValue(value.fit, p));
-			const { s, observed, rate } = launchOdds(odds, p);
+			const s = tokenOdds(oddsFit, p);
 			const haircut = p.flags.length ? A.haircut : 1;
 			const draws = resamples.map(fit => Math.exp(logValue(fit, p)));
 			const [low, high] = A.bandQuantiles.map(q => quantile(draws, q));
-			const row = { ...p, launchValue, s, observed, rate, haircut, score: Math.max(1, Math.round(launchValue * s * haircut)),
+			const row = { ...p, launchValue, tokenOdds: s, haircut, score: Math.max(1, Math.round(launchValue * s * haircut)),
 				band: { low, high, weightedLow: low * s * haircut, weightedHigh: high * s * haircut },
 				peers: nearestPeers(p, points, value.fit) };
 			return { ...row, plan: farmPlan(row) };
@@ -514,21 +498,21 @@
 			return { ...p, ratio, outlier: ratio < peerRatios[0] || ratio > peerRatios[1] };
 		});
 		return { rows, board: { rows: boardRows(rows) }, counts, verdicts, stress, portfolio: portfolio(rows),
-			value, odds, calibration, audit, peerRatios, assumptions: assumptions(odds) };
+			value, odds, calibration, audit, peerRatios, assumptions: assumptions() };
 	}
 
-	function assumptions(odds) {
-		return { parameters: { ...A, exposureDays: odds.exposure.toFixed(1), pooledDailyHazard: odds.pooledRate.toPrecision(4) },
+	function assumptions() {
+		return { parameters: A,
 			chainQuotes: CHAINS, fallbackChain: FALLBACK_CHAIN, mechanisms: MECHANISMS, families: FAMILIES,
 			notes: [
-				"Positive caps trade. IDs or symbols record tokens. Product rules run before ranking.",
-				"Fit the largest TVL per token. Baseline uses median cap/carried TVL.",
-				"Walk-forward trains on earlier listings. Added terms must improve both tests.",
-				"Fallback exposure matches dated prevalence under a pooled hazard and annualizes logistic status.",
-				"Bootstrap bands show curve uncertainty. Audit uses traded cap/carried-TVL percentiles.",
-				"Listed chains qualify. Quotes are estimates. Drop prorates across eligible TVL and deposit. Excludes yield, tax and price moves.",
-				"Use the first 2× ticket or best drop/cost ratio. Issuer flags cap verdicts.",
-				"Portfolio maximizes FARM positions, batches weekly checks and score-weights surplus."
+				"Positive caps trade. IDs or symbols record tokens. Exclude products.",
+				"Fit largest TVL per token. Baseline uses median cap/carried TVL.",
+				"Train walk-forward on earlier listings. Terms must improve both tests.",
+				"Token odds fit snapshot status by TVL and listing age. No launch dates.",
+				"Bootstrap bands show fit uncertainty. Audit uses cap/carried-TVL percentiles.",
+				"Use listed chains and estimated quotes. Prorate drop by eligible TVL and deposit. Exclude yield, tax and price moves.",
+				"First 2× ticket or best drop/cost. Issuer flags cap verdicts.",
+				"Maximize FARM positions, share upkeep, score-weight surplus."
 			] };
 	}
 

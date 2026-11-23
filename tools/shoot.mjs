@@ -132,6 +132,20 @@ function encodeJpeg(png, work, candidates = []) {
       if (bytes.length < minimum) break;
     }
   }
+  for (const mode of [[], ["-optimize"]]) {
+    for (let quality = 100; quality >= 85; quality--) {
+      const result = spawnSync("/usr/bin/cjpeg", [
+        "-quality", String(quality), "-sample", "1x1", ...mode, png
+      ], { timeout: 10_000, maxBuffer: 2 * 1024 * 1024 });
+      if (result.error?.code === "ENOENT") break;
+      if (result.status !== 0) throw new Error(String(result.error || result.stderr));
+      const bytes = result.stdout;
+      const encoder = `cjpeg quality ${quality}${mode.length ? " optimized" : ""}`;
+      if (fits(bytes)) return { bytes, encoder };
+      candidates.push(`${encoder}: ${bytes.length}`);
+      if (bytes.length < minimum) break;
+    }
+  }
   throw new Error(`No JPEG met the byte budget. ${candidates.join(", ")}`);
 }
 
@@ -149,12 +163,17 @@ function readPage() {
     checks: read("#checks"), title: read("h1"), count: read("#row-count"), first: read("tbody tr th a"),
     portfolio: read(".portfolio h2"), verdict: read(".plan-panel .badge"),
     positions: document.querySelectorAll(".positions > div").length,
-    steps: document.querySelectorAll(".plan-steps li").length,
-    eligibility: read(".plan-steps li:nth-child(2)"), stress: read(".detail-aside .facts"),
+    steps: [...document.querySelectorAll(".plan-steps p")].map(step => step.textContent),
+    stress: read(".detail-aside .facts"), rowCheck: read("#row-check"),
+    rowPass: document.querySelector("#row-check")?.dataset.pass,
     chart: read(".chart-note"), scope: document.querySelector("#filter-scope")?.value,
     filter: document.querySelector("#filter-verdict")?.value,
-    rows: rows.map(row => [row.dataset.slug, Number(row.dataset.value), row.querySelector(".badge").textContent, watchlist.has(row.dataset.slug)]),
-    width: innerWidth, height: innerHeight, dpr: devicePixelRatio
+    rows: rows.map(row => {
+      const { slug, value, launch, odds, issuer } = row.dataset;
+      return [slug, Number(row.cells[0].textContent), +value, +launch, +odds, +issuer, row.querySelector(".badge").textContent, watchlist.has(slug)];
+    }),
+    width: innerWidth, height: innerHeight, dpr: devicePixelRatio,
+    scrollbar: innerWidth - document.documentElement.clientWidth
   };
 }
 
@@ -213,6 +232,7 @@ async function shootBidi(url, work, port, verify) {
     for (const { name, hash } of shots) {
       await call("browsingContext.navigate", { context, url: url + hash, wait: "complete" });
       const info = await evaluate(`(async () => {
+        document.documentElement.style.scrollbarWidth = "none";
         await document.fonts.ready;
         await new Promise(ready => requestAnimationFrame(() => requestAnimationFrame(ready)));
         return JSON.stringify((${readPage})());
@@ -253,7 +273,7 @@ async function shootCli(output, work, verify) {
   cpSync(join(output, "dashboard"), dashboard, { recursive: true });
   cpSync(join(output, "data.js"), join(work, "data.js"));
   const page = join(dashboard, "index.html");
-  const html = readFileSync(page, "utf8").replace("<head>", '<head>\n<script src="capture-probe.js"></script>');
+  const html = readFileSync(page, "utf8").replace("<head>", '<head>\n<style>html{scrollbar-width:none}</style>\n<script src="capture-probe.js"></script>');
   writeFileSync(page, html);
   writeFileSync(join(dashboard, "capture-probe.js"), `${readPage}\n(${installProbe})();\n`);
   const url = pathToFileURL(page).href;
@@ -286,7 +306,7 @@ async function shootCli(output, work, verify) {
 
 async function shoot(output, destination) {
   const board = JSON.parse(readFileSync(join(output, "board.json"), "utf8")).rows;
-  const boardValues = new Map(board.map(row => [row.slug, row.implied_value_usd]));
+  const boardBySlug = new Map(board.map(row => [row.slug, row]));
   const url = pathToFileURL(join(output, "dashboard", "index.html")).href;
   const work = mkdtempSync("/work/.tmp/rw-firefox-");
   try {
@@ -303,17 +323,27 @@ async function shoot(output, destination) {
       if (info.width !== width || info.height !== height || info.dpr !== 1) {
         throw new Error(`Unexpected Firefox viewport ${info.width}×${info.height} at DPR ${info.dpr}.`);
       }
+      if (info.scrollbar) throw new Error(`${name}: page scrollbar occupies ${info.scrollbar}px`);
       const slugs = new Set(info.rows.map(([slug]) => slug));
-      if (slugs.size !== info.rows.length || info.rows.some(([slug, value]) => boardValues.get(slug) !== value)) {
-        throw new Error(`${name}: page values differ from board.json`);
+      if (slugs.size !== info.rows.length || info.rows.some(([slug, rank, value, launch, odds, issuer], i) => {
+        const row = boardBySlug.get(slug);
+        return row?.rank !== rank || row.implied_value_usd !== value || row.launch_value_usd !== launch
+          || row.token_odds !== odds || row.issuer_factor !== issuer || (i > 0 && info.rows[i - 1][1] >= rank);
+      })) {
+        throw new Error(`${name}: page order or values differ from board.json`);
+      }
+      if (info.rows.length && (info.rowPass !== "true" || !info.rowCheck.startsWith(`${info.rows.length}/${info.rows.length} rows match board.json`))) {
+        throw new Error(`${name}: ${info.rowCheck}`);
       }
       if (name === "1-board.jpg" && (info.rows.length !== board.length || !info.chart)) throw new Error("The full board did not render.");
-      if (name === "2-detail.jpg" && (!["FARM", "MARGINAL"].includes(info.verdict) || info.steps < 3
-        || !info.eligibility?.includes("deposit caps") || !info.stress?.includes("depositor share"))) {
+      if (name === "2-detail.jpg" && (info.verdict !== "FARM" || info.steps.length < 3
+        || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
+        || !info.steps[0].includes("deposit caps") || !info.steps.some(step => step.startsWith("Exit if TVL"))
+        || !info.stress?.includes("depositor share"))) {
         throw new Error("The detail route must show a farm plan, eligibility and resized stress.");
       }
       if (name === "3-filtered.jpg" && (!info.portfolio || info.positions < 3 || info.scope !== "watchlist" || info.filter !== "FARM"
-        || !info.rows.length || info.rows.some(([, , verdict, watchlist]) => verdict !== "FARM" || !watchlist))) {
+        || !info.rows.length || info.rows.some(row => row[6] !== "FARM" || !row[7]))) {
         throw new Error("The filtered watchlist did not render.");
       }
     };
@@ -323,7 +353,7 @@ async function shoot(output, destination) {
       const dimensions = jpegSize(bytes);
       if (dimensions[0] !== width || dimensions[1] !== height) throw new Error("Unexpected screenshot dimensions.");
       writeFileSync(join(destination, name), bytes);
-      const content = [info.title, info.count, info.first, info.chart, info.verdict, info.portfolio].filter(Boolean).join(" · ");
+      const content = [info.title, info.count, info.rowCheck, info.first, info.chart, info.verdict, info.portfolio].filter(Boolean).join(" · ");
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
     }
     console.log("Firefox reported no console errors or uncaught exceptions.");
