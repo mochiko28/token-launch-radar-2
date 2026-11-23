@@ -258,7 +258,7 @@
       ${peers.map((x) => `<span class="peer" style="left:${pos(x.actual)}" title="${esc(x.p.name)} ${usd(x.actual)}"></span>`).join('')}
       <span class="mid" style="left:${pos(v.implied)}"></span>
      </div>
-     <p class="note">Shaded: the 50% band, ×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)}, the middle half of held-out misses. Ticks: the peers' market caps below. A model's claim, not a price.</p>
+     <p class="note">Shaded: the 50% band, ×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)}, the middle half of held-out misses; cut on other tokens it holds ${fit.band_wf[0]}/${fit.band_wf[1]} of the newest and ${fit.band_fam[0]}/${fit.band_fam[1]} family by family. Ticks: the peers' market caps below. A model's claim, not a price.</p>
     </section>
     <section class="card"><h2>Nearest trading peers <span>${esc(fam.label)}, closest TVL</span></h2>
      ${tbl('mini', ['Protocol', '#TVL', '#Market cap', '#÷ TVL'], peers.map((x) => [`${esc(x.p.name)} <small>${esc(x.p.symbol || '')}</small>`, usd(x.tvl), usd(x.actual), mult(x.actual / x.tvl)]))}</section>

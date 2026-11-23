@@ -85,6 +85,11 @@
   var full = fitPoints(pts, k);
   pts.forEach((q, i) => { q.fit = Math.round(predict(full, q)); q.loo = q.mcap / Math.exp(miss[i]); });
   var sorted = miss.slice().sort((u, v) => u - v);
+  // Band check: cut the 50% band on some tokens, count how many of the others it holds.
+  var hold = (cal, te) => { cal = cal.slice().sort((u, v) => u - v); var a = quantile(cal, 0.25), b = quantile(cal, 0.75); return [te.filter((m) => m >= a && m <= b).length, te.length]; };
+  var di = pts.map((q, i) => i).filter((i) => pts[i].p.listed_at).sort((i, j) => pts[i].p.listed_at < pts[j].p.listed_at ? -1 : pts[i].p.listed_at > pts[j].p.listed_at ? 1 : bySlug(pts[i].p, pts[j].p)), dc = Math.floor(di.length * 0.6);
+  var bandWf = hold(di.slice(0, dc).map((i) => miss[i]), di.slice(dc).map((i) => miss[i]));
+  var bandFam = FAMILIES.reduce((s, f) => { var r = hold(miss.filter((m, i) => pts[i].f !== f[0]), miss.filter((m, i) => pts[i].f === f[0])); return [s[0] + r[0], s[1] + r[1]]; }, [0, 0]);
   var q25 = quantile(sorted, 0.25), q75 = quantile(sorted, 0.75);
   // Held-out miss by TVL band.
   var cuts = [0, 1e7, 3e7, 1e8, 1e15], bands = cuts.slice(0, 4).map((lo, b) => {
@@ -92,7 +97,7 @@
    return { lo: lo, hi: cuts[b + 1], n: m.length, miss: Math.exp(quantile(m, 0.5)) };
   });
   return { bands: bands, k: k, slope: full.b, elasticity: 1 + full.b, base: Math.exp(full.all), families: full.fams, n: pts.length, points: pts,
-   band_low: Math.exp(q25), band_high: Math.exp(q75),
+   band_low: Math.exp(q25), band_high: Math.exp(q75), band_wf: bandWf, band_fam: bandFam,
    tests: tests, odds: launchOdds(snap) };
  }
 
