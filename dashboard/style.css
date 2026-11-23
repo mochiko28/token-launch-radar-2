@@ -71,15 +71,14 @@ small,dt,.curve,.attribution,.board-aside,.portfolio p,.valuation p,.compare-hin
 table{width:100%;border-collapse:collapse}
 th{text-align:left}
 thead{background:#f3eff6;font-size:.75rem}
-.rankings{min-width:880px;font-size:.88rem;line-height:1.4}
-.rankings tr{height:48px}
-.rankings :is(th,td){padding:5px 8px}
+.rankings{min-width:880px;font-size:.88rem;line-height:1.15}
+.rankings :is(th,td){padding:2px 8px}
 .rankings td,.stress-panel td{white-space:nowrap}
 .rankings th:nth-child(4){width:7rem}
 .compare-hint,.compare-panel{margin:0 16px 9px}
 tbody tr{border-bottom:1px solid #eee9f0}
 .protocol{font-weight:755}
-.rankings small{font-size:.73rem}
+.rankings :is(small,.rank,.badge){font-size:12px}
 .value b{color:var(--accent)}
 .positive{color:var(--green)}
 .negative{color:var(--red)}
