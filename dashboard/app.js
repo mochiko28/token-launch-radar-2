@@ -220,7 +220,7 @@
   return [
    `<b>Value:</b> trading tokens of this size (${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} TVL) miss their real market cap by a median ×${b.miss.toFixed(1)} held out; a market cap at launch of ${usd(v.fitted * fit.band_low)} or ${usd(v.cap_high)} would not be unusual.`,
    `<b>Score:</b> ${pc(v.time_factor)} of similar peers record a token today (no launch forecast); days tracked is its strongest input (held-out Brier ${O.terms[0][1].toFixed(3)}, ${O.terms[2][1].toFixed(3)} without it).`,
-   `<b>Rank:</b> #${r.rank} now, ${r.rlo}–${r.rhi} across 40 refits, #${alt[1]} ${alt[0]}${v.growth_imputed ? '; its 7-day change is unreported, so 0% was used' : ''}${r.ageRange ? `; no listing date, so the median age was used: at ${r.ageRange[0].age} days it would rank #${r.ageRange[0].rank}, at ${r.ageRange[1].age} days #${r.ageRange[1].rank}` : ''}.`,
+   `<b>Rank:</b> #${r.rank} now, ${r.rlo}–${r.rhi} across 40 refits${r.flip ? `; ${r.flip < 2 ? Math.ceil((r.flip - 1) * 100) + '% more' : mult(r.flip) + ' the'} TVL, others fixed, would pass #${r.rank - 1}` : ''}, #${alt[1]} ${alt[0]}${v.growth_imputed ? '; its 7-day change is unreported, so 0% was used' : ''}${r.ageRange ? `; no listing date, so the median age was used: at ${r.ageRange[0].age} days it would rank #${r.ageRange[0].rank}, at ${r.ageRange[1].age} days #${r.ageRange[1].rank}` : ''}.`,
    `<b>Plan:</b> pays ×${M.target_cover} only if ≥${(r.plan.need_share * 100).toFixed(1)}% of the token reaches depositors (assumed ${M.drop_share * 100}%), and only if a token launches at all.`
   ];
  }

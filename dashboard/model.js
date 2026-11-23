@@ -20,7 +20,6 @@
   season_days: 365 // TVL-days older than this count as paid by earlier seasons
  };
 
- // Data tables come from lib/tables.json via use().
  var FAMILIES = [], FAM_OF = {}, GAS = {}, GAS0 = 0.3, ACT = {};
  function use(t) {
   FAMILIES = api.FAMILIES = t.families; GAS = t.gas; GAS0 = t.gas_default; ACT = t.act; FAM_OF = {};
@@ -91,7 +90,6 @@
   var bandWf = hold(di.slice(0, dc).map((i) => miss[i]), di.slice(dc).map((i) => miss[i]));
   var bandFam = FAMILIES.reduce((s, f) => { var r = hold(miss.filter((m, i) => pts[i].f !== f[0]), miss.filter((m, i) => pts[i].f === f[0])); return [s[0] + r[0], s[1] + r[1]]; }, [0, 0]);
   var q25 = quantile(sorted, 0.25), q75 = quantile(sorted, 0.75);
-  // Held-out miss by TVL band.
   var cuts = [0, 1e7, 3e7, 1e8, 1e15], bands = cuts.slice(0, 4).map((lo, b) => {
    var m = pts.map((q, i) => q.tvl >= lo && q.tvl < cuts[b + 1] ? Math.abs(miss[i]) : -1).filter((x) => x >= 0).sort((u, v) => u - v);
    return { lo: lo, hi: cuts[b + 1], n: m.length, miss: Math.exp(quantile(m, 0.5)) };
@@ -132,7 +130,7 @@
   var loo = pts.map((q, i) => ({ y: q.y, s: dot(logit(pts.filter((o, j) => j !== i), w, 3), q.x) }));
   var dated = pts.filter((q) => q.a != null).sort((u, v) => v.a - u.a || bySlug(u.p, v.p));
   var cut = Math.floor(dated.length * 0.6);
-  // Held out with some inputs zeroed: walk-forward (newest 40%) and family-out (one fit per family).
+  // Held out, some inputs zeroed: walk-forward and family-out.
   function held(cols) {
    var z = (q) => ({ y: q.y, x: q.x.map((v, i) => cols.indexOf(i) < 0 ? v : 0) }), wd = logit(dated.slice(0, cut).map(z)), fw = {};
    return { wf: dated.slice(cut).map((q) => ({ y: q.y, s: dot(wd, z(q).x) })),
@@ -168,7 +166,6 @@
   });
   var dated = pts.filter((q) => q.p.listed_at).sort((a, b) => a.p.listed_at < b.p.listed_at ? -1 : a.p.listed_at > b.p.listed_at ? 1 : bySlug(a.p, b.p));
   var cut = Math.floor(dated.length * 0.6);
-  // Each term predicts ln(market cap), scored three ways.
   function score(make, spot) {
    var err = (m, q) => Math.abs(Math.log(q.mcap / (spot ? q.tvl : q.tc)) - m(q));
    var med = (a) => Math.exp(quantile(a.sort((u, v) => u - v), 0.5));
@@ -269,7 +266,6 @@
  function mins(m) { return m < 60 ? m + ' min' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' h'; }
 
 
- // Weekly kinds: [fee share, transactions] each week.
  var WEEKLY = { dex: [0.0005, 1], deriv: [0.001, 2], predict: [0.01, 2], infra: [0, 2] };
 
  /* A farm plan from the row's own figures: steps with a dollar cost and a time each, on the cheapest of
@@ -302,13 +298,12 @@
   function tranches(stake) { return kind === 'vault' ? [[stake, 0], [Math.round(stake / 4), 1]] : [[stake, kind === 'rwa' ? 2 : 0]]; }
   function eligible(stake) { return tranches(stake).reduce((a, t) => a + t[0], 0); }
   function earn(stake) { return tranches(stake).reduce((a, t) => a + t[0] * (M.farm_days - t[1]), 0) * v.apr / 365; }
-  // Break-even certificate: the least passing capital on the grid and the step below it that fails.
+  // Break-even certificate: least passing capital and the failing step below it.
   var cov = (k) => earn(k) / total(steps(k)).all, cap = (k) => k + Math.round(k / 4), cert = null;
   var stake = dep ? Math.round(dep / 1.25) : 20000;
   for (var k = 400; !dep && k <= 20000; k += 400) if (cov(k) >= M.target_cover) { stake = k; if (k > 400) cert = [cap(k - 400), cov(k - 400), cap(k), cov(k)]; break; }
   var st = steps(stake), t = total(st), capital = stake + Math.round(stake / 4), drop = earn(stake);
   var verdict = drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip';
-  // Every plan opens with its decision.
   var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
   // Least capital (to $1M) whose drop covers its recomputed costs.
   var payCap = 0, at = (c) => cov(Math.round(c / 1.25));
@@ -354,6 +349,15 @@
   });
   rows.sort((a, b) => b.v.implied - a.v.implied || bySlug(a.p, b.p));
   rows.forEach((r, i) => { r.rank = i + 1; });
+  // Flip threshold: the TVL multiple, others fixed, at which a row would pass the one above it.
+  rows.forEach((r, i) => {
+   var up = i && rows[i - 1].v.implied, at = (f) => value(Object.assign({}, r.p, { tvl_usd: r.p.tvl_usd * f }), fit, snap.as_of, ageFallback).implied, lo = 1, hi = 2, k;
+   if (!up) return;
+   for (k = 0; k < 12 && at(hi) <= up; k++) { lo = hi; hi *= 2; }
+   if (at(hi) <= up) return;
+   for (k = 0; k < 30; k++) { var m = Math.sqrt(lo * hi); if (at(m) > up) hi = m; else lo = m; }
+   r.flip = hi;
+  });
   // Rank crossing: each row's rank under three declared alternatives.
   var F0 = (r, a) => fit.odds.F(Object.assign({}, r.p, { change_7d: 0 }), a);
   var ALT = { 'without momentum': (r) => { var a = r.v.age_used, f0 = F0(r, a); return r.v.fitted * Math.pow(r.p.tvl_usd / r.v.tvl_next, 1 + fit.slope) * f0; },
