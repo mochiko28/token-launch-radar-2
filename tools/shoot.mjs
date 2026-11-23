@@ -137,7 +137,7 @@ function encodeJpeg(png, work, candidates = []) {
 
 const shots = [
   { name: "1-board.jpg", hash: "#board" },
-  { name: "2-detail.jpg", hash: "#detail/steakhouse-financial" },
+  { name: "2-detail.jpg", hash: "#detail/upshift" },
   { name: "3-filtered.jpg", hash: "#board?scope=watchlist&verdict=FARM" }
 ];
 
@@ -148,7 +148,9 @@ function readPage() {
   return {
     checks: read("#checks"), title: read("h1"), count: read("#row-count"), first: read("tbody tr th a"),
     portfolio: read(".portfolio h2"), verdict: read(".plan-panel .badge"),
+    positions: document.querySelectorAll(".positions > div").length,
     steps: document.querySelectorAll(".plan-steps li").length,
+    eligibility: read(".plan-steps li:nth-child(2)"), stress: read(".detail-aside .facts"),
     chart: read(".chart-note"), scope: document.querySelector("#filter-scope")?.value,
     filter: document.querySelector("#filter-verdict")?.value,
     rows: rows.map(row => [row.dataset.slug, Number(row.dataset.value), row.querySelector(".badge").textContent, watchlist.has(row.dataset.slug)]),
@@ -306,10 +308,11 @@ async function shoot(output, destination) {
         throw new Error(`${name}: page values differ from board.json`);
       }
       if (name === "1-board.jpg" && (info.rows.length !== board.length || !info.chart)) throw new Error("The full board did not render.");
-      if (name === "2-detail.jpg" && (!["FARM", "MARGINAL"].includes(info.verdict) || info.steps < 3)) {
-        throw new Error("The detail route has no qualifying farm plan.");
+      if (name === "2-detail.jpg" && (!["FARM", "MARGINAL"].includes(info.verdict) || info.steps < 3
+        || !info.eligibility?.includes("deposit caps") || !info.stress?.includes("depositor share"))) {
+        throw new Error("The detail route must show a farm plan, eligibility and resized stress.");
       }
-      if (name === "3-filtered.jpg" && (!info.portfolio || info.scope !== "watchlist" || info.filter !== "FARM"
+      if (name === "3-filtered.jpg" && (!info.portfolio || info.positions < 3 || info.scope !== "watchlist" || info.filter !== "FARM"
         || !info.rows.length || info.rows.some(([, , verdict, watchlist]) => verdict !== "FARM" || !watchlist))) {
         throw new Error("The filtered watchlist did not render.");
       }

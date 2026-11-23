@@ -152,22 +152,28 @@ function report(output, input) {
   const self = api.selfChecks(model, snapshot, api.digest(actualRows));
   const passed = self.filter(check => check.pass).length;
   console.log(`${passed}/${self.length} model self-checks pass (including board digest)`);
-  const { traded, setAside, ranked, watchlistCovered, watchlistTotal, total, valueFit, oddsFit } = model.counts;
-  console.log(`${traded} traded + ${setAside} products set aside + ${ranked} ranked = ${total} protocols | watchlist ${watchlistCovered}/${watchlistTotal}`);
+  const { traded, recorded, setAside, ranked, watchlistCovered, watchlistTotal, total, valueFit, oddsFit } = model.counts;
+  console.log(`${traded} traded with cap + ${recorded} token recorded without cap + ${setAside} products set aside + ${ranked} pre-token ranked = ${total} | watchlist ${watchlistCovered}/${watchlistTotal}`);
   const { fit, validation } = model.value;
   const curve = fit.names.map((name, i) => `${name}=${fit.coefficients[i].toFixed(6)}`).join(", ");
   console.log(`Log market-cap fit (${valueFit} tokens, TVL divided by $100M): ${curve}`);
   for (const [key, label] of [["loo", "LOO"], ["walk", "Walk-forward"]]) {
     console.log(`${label} median miss ${validation.selected[key].miss.toFixed(3)}x vs ${validation.baseline[key].miss.toFixed(3)}x flat (n=${validation.selected[key].n})`);
     const result = model.odds.validation[key];
-    console.log(`${label} launch-score AUC ${result.auc.toFixed(3)} | token-status AUC ${result.statusAuc.toFixed(3)} (n=${result.n} of ${oddsFit})`);
+    console.log(`${label} logistic score AUC ${result.auc.toFixed(3)} | annualized hazard trial AUC ${result.hazardAuc.toFixed(3)} (n=${result.n} of ${oddsFit})`);
   }
+  console.log(`Launch odds: ${model.odds.useHazard ? "daily hazard" : `logistic score annualized over ${model.odds.exposure.toFixed(1)} estimated days`}`);
   console.log(Object.entries(model.verdicts).map(([name, n]) => `${name} ${n}`).join(" | "));
-  console.log(`FARM flips: double cost ${model.stress.doubleCost} | half share ${model.stress.halfShare}`);
+  for (const [scenario, { all, farm }] of Object.entries(model.stress)) {
+    console.log(`${scenario}, all rows (base FARM): ${Object.entries(all).map(([verdict, count]) => `${verdict} ${count} (${farm[verdict]})`).join(" | ")}`);
+  }
   const { portfolio } = model;
   console.log(`Portfolio: ${portfolio.positions.length} positions, $${portfolio.capital.toFixed(2)} capital, $${portfolio.cost.toFixed(2)} cost, $${portfolio.net.toFixed(2)} expected net`);
+  console.table(portfolio.positions.map(({ name, capital, cost, net }) => ({
+    name, capital: capital.toFixed(2), cost: cost.toFixed(2), expected_net: net.toFixed(2)
+  })));
   console.table(model.rows.slice(0, 10).map(p => ({
-    name: p.name, value_usd: p.implied_value_usd, s: p.s.toFixed(4), verdict: p.plan.verdict
+    name: p.name, value_usd: p.score, s: p.s.toFixed(4), verdict: p.plan.verdict
   })));
   if (passed !== self.length) process.exitCode = 1;
 }
