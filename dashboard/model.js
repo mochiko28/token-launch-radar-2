@@ -382,7 +382,7 @@ function farmPlan(p,asOf) {
 		[`If checks pass and quotes clear FARM, ${ticket}. ${guidance}`,
 			`${stepCost(depositMinutes,entryFees)}. Gas + slip cap ${costUsd(entryFees)}. Undo gas ${costUsd(quote.exitGas)}.`,
 			`${verdict} at odds ${percent(p.tokenOdds)} vs p* ${pStar === null ? "unreachable" : percent(pStar)}.`,
-			`Else wait to ${review} for lower costs${plan.capped ? " and cleared flags" : ""}`, `(${stepCost(0)} extra, reversible).`],
+			`Else wait to ${review} for lower costs${plan.capped ? " and cleared flags" : ""}`, `${stepCost(0)} extra, reversible.`],
 		["If eligible, log receipt and TVL weekly.", `${stepCost(weeklyMinutes)} per check, reversible.`],
 		[`If TVL < ${whole(p.tvl_usd * A.exitTvlShare)}, 7d change < ${exitGrowth.toFixed(2)}%, token announced, or day ${holdDays}, withdraw.`, `${stepCost(exitMinutes,quote.exitGas)}. Honor quoted lock and delay.`],
 		[`If eligible at launch, claim and sell ${A.firstSaleShare * 100}% at ${whole(p.band.low)} circulating cap, rest near ${whole(p.band.high)}.`, `${stepCost(claimMinutes,result.claimSell - wage(claimMinutes))}. Undo requires a buyback.`]
