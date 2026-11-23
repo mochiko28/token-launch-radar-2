@@ -229,7 +229,9 @@ function readPage() {
     checks: read("#checks"), title: read("h1"), count: read("#row-count"), first: read("tbody tr th a"),
     portfolio: read(".portfolio"),
     summary: read(".verdict-summary"), defaultHalfOdds,
-    oddsNote: read("#quote-result + p"),
+    oddsNote: read(".pay + p"), pay: read(".pay"), payVisible: visible(".pay"),
+    farms: read(".best-farms"), farmsVisible: visible(".best-farms"),
+    farmLinks: [...document.querySelectorAll(".best-farms a")].map(a => a.getAttribute("href")),
     positions: document.querySelectorAll(".positions > div").length,
     labels, steps,
     planVisible: visible(".plan-steps"),
@@ -414,9 +416,14 @@ async function shoot(output, destination) {
         throw new Error(`${name}: calibration summary is incomplete.`);
       }
       if (name === "1-board.jpg" && (info.rows.length !== board.length || !info.chart)) throw new Error("The full board did not render.");
+      if (name === "1-board.jpg" && (!info.farmsVisible || !info.farms?.includes("Best available farms")
+        || info.farmLinks.length !== 5 || new Set(info.farmLinks).size !== 5
+        || info.farmLinks.some(href => !href.startsWith("#detail/") || !boardBySlug.has(decodeURIComponent(href.slice(8)))))) {
+        throw new Error("The best available farms panel did not render five linked plans.");
+      }
       if (name === "calibration" && !info.timing?.includes("F walk-forward AUC")) throw new Error("Missing launch calibration.");
       if (name === "2-detail.jpg" && (info.steps.length < 3
-        || info.labels.map(label => label.split(" ")[0]).join() !== "1,2a,2b,2c,3a,3b,3c,4,5,6"
+        || info.labels.map(label => label.split(" ")[0]).join() !== "1,2a,2b,2c,3a,3b,3c,4,5,6,7"
         || !/Launch within (30|90|180|365) d: [\d.]+% \(q\) vs p\*/.test(info.summary)
         || !info.oddsNote?.includes("no launch dates") || !info.oddsNote.includes("F walk-forward AUC")
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
@@ -426,6 +433,8 @@ async function shoot(output, destination) {
         || !["TVL size", "7d carry", "Age on odds", "Issuer"].every(label => info.attribution?.includes(label))
         || !info.steps.some(step => step.includes("p*") && /Gas \+ slip cap \$[\d.]+/.test(step))
         || !info.steps.some(step => step.includes("deposit $80 USDC and withdraw it"))
+        || !info.payVisible || !info.pay?.includes("What would make it pay")
+        || !info.steps.at(-1).startsWith("Revisit if a points program or snapshot is announced:")
         || !info.stressVisible || !info.stress?.includes("½ share"))) {
         throw new Error(`Detail checks failed: ${JSON.stringify(info)}`);
       }
