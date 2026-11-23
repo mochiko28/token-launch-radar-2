@@ -1,6 +1,4 @@
-/* Launch Radar. Audit route: (1) screen = board.json: model.js digest() hashes rank, name, value and every
-* plan step; the cover compares it on load. (2) termTests() scores each value term held out three ways.
-* (3) farmPlan() costs and times every step, kill test first. No launch dates, so no timing claim. */
+/* Launch Radar. The page checks the board digest and shows held-out model results. */
 (function () {
  'use strict';
  const R = window.RadarModel, S = window.SNAPSHOT, app = document.getElementById('app');
@@ -11,6 +9,7 @@
  const FAM = {}; R.FAMILIES.forEach((f) => { FAM[f[0]] = f[1]; });
  const bySlug = Object.create(null); rows.forEach((r) => { bySlug[r.p.slug] = r; });
  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+ const nameFlag = (r) => r.wordMatch ? `<small>Name shares a word with ${esc(r.wordMatch)}, whose token may already cover this protocol.</small>` : '';
  const pct = (x, d) => (x == null ? 'n/a' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d == null ? 1 : d) + '%');
  const mult = (x) => '×' + (x >= 10 ? x.toFixed(1) : x >= 1 ? x.toFixed(2) : x.toFixed(3));
  const days = (d) => (d == null ? '?' : d >= 365 ? (d / 365).toFixed(1) + 'y' : d + 'd');
@@ -134,7 +133,7 @@
  const [flatT, spotT, sizeT] = fit.tests.terms;
  const nTr = S.protocols.filter((p) => p.mcap_usd > 0).length, nAll = rows.length + radar.products.length + nTr + radar.listed_only;
  const CHECKS = [
-  [nAll === S.protocols.length, `${nAll}/${S.protocols.length} protocols: ${rows.length} ranked, ${radar.products.length} set aside, ${nTr} trading (${fit.n} tokens), ${radar.listed_only} token without cap`],
+  [nAll === S.protocols.length, `${nAll}/${S.protocols.length} protocols: ${rows.length} ranked, ${radar.products.length} set aside, ${nTr} trading (${fit.n} in fit), ${radar.listed_only} with a token but no cap`],
   [S.watchlist.every((s) => bySlug[s]), `watchlist ${S.watchlist.filter((s) => bySlug[s]).length}/${S.watchlist.length} covered`],
   [rows.every((r, i) => r.rank === i + 1 && (!i || r.v.implied <= rows[i - 1].v.implied)), `ranks 1–${rows.length}, value never rising`],
   [rows.every((r) => r.p.gecko_id == null && r.p.symbol == null && r.p.mcap_usd == null), `${rows.length}/${rows.length} ranked rows record no token`],
@@ -171,7 +170,7 @@
    const w = Math.max(1.5, 100 * Math.sqrt(r.v.implied / maxImplied));
    return `<tr data-slug="${esc(r.p.slug)}" tabindex="0">
     <td class="rank">${r.rank}<small>${r.rlo}–${r.rhi}</small></td>
-    <td class="proto"><a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a>${r.watch ? '<span class="wl" title="On the snapshot watchlist">WL</span>' : ''}<small>${esc(r.p.category || 'Uncategorised')} · ${esc(r.p.chains.slice(0, 2).join(', '))}${r.p.chains.length > 2 ? ' +' + (r.p.chains.length - 2) : ''}</small></td>
+    <td class="proto"><a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a>${r.watch ? '<span class="wl" title="On the snapshot watchlist">WL</span>' : ''}<small>${esc(r.p.category || 'Uncategorised')} · ${esc(r.p.chains.slice(0, 2).join(', '))}${r.p.chains.length > 2 ? ' +' + (r.p.chains.length - 2) : ''}</small>${nameFlag(r)}</td>
     <td>${famChip(r.v.family)}</td>
     <td class="num">${usd(r.p.tvl_usd)}</td>
     <td class="num ${r.p.change_7d >= 0.05 ? 'up' : r.p.change_7d <= -0.05 ? 'down' : ''}">${pct(r.p.change_7d)}</td>
@@ -238,7 +237,7 @@
    <div class="rankbig"><small>Rank</small><b>${r.rank}</b><small>of ${rows.length}</small></div>
    <div><h1>${esc(p.name)}</h1>
     <p class="tags">${famChip(v.family)}<span class="tag">${esc(p.category || 'Uncategorised')}</span><span class="tag pre">No token on record</span>${r.watch ? '<span class="tag wlt">On the watchlist</span>' : '<span class="tag">Outside the watchlist</span>'}</p>
-    <p class="sub">${esc(p.chains.join(' · '))}${p.listed_at ? ` — tracked since ${esc(p.listed_at)}` : ' — no listing date on record'}</p></div>
+    <p class="sub">${esc(p.chains.join(' · '))}${p.listed_at ? ` — tracked since ${esc(p.listed_at)}` : ' — no listing date on record'}</p>${nameFlag(r)}</div>
    <div class="dval"><small>Implied token value</small><b>${usd(v.implied)}</b><small>50% band ${usd(v.low)} – ${usd(v.high)} · ${mult(v.multiple)} TVL</small><small>Rank ${r.rlo}–${r.rhi} in 80% of 40 bootstrap refits; top 20 in ${pc(r.boot)}</small><small>Rank #${r.rank}; ${Object.keys(r.alt).map((k) => `#${r.alt[k]} ${k}`).join(' · ')}</small></div>
   </section>
   <div class="dgrid">
@@ -288,8 +287,8 @@
   return `<section class="hero slim">${formula()}<div class="card checks"><h2>Self-checks <span>run in this page on load</span></h2><ul>${CHECKS.map(([ok, t]) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${t}</li>`).join('')}</ul></div></section>`;
  }
  function aside() {
-  return `<section class="intro"><h1>${radar.products.length} products set aside, not ranked</h1>
-   <p>No token of their own, but each is a wrapped, bridged, staked or exchange product, a versioned pool or a likely sibling of a trading token (productOf, applied to every protocol); their value rides on that token's.</p></section>
+  return `<section class="intro"><h1>${radar.products.length} products set aside</h1>
+   <p>These protocols record no token and match the watchlist's category or product-name exclusions.</p></section>
    <div class="tablewrap">${tbl('board', ['Product', 'Why set aside', '#TVL', '#7d'], radar.products.map((x) => [nm(x.p.name, x.p.chains.slice(0, 3).join(', ')), `<span class="tag">${esc(x.kind)}</span>`, usd(x.p.tvl_usd), pct(x.p.change_7d)]))}</div>`;
  }
 

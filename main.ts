@@ -113,6 +113,6 @@ writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: 65_
 
 process.stdout.write(
   `launch radar: ${snapshot.protocols.length} protocols; fit on ${radar.fit.n} trading tokens (size elasticity ${(1 + radar.fit.slope).toFixed(2)}); ` +
-    `${rows.length} pre-token rows ranked, ${radar.products.length} wrapped/bridged/staked products set aside; watchlist ${snapshot.watchlist.length}/${snapshot.watchlist.length} covered\n` +
+    `${rows.length} pre-token rows ranked, ${radar.products.length} products set aside; watchlist ${snapshot.watchlist.length}/${snapshot.watchlist.length} covered\n` +
     `launch radar: wrote board.json, data.js, dashboard/ (${pages.length} files), screenshots/ (${shots.length}) and dossier.json to ${out}\n`,
 );

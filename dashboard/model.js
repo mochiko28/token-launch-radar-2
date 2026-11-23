@@ -1,15 +1,14 @@
-/* Launch Radar value model, run by main.ts (board.json) and by the page: every number on screen is
-* computed here from the snapshot. No protocol name appears in this file. */
+/* Launch Radar value model, shared by main.ts and the dashboard. */
 (function (root) {
  'use strict';
 
  var DAY = 86400000;
  var M = {
   version: 'radar-fit-3',
-  ref_tvl: 1e8, // the fit's reference size: $100M of TVL
-  ratio_floor: 0.02, // mcap/TVL outliers are clipped before the fit
+  ref_tvl: 1e8, // fit reference TVL
+  ratio_floor: 0.02, // mcap/TVL clipping
   ratio_cap: 20,
-  growth_floor: -30, // 7-day change used for momentum, clipped (per cent)
+  growth_floor: -30, // 7-day momentum clipping (%)
   growth_cap: 50,
   odds_ridge: 1, // L2 penalty of the odds fit: best-calibrated walk-forward of the leave-one-out ties
   drop_share: 0.10, // assumed share of supply sent to depositors, pro rata to TVL-days
@@ -41,20 +40,19 @@
  var VERSIONED = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
  var WRAPPED = /\b(wrapped|staked|staking)\b/i;
  var EXCHANGE = /^(Binance|Coinbase|Bybit|Kraken|Bitget|OKX|Bitfinex|Gemini)\b/;
- // Plus likely siblings of a token holder.
+ // First-word matches flag possible token overlap on ranked rows.
  function firstWord(n) { return n.toLowerCase().split(/[\s.-]+/)[0]; }
  function tokenWords(snap) {
-  var w = {};
+  var w = Object.create(null);
   snap.protocols.forEach((p) => { if (hasToken(p) && firstWord(p.name).length >= 3) w[firstWord(p.name)] = p.name; });
   return w;
  }
- function productOf(p, words) {
+ function productOf(p) {
   if (p.category === 'CEX') return 'exchange';
   if (PRODUCT_CATS.indexOf(p.category) >= 0 || /bridge/i.test(p.category || '')) return p.category.toLowerCase();
   if (VERSIONED.test(p.name)) return 'versioned pool';
   if (WRAPPED.test(p.name)) return 'wrapped or staked';
   if (EXCHANGE.test(p.name)) return 'exchange product';
-  if (words && !hasToken(p) && Object.prototype.hasOwnProperty.call(words, firstWord(p.name))) return 'likely sibling of ' + words[firstWord(p.name)];
   return null;
  }
  function bySlug(a, b) { return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0; }
@@ -331,21 +329,21 @@
   return (head.length + tail.length > 600 ? head.slice(0, 597 - tail.length) + '...' : head) + tail;
  }
 
- /* The whole radar: the fit, the ranked pre-token board, and the trading set kept apart. */
+ // Fit the model and rank the board.
  function build(snap) {
   var fit = calibrate(snap);
   var watch = {};
   snap.watchlist.forEach((s) => { watch[s] = true; });
   var noToken = snap.protocols.filter((p) => !hasToken(p) && p.tvl_usd > 0);
   var words = tokenWords(snap);
-  var pre = noToken.filter((p) => watch[p.slug] || !productOf(p, words));
-  var products = noToken.filter((p) => !watch[p.slug] && productOf(p, words)).map((p) => ({ p: p, kind: productOf(p, words) }))
+  var pre = noToken.filter((p) => watch[p.slug] || !productOf(p));
+  var products = noToken.map((p) => ({ p: p, kind: productOf(p) })).filter((x) => x.kind && !watch[x.p.slug])
    .sort((a, b) => b.p.tvl_usd - a.p.tvl_usd || bySlug(a.p, b.p));
   var ages = pre.map((p) => ageDays(snap.as_of, p.listed_at)).filter((a) => a != null).sort((a, b) => a - b);
   var ageFallback = ages.length ? ages[ages.length >> 1] : 365;
   var rows = pre.map((p) => {
    var v = value(p, fit, snap.as_of, ageFallback);
-   return { p: p, v: v, plan: farmPlan(p, v), watch: !!watch[p.slug], below: p.tvl_usd < snap.floor_usd };
+   return { p: p, v: v, plan: farmPlan(p, v), watch: !!watch[p.slug], below: p.tvl_usd < snap.floor_usd, wordMatch: words[firstWord(p.name)] };
   });
   rows.sort((a, b) => b.v.implied - a.v.implied || bySlug(a.p, b.p));
   rows.forEach((r, i) => { r.rank = i + 1; });
