@@ -1,11 +1,8 @@
 :root{
-	--dim:#635a6d;
-	--line:1px solid #e4dfe8;
-	--ink:#6040a5;
-	--bg:#eee8f7;
-	font:15px/1.5 Adwaita Sans,FreeSans,sans-serif;
-	color:#211a2e;
-	background:#f5f3f1
+--ink:#142835;--dim:#4f5e66;--paper:#f2eade;--sheet:#fffaf0;--wash:#efe1c9;--rule:#ded0bc;--line:1px solid var(--rule);
+--signal:#f4ad49;--rust:#873a10;--gain:#12634d;--loss:#993829;
+font:15px/1.5 Adwaita Sans,FreeSans,sans-serif;
+font-variant-numeric:tabular-nums;color:var(--ink);background:var(--paper)
 }
 *{box-sizing:border-box}
 body,h1,h2,h3,p,dl,dd{margin:0}
@@ -13,115 +10,113 @@ a{color:inherit;text-decoration:none}
 a:hover{text-decoration:underline}
 button,select,input{font:inherit;color:inherit}
 button,select,summary{cursor:pointer}
-:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
-h1{font-size:clamp(2.4rem,4vw,3.9rem);line-height:1;letter-spacing:-.06em}
+:focus-visible{outline:2px solid}
+h1{font:700 clamp(2.4rem,4vw,3.9rem)/1 FreeSerif,serif;letter-spacing:-.035em}
 h2{font-size:1.14rem;line-height:1.25}
 .frame{width:min(1328px,95%);margin:auto}
-body>header,.dialog-top,.btn,.chip,.panel{background:#fff}
+body>header{background:var(--ink);color:var(--sheet);border-bottom:2px solid var(--signal)}
+.dialog-top,.chip,.panel,dialog{background:var(--sheet)}
 .brand,.mast,.bar,.dialog-top,.portfolio,.equation{display:flex;align-items:center}
-.intro,.readings,.legend,.positions,.flows,.integrity,dl{display:flex}
-.mast{min-height:60px;gap:28px}
-.brand{gap:6px;font-weight:700}
+.intro,.readings,.legend,.positions,.flows,.integrity,dl,nav{display:flex}
+.mast{min-height:56px;gap:32px}
+.brand{gap:8px;font-weight:700}
 .brand span{font-size:1.35em}
-nav{display:flex;gap:25px;margin-right:auto}
-nav [aria-current=page]{text-decoration:underline}
-[aria-current=page],[aria-sort] a,.brand span,.watch,.back,.kicker,.steps h3{color:var(--ink)}
-.btn,.chip,.panel,.portfolio{border:var(--line)}
-.btn{padding:6px 11px}
+.brand span,[aria-current]{color:var(--signal)}
+nav{gap:24px;margin-right:auto}
+[aria-sort] a,.watch,.back,.kicker,.steps h3{color:var(--rust)}
+.panel,.portfolio{border:var(--line)}
+.btn,.chip{border:0}
+.btn{padding:4px 12px;background:var(--signal);color:var(--ink)}
 #checks,.rank,.kicker,footer{font:.76rem monospace}
-small,dt,.rank,.intro p,.curve,footer{color:var(--dim)}
+small,dt,.curve,footer{color:var(--dim)}
 .intro,.bar,.dialog-top,.metrics{justify-content:space-between}
 .integrity,.readings,.portfolio,.positions,.drivers dl{flex-wrap:wrap}
 .intro{align-items:end;margin:12px 0 24px}
 .intro p{margin-top:8px}
 .integrity{gap:2px;margin:-17px 0 8px}
-.chip{padding:2px;white-space:nowrap;font-size:.68rem}
+.chip{padding:2px 1px;white-space:nowrap;font-size:.68rem}
 #check-help,.back{margin-top:16px}
 .kpis,.groups,.board,.detail,.research,.rail,.detail>div,.filters,.steps li,.quotes{display:grid}
-.kpis{grid-template-columns:1.25fr 1.55fr 1fr .68fr;gap:12px;margin-bottom:10px}
-.panel,.portfolio{border-radius:10px;min-width:0}
-.kpi{padding:5px 12px;line-height:1.25}
+.kpis{grid:auto/1.25fr 1.55fr 1fr .68fr;gap:12px;margin-bottom:8px}
+.panel,.portfolio{min-width:0}
+.kpi{padding:4px 12px;line-height:1.25;border-top:2px solid var(--ink)}
+.kpi h2,.filters label,.kicker{text-transform:uppercase}
 .kpi strong{font-size:1.94rem}
-.groups{grid-template:auto/1fr 1fr}
+.groups{grid:auto/1fr 1fr}
 .readings,.band,.totals,.board,.detail,.research{gap:1rem}
 :not(strong)>small,.readings span,svg,.back{display:block}
 .misses strong{font-size:1.4rem}
 small,dt,.curve,.drivers,.rail,.portfolio p,.hint,.back,.kpi{font-size:.8rem}
-.valuation,.portfolio,.metrics,.steps small{background:var(--bg)}
+.valuation,.portfolio,.metrics,.steps small,thead,.rank{background:var(--wash)}
 .board,.detail,.research{align-items:start}
-.board{grid-template-columns:1fr 310px}
-.rail,.detail>div{gap:14px}
-.bar{padding:14px 16px 9px}
-.filters{grid-template-columns:1.4fr repeat(6,1fr);gap:8px;padding:0 16px 9px}
+.board{grid:auto/1fr 310px}
+.rail,.detail>div,.legend,.equation{gap:12px}
+.bar{padding:12px 16px 8px}
+.filters{grid:auto/1.4fr repeat(6,1fr);padding:0 16px 8px}
 :is(.filters,.quotes){
 	label{font-size:.75rem;font-weight:700}
-	:is(input,select){width:100%;height:34px;padding:4px 6px;border:var(--line);border-radius:5px}
+	input,select{width:100%;height:34px;padding:4px 8px;border:var(--line);background:var(--sheet)}
 }
 .scroll{overflow:auto}
 #results .scroll{max-height:511px;.portfolio+div &{max-height:318px}}
 #results thead{position:sticky;top:0;z-index:1}
 table{width:100%;border-collapse:collapse}
 th{text-align:left}
-thead{background:#f3eff6;font-size:.75rem}
+thead{font-size:.75rem}
 .ranks{min-width:880px;font-size:.88rem;line-height:1.15}
-.ranks :is(td,th){padding:2px 7px}
+.ranks :is(td,th){padding:2px 6px}
 .ranks :is(td,small){white-space:nowrap}
-.hint,.compare{margin:0 16px 9px}
+.rank,.ranks th:first-child{text-align:center}
+.hint,.compare{margin:0 16px 8px}
 tbody tr{border-bottom:var(--line)}
 .protocol,dd,.amount{font-weight:750}
-.pos,[data-pass=true]{color:#17644f}
-.neg,[data-pass=false]{color:#a0414e}
-.badge{display:inline-block;padding:3px 6px;border-radius:5px;font:700 .7rem/1.15 monospace}
-.farm{background:#e1f3eb;color:#145a46}
-.marginal{background:#fbefd7;color:#754800}
-.skip{background:#f6e6e8;color:#893842}
-.inset,.valuation,.empty{padding:14px 16px}
+.pos,.chip[data-pass=true]{color:var(--gain)}
+.neg,.chip[data-pass=false]{color:var(--loss)}
+.badge{padding:3px 6px;font:700 .7rem/1.15 monospace;color:var(--mark);background:var(--tint)}
+.farm{--mark:var(--gain);--tint:#d9ebe1}
+.marginal{--mark:#854608;--tint:#ffe3b1}
+.skip{--mark:#435783;--tint:#e3e8f0}
+.inset,.valuation,.empty,.portfolio{padding:12px}
 svg{width:100%;height:146px}
 svg text{fill:var(--dim);font-size:11px}
-svg path{stroke:#e8e0ed}
-.farm-dot{--dot:#24795e}
-.marginal-dot{--dot:#ad6b1a}
-.skip-dot{--dot:#bf4f62}
-svg circle{fill:var(--dot)}
-.legend{gap:12px;font:.7rem monospace}
-.legend span::before{content:"● ";color:var(--dot)}
+svg path{stroke:var(--rule)}
+svg circle{fill:var(--mark)}
+.legend{font:.7rem monospace}
+.legend span::before{content:"● ";color:var(--mark)}
 .plans div,.pay,.steps li,.drivers,.band{border-top:var(--line)}
 .plans b{float:right}
-.pay{margin:8px 0;padding-top:7px}
-.portfolio{gap:12px 26px;padding:12px 16px;margin-bottom:16px}
+.pay{padding-top:8px}
+.portfolio{gap:12px 24px;margin-bottom:16px}
 .positions,.positions>div,.flows>div{flex:1}
-.back+.intro{margin:10px 0 20px}
-.detail{grid-template-columns:6fr 5fr}
+.detail{grid:auto/6fr 5fr}
 .detail>div{min-width:0}
-.metrics,.flows,.steps li{gap:8px}
-.metrics{padding:8px;margin-block:8px}
+.metrics,.flows,.steps li,.filters{gap:8px}
+.metrics{padding:8px}
 .steps{list-style:none;margin:6px 0 0;padding:0}
-.steps li{grid-template-columns:7fr 3fr;padding:5px 0}
+.steps li{grid:auto/7fr 3fr}
 .steps small{align-self:center;padding:4px 6px}
 .detail h3,.steps p,.quote p,.facts,.kpi h2,.exits,.range-net{font-size:.85rem}
 .exits{margin:0;padding-left:1.25em}
-.half-q,.quotes{margin-block:7px}
-.quotes{grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:6px}
+.half-q,.quotes,.metrics,.pay,.equation{margin-block:8px}
+.quotes{grid:auto/repeat(auto-fit,minmax(80px,1fr));gap:6px}
 .amount{font-size:2.8rem}
-.range-net{color:var(--dim)}
-.equation{gap:14px;margin:8px 0}
-.drivers,.band{padding:5px 0}
+.drivers,.band,.steps li{padding:4px 0}
 .drivers dl{gap:1em}
 .inset h2{margin-bottom:.4em}
 .facts :is(td,th){padding:7px}
-.research{grid-template-columns:7fr 5fr}
+.research{grid:auto/7fr 5fr}
 footer{padding:20px 0}
 dialog{margin:0 0 0 auto;height:100%;max-height:none;width:min(640px,100%);border:0}
 .dialog-top,.drawer{padding:16px}
 .dialog-top{position:sticky;top:0}
-@media(max-width:1130px){.board{grid-template-columns:1fr}.rail{grid-template-columns:1fr 1fr}}
+@media(max-width:1130px){.board{grid:auto/1fr}.rail{grid:auto/1fr 1fr}}
 @media(max-width:780px){
 	.mast{flex-wrap:wrap;gap:5px 12px}
 	nav{order:3;width:100%}
 	.intro{align-items:start;flex-direction:column}
-	.kpis,.filters{grid-template-columns:1fr 1fr}
+	.kpis,.filters{grid:auto/1fr 1fr}
 	.filters label:first-child{grid-column:span 2}
-	.detail,.research{grid-template-columns:1fr}
+	.detail,.research{grid:auto/1fr}
 	.metrics{flex-wrap:wrap}
 }
-@media(max-width:500px){.kpis,.rail,.steps li{grid-template-columns:1fr}}
+@media(max-width:500px){.kpis,.rail,.steps li{grid:auto/1fr}}

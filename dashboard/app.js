@@ -118,7 +118,7 @@ ${html(filters,spec=>filter(spec,st))}</div>
 </section><aside class=rail>
 ${plans(st)}
 ${inset("Expected yield by age",`<div id=yield></div>
-<div class=legend>${html(grades,v=>`<span class=${v.toLowerCase()}-dot>${v}</span>`)}</div>`)}
+<div class=legend>${html(grades,v=>`<span class=${v.toLowerCase()}>${v}</span>`)}</div>`)}
 </aside></div>
 <details class="panel inset" id=check-help><summary>Integrity</summary><ul>
 <li>Export, hash, groups, watchlist, order, costs, miss, AUC
@@ -217,7 +217,7 @@ ${html(["start","middle","middle","end"],(anchor,i)=>{
 	return`<path d="M36,${y}H275M${x},10V130"/><text x=29 y=${y+4} text-anchor=end>${+(low+span*i/3).toFixed(1)}%</text>
 <text x=${x} y=148 text-anchor=${anchor}>${integer(days*i/3)}</text>`
 })}
-${html(points,({plan,ageDays,name},i)=>`<circle class=${plan.verdict.toLowerCase()}-dot cx=${36+239*ageDays/days} cy=${130-120*(rates[i]-low)/span} r=3.1>
+${html(points,({plan,ageDays,name},i)=>`<circle class=${plan.verdict.toLowerCase()} cx=${36+239*ageDays/days} cy=${130-120*(rates[i]-low)/span} r=3.1>
 <title>${esc(name)} · ${ageDays} days · ${pct(plan.expectedYield)}</title></circle>`)}
 <text x=156 y=167 text-anchor=middle>Days without a recorded token</text>
 </svg><p>${points.length} plotted${rs.length>points.length?` · ${rs.length-points.length} undated`:""}`
