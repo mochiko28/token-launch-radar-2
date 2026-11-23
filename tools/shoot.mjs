@@ -153,7 +153,7 @@ function encodeJpeg(png, work, candidates = []) {
 const shots = [
   { name: "1-board.jpg", hash: "#board" },
   { name: "2-detail.jpg", hash: "#detail/upshift", viewHeight: detailHeight },
-  { name: "3-filtered.jpg", hash: "#board?scope=watchlist&verdict=FARM" }
+  { name: "3-filtered.jpg", hash: "#board?scope=watchlist&verdict=SKIP" }
 ];
 const pages = [...shots, { name: "calibration", hash: "#calibration", probeOnly: true }];
 
@@ -171,26 +171,45 @@ function readPage() {
   if (form) {
     const initial = read("#quote-result");
     defaultHalfOdds = halfOdds();
-    const inputs = [...form.elements];
+    const inputs = [...form.querySelectorAll("input")];
+    const horizon = form.elements.horizon;
     const defaulted = () => inputs.every(input => input.nextElementSibling.textContent === "Default");
     const fieldsValid = inputs.map(input => input.name).join() === "entryGas,exitGas,slippage,delay,lockup";
-    quotePass = fieldsValid && defaulted() && initial.includes("No token") && initial.includes("Break-even p*");
-    if (fieldsValid) {
-      const resultFields = () => [...document.querySelectorAll("#quote-result dd")].map(node => node.textContent);
-      const before = resultFields();
+    quotePass = fieldsValid && defaulted() && initial.includes("No token") && initial.includes("Break-even p*")
+      && horizon?.value === "0" && [...horizon.options].map(option => option.value).join() === "0,30,90,180,365"
+      && visible("#quote select");
+    if (quotePass) {
+      const update = control => control.dispatchEvent(new Event("input", { bubbles: true }));
+      const metrics = () => Object.fromEntries([...document.querySelectorAll("#quote-result dt")]
+        .map(node => [node.textContent, node.nextElementSibling.textContent]));
+      const select = h => { horizon.value = h; update(horizon); };
+      const best = [...horizon.options].slice(1).map(option => {
+        select(option.value);
+        const result = metrics();
+        quotePass &&= Boolean(result[`Launch within ${option.value} d (q)`])
+          && read("#quote-result").includes(`${option.value}d at`);
+        return result;
+      }).sort((a, b) => Number(b["Expected net"].replace(/[^\d.-]/g, ""))
+        - Number(a["Expected net"].replace(/[^\d.-]/g, "")))[0];
+      select(0);
+      quotePass &&= read("#quote-result") === initial && JSON.stringify(metrics()) === JSON.stringify(best);
       const values = [10000, 7, 1, 12, 45];
+      select(30);
+      const before = metrics();
       inputs.forEach((input, i) => { input.value = values[i]; });
-      inputs[0].dispatchEvent(new Event("input", { bubbles: true }));
-      const after = resultFields();
-      quotePass &&= after[0] !== before[0] && after[1] === before[1] && after[2] !== before[2] && after[3] === "SKIP"
+      update(inputs[0]);
+      const after = metrics();
+      quotePass &&= after["Break-even p*"] !== before["Break-even p*"]
+        && after["Launch within 30 d (q)"] === before["Launch within 30 d (q)"]
+        && after["Expected net"] !== before["Expected net"] && after["Quote verdict"] === "SKIP"
         && read("#quote-result").includes("57d at")
         && halfOdds() !== defaultHalfOdds && halfOdds().includes("SKIP")
         && inputs.every(input => input.nextElementSibling.textContent === "Quoted");
       inputs.forEach(input => { input.value = ""; });
-      inputs[0].dispatchEvent(new Event("input", { bubbles: true }));
+      select(0);
       quotePass &&= read("#quote-result") === initial && defaulted();
       inputs[0].value = "-1";
-      inputs[0].dispatchEvent(new Event("input", { bubbles: true }));
+      update(inputs[0]);
       quotePass &&= read("#quote-result") === initial && defaulted();
       inputs[0].value = "";
     }
@@ -202,13 +221,13 @@ function readPage() {
     const copy = li.querySelector("p");
     const parts = [copy.firstChild.textContent.trim(), li.querySelector("small").textContent];
     const follow = copy.querySelector("span")?.textContent;
-    if (follow) parts.push(follow.replace(" at token odds (snapshot status) ", " at odds "));
+    if (follow) parts.push(follow);
     if (li.querySelector("h3").textContent === "3c Wait") steps[steps.length - 1] += " " + parts.join(" ");
     else steps.push(parts.join(" "));
   }
   return {
     checks: read("#checks"), title: read("h1"), count: read("#row-count"), first: read("tbody tr th a"),
-    portfolio: read(".portfolio h2"), verdict: read(".verdict-summary .badge"),
+    portfolio: read(".portfolio"),
     summary: read(".verdict-summary"), defaultHalfOdds,
     oddsNote: read("#quote-result + p"),
     positions: document.querySelectorAll(".positions > div").length,
@@ -217,7 +236,7 @@ function readPage() {
     quoteVisible: visible(".quote"), quotePass,
     attribution: read(".attribution"), attributionVisible: visible(".attribution"),
     peersVisible: visible(".detail-grid > :last-child > :last-child"),
-    curve: read(".curve"), heldOut: read(".misses"),
+    curve: read(".curve"), heldOut: read(".misses"), timing: read(".research-grid") && read("#view .inset p"),
     stress: read(".detail-aside .facts"), stressVisible: visible(".detail-aside .facts"), rowCheck: read("#row-check"),
     rowPass: document.querySelector("#row-check")?.dataset.pass,
     chart: read(".chart-note"), scope: document.querySelector("#filter-scope")?.value,
@@ -395,10 +414,11 @@ async function shoot(output, destination) {
         throw new Error(`${name}: calibration summary is incomplete.`);
       }
       if (name === "1-board.jpg" && (info.rows.length !== board.length || !info.chart)) throw new Error("The full board did not render.");
-      if (name === "2-detail.jpg" && (info.verdict !== "FARM" || info.steps.length < 3
+      if (name === "calibration" && !info.timing?.includes("F walk-forward AUC")) throw new Error("Missing launch calibration.");
+      if (name === "2-detail.jpg" && (info.steps.length < 3
         || info.labels.map(label => label.split(" ")[0]).join() !== "1,2a,2b,2c,3a,3b,3c,4,5,6"
-        || !info.summary?.includes("token odds (snapshot status)") || !info.oddsNote?.includes("no launch dates")
-        || !info.defaultHalfOdds?.includes("MARGINAL")
+        || !/Launch within (30|90|180|365) d: [\d.]+% \(q\) vs p\*/.test(info.summary)
+        || !info.oddsNote?.includes("no launch dates") || !info.oddsNote.includes("F walk-forward AUC")
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
         || !info.steps[0].includes("deposit caps") || !info.steps.some(step => step.startsWith("If TVL"))
         || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps)
@@ -409,8 +429,8 @@ async function shoot(output, destination) {
         || !info.stressVisible || !info.stress?.includes("½ share"))) {
         throw new Error(`Detail checks failed: ${JSON.stringify(info)}`);
       }
-      if (name === "3-filtered.jpg" && (!info.portfolio || info.positions < 3 || info.scope !== "watchlist" || info.filter !== "FARM"
-        || !info.rows.length || info.rows.some(row => row[6] !== "FARM" || !row[7]))) {
+      if (name === "3-filtered.jpg" && (!info.portfolio?.includes("watchlist portfolio") || info.scope !== "watchlist" || info.filter !== "SKIP"
+        || !info.rows.length || info.rows.some(row => row[6] !== "SKIP" || !row[7]))) {
         throw new Error("The filtered watchlist did not render.");
       }
     };
@@ -424,7 +444,7 @@ async function shoot(output, destination) {
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
     }
     console.log("Firefox reported no console errors or uncaught exceptions.");
-    console.log("Calibration, detail attribution, board-matched decision tree, and live quote update and reset pass.");
+    console.log("Calibration, detail attribution, board-matched decision tree, and live quote horizon selection, update and reset pass.");
   } finally {
     spawnSync("find", [work, "-mindepth", "1", "-delete"]);
     rmdirSync(work);
