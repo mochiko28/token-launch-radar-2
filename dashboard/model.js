@@ -37,12 +37,12 @@
   var d = Math.floor((Date.parse(asOf + 'T00:00:00Z') - Date.parse(listed + 'T00:00:00Z')) / DAY);
   return isFinite(d) ? Math.max(0, d) : null;
  }
- // The watchlist rule for wrapped, staked, bridged and exchange products.
+ // The watchlist's product rule.
  var PRODUCT_CATS = ['Bridge', 'Canonical Bridge', 'Liquid Staking', 'Liquid Restaking', 'Restaked BTC', 'CEX'];
  var VERSIONED = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
  var WRAPPED = /\b(wrapped|staked|staking)\b/i;
  var EXCHANGE = /^(Binance|Coinbase|Bybit|Kraken|Bitget|OKX|Bitfinex|Gemini)\b/;
- // Plus: a no-token protocol named with the first word of a token-holding one.
+ // Plus likely siblings of a token holder.
  function firstWord(n) { return n.toLowerCase().split(/[\s.-]+/)[0]; }
  function tokenWords(snap) {
   var w = {};
@@ -74,12 +74,12 @@
   });
   var pts = order.map(function (k) {
    var t = tok[k];
-   // tc = TVL carried a week at its 7-day change, the same T the board values.
+   // tc = TVL carried a week at its 7-day change.
    var tc = t.tvl * (1 + clamp(t.p.change_7d || 0, M.growth_floor, M.growth_cap) / 100);
    return { p: t.p, tvl: t.tvl, tc: tc, mcap: t.mcap, members: t.members, f: family(t.p), x: Math.log(tc / M.ref_tvl), y: Math.log(clamp(t.mcap / tc, M.ratio_floor, M.ratio_cap)),
     sx: Math.log(t.tvl / M.ref_tvl), sy: Math.log(clamp(t.mcap / t.tvl, M.ratio_floor, M.ratio_cap)) };
   });
-  // Families enter the curve only if they lower the miss in both held-out tests.
+  // Families enter only if they lower both held-out misses.
   var tests = termTests(pts, snap.as_of), k = tests.terms[3].ok ? 0 : Infinity;
   var miss = pts.map(function (q, i) { return Math.log(q.mcap / predict(fitPoints(pts.filter(function (o, j) { return j !== i; }), k), q)); });
   var full = fitPoints(pts, k);
@@ -88,7 +88,7 @@
   var absMiss = miss.map(Math.abs).sort(function (u, v) { return u - v; });
   var inBand = 0, q25 = quantile(sorted, 0.25), q75 = quantile(sorted, 0.75);
   miss.forEach(function (m) { if (m >= q25 && m <= q75) inBand++; });
-  // Held-out miss by TVL band, so the reader sees where the curve is weak.
+  // Held-out miss by TVL band.
   var cuts = [0, 1e7, 3e7, 1e8, 1e15], bands = cuts.slice(0, 4).map(function (lo, b) {
    var m = pts.map(function (q, i) { return q.tvl >= lo && q.tvl < cuts[b + 1] ? Math.abs(miss[i]) : -1; }).filter(function (x) { return x >= 0; }).sort(function (u, v) { return u - v; });
    return { lo: lo, hi: cuts[b + 1], n: m.length, miss: Math.exp(quantile(m, 0.5)) };
@@ -130,8 +130,14 @@
   var w = logit(pts), F = function (p, a) { return sig(dot(w, X(p, a))); };
   var loo = pts.map(function (q, i) { return { y: q.y, s: dot(logit(pts.filter(function (o, j) { return j !== i; }), w, 3), q.x) }; });
   var dated = pts.filter(function (q) { return q.a != null; }).sort(function (u, v) { return v.a - u.a || bySlug(u.p, v.p); });
-  var cut = Math.floor(dated.length * 0.6), ww = logit(dated.slice(0, cut));
-  var wf = dated.slice(cut).map(function (q) { return { y: q.y, s: dot(ww, q.x) }; });
+  var cut = Math.floor(dated.length * 0.6);
+  // Held out with some inputs zeroed: walk-forward (newest 40%) and family-out (one fit per family).
+  function held(cols) {
+   var z = function (q) { return { y: q.y, x: q.x.map(function (v, i) { return cols.indexOf(i) < 0 ? v : 0; }) }; }, wd = logit(dated.slice(0, cut).map(z)), fw = {};
+   return { wf: dated.slice(cut).map(function (q) { return { y: q.y, s: dot(wd, z(q).x) }; }),
+    fam: pts.map(function (q) { var f = family(q.p); fw[f] = fw[f] || logit(pts.filter(function (o) { return family(o.p) !== f; }).map(z), w, 4); return { y: q.y, s: dot(fw[f], z(q).x) }; }) };
+  }
+  var h0 = held([]), wf = h0.wf, lofo = h0.fam, ss = function (q) { return sig(q.s); };
   // Cohort check: each age cohort's token share against the fitted mean.
   var edges = [0, 180, 365, 730, 1095, 1e9], cohorts = edges.slice(0, 5).map(function (lo, c) {
    var m = pts.filter(function (q) { return q.a != null && q.a >= lo && q.a < edges[c + 1]; }), n = m.length || 1;
@@ -140,15 +146,15 @@
   // Brier score against the base rate, both held out the same way.
   var S = pts.reduce(function (t, q) { return t + q.y; }, 0), n = pts.length, rate = dated.slice(0, cut).reduce(function (t, q) { return t + q.y; }, 0) / cut;
   var bri = function (T, f) { return T.reduce(function (t, q) { return t + Math.pow(f(q) - q.y, 2); }, 0) / T.length; };
-  var brier = { loo: bri(loo, function (q) { return sig(q.s); }), loo_base: bri(pts, function (q) { return (S - q.y) / (n - 1); }),
-   wf: bri(wf, function (q) { return sig(q.s); }), wf_base: bri(wf, function () { return rate; }) };
+  var brier = { loo: bri(loo, ss), loo_base: bri(pts, function (q) { return (S - q.y) / (n - 1); }),
+   wf: bri(wf, ss), wf_base: bri(wf, function () { return rate; }) };
   // A bootstrap refit on resampled peers.
   var boot = function (rnd) { var wb = logit(pts.map(function () { return pts[Math.floor(rnd() * n)]; }), w, 4); return function (p, a) { return sig(dot(wb, X(p, a))); }; };
-  // Family out: each family scored by a fit that never saw it.
-  var lofo = pts.map(function (q) { var f = family(q.p); return { y: q.y, s: dot(logit(pts.filter(function (o) { return family(o.p) !== f; }), w, 4), q.x) }; });
-  brier.fam = bri(lofo, function (q) { return sig(q.s); });
+  brier.fam = bri(lofo, ss);
   brier.fam_base = bri(pts, function (q) { var o = pts.filter(function (z) { return family(z.p) !== family(q.p); }); return o.reduce(function (t, z) { return t + z.y; }, 0) / o.length; });
-  return { mid: mid, auc_fam: auc(lofo), boot: boot, brier: brier, w: w, cohorts: cohorts, gap: Math.max.apply(null, cohorts.map(function (c) { return Math.abs(c.actual - c.fitted); })), n: pts.length, with_token: pts.filter(function (q) { return q.y; }).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
+  var terms = [['all inputs', []], ['without TVL', [1]], ['without days tracked', [2]], ['without 7-day change', [3]], ['without family', fams.map(function (f, i) { return 4 + i; })]]
+   .map(function (t) { var h = t[1].length ? held(t[1]) : h0; return [t[0], bri(h.wf, ss), bri(h.fam, ss)]; });
+  return { terms: terms, mid: mid, auc_fam: auc(lofo), boot: boot, brier: brier, w: w, cohorts: cohorts, gap: Math.max.apply(null, cohorts.map(function (c) { return Math.abs(c.actual - c.fitted); })), n: pts.length, with_token: pts.filter(function (q) { return q.y; }).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
    F: F };
  }
  function sig(z) { return 1 / (1 + Math.exp(-z)); }
@@ -185,7 +191,7 @@
    r.key = t[0]; r.label = t[1];
    return r;
   });
-  // ok = beats its rival (flat for spot, spot for carried, carried for the rest).
+  // ok = beats its rival term.
   T.forEach(function (t, i) { var b = T[i < 3 ? i - 1 : 2]; t.ok = i ? t.loo < b.loo && t.wf < b.wf && t.lofo < b.lofo : null; });
   return { terms: T, wf_n: dated.length - cut, wf_train: cut, wf_from: dated[cut].p.listed_at };
  }
@@ -306,7 +312,7 @@
   }
   var st = steps(stake), t = total(st), capital = stake + Math.round(stake / 4), drop = earn(stake);
   var verdict = drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip';
-  // Every plan opens with its decision and the drop share at which it pays.
+  // Every plan opens with its decision.
   var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
   // Least capital (to $1M) whose drop covers its recomputed costs.
   var payCap = 0;
@@ -316,7 +322,7 @@
   st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: ' + Math.round(v.time_factor * 100) + '% of peers like it record a token, so the score-weighted drop is ' + usd(drop * v.time_factor) + ' (×' + (drop * v.time_factor / t.all).toFixed(2) + ' the costs); if it launches, at ' + usd(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
    ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + (verdict === 'farm' ? '' : '; before your time it nets ' + (drop >= t.cost ? '+' : '−') + usd(Math.abs(drop - t.cost)) + ', and ' + (payCap ? 'it would pay ×' + M.target_cover + ' at about ' + usd(payCap) + ' of capital' : 'no deposit up to $1M pays ×' + M.target_cover + ' because its fees grow with the deposit')) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
    '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%; at 5% it pays ×' + (drop / t.all / 2).toFixed(2) + ', at 20% ×' + (drop / t.all * 2).toFixed(2) + '), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
-  // A plan that does not cover its costs even once gets a $0 research plan.
+  // Below ×1: a $0 research plan.
   if (verdict === 'skip') {
    st = [st[0],
     { when: 'Day 0', usd: 0, min: 15, act: 'Research only, no deposit: check whether ' + ACT[kind][3].replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain) },

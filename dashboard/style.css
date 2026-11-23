@@ -214,3 +214,4 @@ td.proto{min-width:230px;}
 .radar .ax{font-size:11.5px;fill:var(--muted);}
 .radar .lab{font-size:11px;}
 .radar .grid{stroke:#d9d2c3;}
+.brand::before{content:"";width:26px;height:26px;border-radius:50%;border:1.5px solid #1f6f5c66;box-sizing:border-box;background:radial-gradient(circle at 72% 64%,#f2b950 0 2.4px,transparent 2.8px),radial-gradient(circle,transparent 0 6.5px,#1f6f5c 7px 8px,transparent 8.5px),linear-gradient(-28deg,transparent 0 47%,#1f6f5c 47% 53%,transparent 53%) top right/50% 50% no-repeat;}
