@@ -11,7 +11,7 @@
     familyPenalty: 2, oddsPenalty: 1, valueWarmup: 25, oddsWarmup: 60,
     bootstrapDraws: 192, bootstrapSeed: 918273, bandQuantiles: [0.1, 0.9],
     hourlyUsd: 20, depositorShare: 0.05, competingTvlShare: 0.20,
-    minCapital: 100, maxCapital: 10_000, portfolioCapital: 10_000,
+    capitalLadder: [1_000, 2_500, 5_000, 10_000, 25_000, 50_000], portfolioCapital: 10_000,
     farmMultiple: 2, stressCost: 2, stressShare: 0.5, weeklyMinutes: 2,
     routeHandsOnMinutes: 6, eligibilityMinutes: 2, exitTvlShare: 0.75, exitMinutes: 10,
     claimMinutes: 8, claimActions: 2,
@@ -19,7 +19,6 @@
     peerCategoryPenalty: 1, peerFamilyPenalty: 0.45
   };
 
-  // Gas USD per action, round-trip funding USD and elapsed minutes.
   const CHAINS = {
     Ethereum: [4.5, 9, 25], Bitcoin: [3, 9, 60], Solana: [0.08, 1.8, 8],
     Base: [0.16, 0.8, 8], Arbitrum: [0.23, 1.2, 10], Optimism: [0.19, 1, 10],
@@ -41,7 +40,6 @@
   };
   const FALLBACK_CHAIN = [1.5, 5, 30];
 
-  // Round-trip protocol actions, fee bps, deposit minutes and action.
   const MECHANISMS = {
     Lending: [3, 4, 9, "Supply a supported stablecoin to a liquid lending market and leave borrowing disabled"],
     Vault: [3, 12, 12, "Deposit a supported stablecoin into an open vault after checking its strategy and redemption terms"],
@@ -334,18 +332,6 @@
       conditionalApr: capital > 0 ? (conditionalGross - cost) / capital : null };
   }
 
-  function sizeCapital(plan, multiple, peak) {
-    const target = size => evaluateFarm(plan, size).multiple >= multiple;
-    if (!target(peak)) return null;
-    let low = A.minCapital, high = peak;
-    while (low < high) {
-      const mid = Math.floor((low + high) / 2);
-      if (target(mid)) high = mid;
-      else low = mid + 1;
-    }
-    return low;
-  }
-
   function farmPlan(p) {
     const [actions, feeBps, depositMinutes, depositAction] = MECHANISMS[p.family];
     const chain = cheapestChain(p.chains, actions);
@@ -358,12 +344,10 @@
       competingTvl: p.tvl_usd * A.competingTvlShare, conditionalValue: p.valueIfLaunched * p.haircut,
       fixedCost: chain.total + timeCost, capped: Boolean(p.flags.length), impliedValue: p.implied_value_usd
     };
-    // Gross/cost peaks where feeRate * capital² equals competingTvl * fixedCost.
-    const peak = limit(Math.round(Math.sqrt(plan.competingTvl * plan.fixedCost / plan.feeRate)), A.minCapital, A.maxCapital);
-    const minimumCapital = sizeCapital(plan, A.farmMultiple, peak);
-    const stressTarget = A.farmMultiple * Math.max(A.stressCost, 1 / A.stressShare);
-    const bufferedCapital = plan.capped ? null : sizeCapital(plan, stressTarget, peak);
-    const result = evaluateFarm(plan, bufferedCapital ?? minimumCapital ?? peak);
+    const ladder = A.capitalLadder.map(capital => evaluateFarm(plan, capital));
+    const ticket = ladder.find(step => step.multiple + 1e-10 >= A.farmMultiple);
+    const minimumCapital = ticket?.capital ?? null;
+    const result = ticket ?? ladder.at(-1);
     const doubleCost = evaluateFarm(plan, result.capital, A.stressCost);
     const halfShare = evaluateFarm(plan, result.capital, 1, A.stressShare);
     const baseFarm = result.verdict === "FARM";
@@ -372,11 +356,11 @@
     const routeCheck = chain.estimated ? "Confirm the fallback quote." : "Verify the route.";
     const decision = baseFarm ? "Verify eligibility and redemptions."
       : result.verdict === "SKIP" ? "Keep funds unallocated."
-      : plan.capped ? "Issuer flag caps verdict." : `Drop falls short of ${A.farmMultiple}× cost.`;
+      : plan.capped && ticket ? "Issuer flag caps verdict." : `Drop falls short of ${A.farmMultiple}× cost.`;
     const steps = [
-      `${result.verdict} · Expected drop ${dollars(result.expectedGross)} vs ${dollars(result.cost)} all-in. Break-even pool ${percent(result.breakEvenShare)} of launched value. ${decision} Check eligibility (${dollars(A.eligibilityMinutes * A.hourlyUsd / 60)}, ${A.eligibilityMinutes} min).`,
+      `${result.verdict} at ${whole(result.capital)} · Expected drop ${dollars(result.expectedGross)} vs ${dollars(result.cost)} all-in (${result.multiple.toFixed(2)}× cost, target ${dollars(A.farmMultiple * result.cost)}). Break-even pool ${percent(result.breakEvenShare)} of launched value. ${decision} Allow ${A.eligibilityMinutes} min for eligibility.`,
       `Fund ${chain.name} after checks. Allow ${dollars(chain.bridge)} round trip, ${chain.bridgeMinutes} minutes elapsed and ${A.routeHandsOnMinutes} minutes hands-on. ${routeCheck}`,
-      `Size ${whole(result.capital)} for ${A.year} days with ${handsOnMinutes} minutes of work and a ${dollars(A.farmMultiple * result.cost)} drop target.`,
+      `Budget ${handsOnMinutes} minutes of work (${dollars(timeCost)}) over ${A.year} days. First check eligibility for ${A.eligibilityMinutes} minutes (${dollars(A.eligibilityMinutes * A.hourlyUsd / 60)} included).`,
       `${p.family} · ${depositAction} on ${chain.name} through ${p.name}. Budget ${dollars(depositCost)} in round-trip gas and fees and ${depositMinutes} minutes to enter.`,
       `Log position, eligibility and TVL weekly. Budget ${dollars(A.weeklyMinutes * A.hourlyUsd / 60)} for ${A.weeklyMinutes} minutes per check and $0 gas.`,
       `Exit below ${whole(exitFloor)} TVL or after ${A.year} days. Allow ${A.exitMinutes} minutes to check queues and redeem. Gas is in the ${dollars(depositCost)} round trip.`,
@@ -509,7 +493,7 @@
         "Bootstrap bands show curve uncertainty. Audit thresholds use traded cap/carried-TVL percentiles.",
         "Route costs are USD estimates. All listed chains qualify.",
         "Drop uses implied value and prorates over eligible TVL plus the deposit. Returns exclude yield, taxes and price moves.",
-        "Sizing seeks twice cost under stress within the cap, then twice base cost.",
+        "Use the first ladder ticket covering twice cost. Otherwise test break-even at the cap. Issuer flags cap the verdict.",
         "The portfolio score-weights viable watchlist tickets and prices each separately."
       ] };
   }
