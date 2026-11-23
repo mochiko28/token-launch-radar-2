@@ -30,6 +30,7 @@ function run() {
   for (const dir of ["dashboard", "screenshots"]) {
     cpSync(join(import.meta.dirname, dir), join(output, dir), { recursive: true });
   }
+  compactDashboard(join(output, "dashboard"));
   requirePass(assetChecks(output), "Asset gate");
   const dossier = buildDossier(output, { text_max_bytes: 65536 });
   if (dossier.byteLength > 1.5 * 1024 * 1024) throw new Error("Dossier exceeds the gate's 1.5 MiB limit.");
@@ -40,6 +41,17 @@ function run() {
   writeFileSync(join(output, "data.js"), `globalThis.LaunchRadarData = ${data};\n`);
   writeFileSync(join(output, "dossier.json"), dossier);
   console.log(`Wrote ${model.counts.ranked} ranked rows with board digest ${boardDigest}.`);
+}
+
+function compactDashboard(dir: string) {
+  const write = (file: string, format: (source: string) => string) => {
+    const path = join(dir, file);
+    writeFileSync(path, format(readFileSync(path, "utf8")));
+  };
+  // Preserve JavaScript line breaks for automatic semicolon insertion.
+  for (const file of ["app.js", "model.js"]) write(file, source => source.replace(/^\t+|\n(?=\n)/gm, ""));
+  write("style.css", source => source.replace(/(?<=[{};])\n\t*(?=\S)/g, ""));
+  write("index.html", source => source.replace(/(?<=>)\n(?=<)/g, ""));
 }
 
 function readSnapshot(file: string) {

@@ -88,6 +88,7 @@ function jpegSize(bytes) {
 }
 
 const fits = bytes => bytes.length >= minimum && bytes.length < maximum;
+const displaySigns = text => text.replace(/(^|[\s$(,])-(?=\$?\d)/g, "$1−");
 
 async function captureJpeg(call, context, work) {
   const capture = async format => {
@@ -162,11 +163,23 @@ function readPage() {
   const read = selector => document.querySelector(selector)?.textContent.trim();
   const rows = [...document.querySelectorAll("tr[data-slug]")];
   const tableBottom = document.querySelector("#results .scroll")?.getBoundingClientRect().bottom;
+  const rangesInline = rows.every(row => {
+    const value = row.cells[2].querySelector("b")?.getBoundingClientRect();
+    const range = row.cells[2].querySelector(".range")?.getBoundingClientRect();
+    return value && range && range.left >= value.right && range.top >= value.top && range.bottom <= value.bottom;
+  });
   const completeRows = rows.filter(row => {
     const box = row.getBoundingClientRect();
     return box.top >= 0 && box.bottom <= Math.min(tableBottom, innerHeight);
   }).length;
   const watchlist = new Set(globalThis.LaunchRadarData.snapshot.watchlist);
+  const plot = document.querySelector("#yield svg");
+  const names = [...(plot?.querySelectorAll("g text") ?? [])];
+  const boxes = names.map(name => name.getBoundingClientRect());
+  const plotBox = plot?.getBoundingClientRect();
+  const labelsFit = boxes.every((a, i) => a.left >= plotBox.left && a.right <= plotBox.right
+    && a.top >= plotBox.top && a.bottom <= plotBox.bottom
+    && boxes.slice(0, i).every(b => a.top >= b.bottom || a.bottom <= b.top || a.left >= b.right || a.right <= b.left));
   const visible = selector => {
     const box = document.querySelector(selector)?.getBoundingClientRect();
     return Boolean(box && box.height && box.top >= 0 && box.bottom <= innerHeight && box.right <= innerWidth);
@@ -188,6 +201,7 @@ function readPage() {
       const update = control => control.dispatchEvent(new Event("input", { bubbles: true }));
       const metrics = () => Object.fromEntries([...document.querySelectorAll("#quote-result dt")]
         .map(node => [node.textContent, node.nextElementSibling.textContent]));
+      const amount = value => Number(value.replace("−", "-").replace(/[^\d.-]/g, ""));
       const select = h => { horizon.value = h; update(horizon); };
       const best = [...horizon.options].slice(1).map(option => {
         select(option.value);
@@ -195,8 +209,7 @@ function readPage() {
         quotePass &&= Boolean(result[`Launch within ${option.value} d (q)`])
           && read("#quote-result").includes(`${option.value}d at`);
         return result;
-      }).sort((a, b) => Number(b["Expected net"].replace(/[^\d.-]/g, ""))
-        - Number(a["Expected net"].replace(/[^\d.-]/g, "")))[0];
+      }).sort((a, b) => amount(b["Expected net"]) - amount(a["Expected net"]))[0];
       select(0);
       quotePass &&= read("#quote-result") === initial && JSON.stringify(metrics()) === JSON.stringify(best);
       const values = [10000, 7, 1, 12, 45];
@@ -281,13 +294,17 @@ function readPage() {
     assumptionTables: [...document.querySelectorAll("#assumptions table")].map(table => table.textContent),
     stress: read(".detail .facts"), stressVisible: visible(".detail .facts"), rowCheck: chips[0]?.textContent,
     rowPass: chips[0]?.dataset.pass,
-    chart: read("#yield p"), scope: document.querySelector("select[name=scope]")?.value,
+    chart: read("#yield p"), chartVisible: visible("#yield svg"), labelsFit,
+    chartBounds: [plotBox, ...boxes].map(box => box?.toJSON()),
+    chartNames: names.map(name => name.textContent),
+    chartAxes: [...(plot?.children ?? [])].filter(node => node.localName === "text").map(axis => axis.textContent),
+    scope: document.querySelector("select[name=scope]")?.value,
     filter: document.querySelector("select[name=verdict]")?.value,
     rows: rows.map(row => {
       const { slug, factors } = row.dataset;
       return [slug, Number(row.cells[0].textContent), ...factors.split(",").map(Number), row.querySelector(".badge").textContent, watchlist.has(slug)];
     }),
-    completeRows, width: innerWidth, height: innerHeight, dpr: devicePixelRatio,
+    completeRows, rangesInline, width: innerWidth, height: innerHeight, dpr: devicePixelRatio,
     scrollbar: innerWidth - document.documentElement.clientWidth
   };
 }
@@ -428,7 +445,8 @@ async function shoot(output, destination) {
   const { snapshot } = JSON.parse(data.slice("globalThis.LaunchRadarData = ".length, -1));
   const { value, odds, rows } = api.buildModel(snapshot);
   const upshift = rows.find(row => row.slug === "upshift");
-  const { exits, gas, chain, cost, transactions } = upshift.plan;
+  const { exits: rawExits, gas, chain, cost, transactions } = upshift.plan;
+  const exits = rawExits.map(displaySigns);
   const modelBySlug = new Map(rows.map(row => [row.slug, row]));
   for (const { slug, chains, plan } of rows) {
     const { name } = plan.chain;
@@ -484,6 +502,19 @@ async function shoot(output, destination) {
       if (info.rows.length && (info.rowPass !== "true" || info.rowCheck !== `✓ Rows match board.json ${info.rows.length}/${info.rows.length}`)) {
         throw new Error(`${name}: ${info.rowCheck}`);
       }
+      if (info.rows.length) {
+        if (!info.rangesInline) throw new Error(`${name}: implied-value range moved off the figure's line`);
+        const top = [...slugs].map(slug => modelBySlug.get(slug))
+          .filter(row => row.ageDays != null && Number.isFinite(row.plan.expectedYield))
+          .sort((a, b) => b.plan.expectedYield - a.plan.expectedYield || a.rank - b.rank)
+          .slice(0, 3).map(row => row.name);
+        if (!info.chartVisible || !info.labelsFit || JSON.stringify(info.chartNames) !== JSON.stringify(top)
+          || !["Days pre-token", "Expected yield"].every(axis => info.chartAxes.includes(axis))) {
+          throw new Error(`${name}: expected scatter labels ${top.join(" / ")}. Got ${JSON.stringify({
+            visible: info.chartVisible, labels: info.chartNames, axes: info.chartAxes, bounds: info.chartBounds
+          })}`);
+        }
+      }
       if (["1-board.jpg", "calibration"].includes(name) && (!/carried TVL.*n=\d+/.test(info.curve)
         || !["Leave-one-out", "Walk-forward", "Family hold-out"].every(label => info.heldOut?.includes(label))
         || ![80, 50].every(level => info.coverage?.includes(`${level}% range ${(value.ranges.heldOut[level] * 100).toFixed(0)}%`))
@@ -530,7 +561,7 @@ async function shoot(output, destination) {
         || !info.steps.some(step => step.includes("allocator vault. Hold shares"))
         || !info.gasVisible || info.gas !== gasLine || !info.exitsVisible
         || JSON.stringify(info.exits) !== JSON.stringify(exits) || !info.steps.some(step => step.startsWith("If " + exits[0]))
-        || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps)
+        || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps.map(displaySigns))
         || !info.attributionVisible || !info.planVisible || !info.quoteVisible || !info.quotePass || !info.peersVisible
         || !["TVL size", "7d carry", "Age on odds", "Issuer"].every(label => info.attribution?.includes(label))
         || !info.steps.some(step => step.includes("p*") && /Gas \+ slip cap \$[\d.]+/.test(step))

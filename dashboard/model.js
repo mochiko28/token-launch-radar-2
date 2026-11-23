@@ -1,25 +1,60 @@
 "use strict";
-const {chainQuotes,fallbackChain,ethChains,assets,families,parameters:A}={
-	chainQuotes:{
-		Ethereum:[4.5,9,25],Bitcoin:[3,9,60],Solana:[.08,1.8,8],Base:[.16,.8,8],
-		Arbitrum:[.23,1.2,10],Optimism:[.19,1,10],Binance:[.18,1.2,9],Polygon:[.12,.9,9],
-		Avalanche:[.3,1.5,12],Monad:[.15,1.2,12],Ink:[.17,1.1,10],Plasma:[.14,1.3,14],
-		"Hyperliquid L1":[.23,1.6,15],Sui:[.12,1.6,12],Aptos:[.12,1.5,12],Stellar:[.08,1.8,12],
-		Flare:[.16,1.9,15],Algorand:[.09,2,12],Ripple:[.12,2.1,14],Tron:[1.2,3.5,16],
-		Linea:[.24,1.3,15],Mantle:[.22,1.5,14],Sonic:[.15,1.5,12],Scroll:[.25,1.5,15],
-		xDai:[.13,1.4,12],Berachain:[.24,1.5,15],TON:[.25,2,15],Near:[.18,2,15],
-		Starknet:[.26,1.5,18],Celo:[.13,1.5,12],"zkSync Era":[.24,1.5,16],Unichain:[.18,1.3,12],
-		"World Chain":[.21,1.5,12],Ronin:[.21,1.7,15],Sei:[.18,1.8,15],Cardano:[.32,2.5,20],
-		"Plume Mainnet":[.24,1.7,16],Arc:[.2,1.7,15],Pharos:[.25,2,18],CORE:[.27,2.3,18],
-		Bittensor:[.32,2.7,18],BSquared:[.35,3,22],Noble:[.25,2,15],Mezo:[.34,2.6,17]
-	},
-	fallbackChain:[1.5,5,30],ethChains:["Ethereum","Base","Arbitrum","Optimism","Linea","Ink","Scroll","zkSync Era"],
-	assets:{
+const tableData=(numbers,table)=>Object.fromEntries(table.trim().split("\n").map(line=>{
+	const [key,...fields]=line.split("|")
+	return [key,fields.map((field,i)=>i<numbers?Number(field):field)]
+}))
+const chainQuotes=tableData(3,`
+Ethereum|4.5|9|25
+Bitcoin|3|9|60
+Solana|.08|1.8|8
+Base|.16|.8|8
+Arbitrum|.23|1.2|10
+Optimism|.19|1|10
+Binance|.18|1.2|9
+Polygon|.12|.9|9
+Avalanche|.3|1.5|12
+Monad|.15|1.2|12
+Ink|.17|1.1|10
+Plasma|.14|1.3|14
+Hyperliquid L1|.23|1.6|15
+Sui|.12|1.6|12
+Aptos|.12|1.5|12
+Stellar|.08|1.8|12
+Flare|.16|1.9|15
+Algorand|.09|2|12
+Ripple|.12|2.1|14
+Tron|1.2|3.5|16
+Linea|.24|1.3|15
+Mantle|.22|1.5|14
+Sonic|.15|1.5|12
+Scroll|.25|1.5|15
+xDai|.13|1.4|12
+Berachain|.24|1.5|15
+TON|.25|2|15
+Near|.18|2|15
+Starknet|.26|1.5|18
+Celo|.13|1.5|12
+zkSync Era|.24|1.5|16
+Unichain|.18|1.3|12
+World Chain|.21|1.5|12
+Ronin|.21|1.7|15
+Sei|.18|1.8|15
+Cardano|.32|2.5|20
+Plume Mainnet|.24|1.7|16
+Arc|.2|1.7|15
+Pharos|.25|2|18
+CORE|.27|2.3|18
+Bittensor|.32|2.7|18
+BSquared|.35|3|22
+Noble|.25|2|15
+Mezo|.34|2.6|17`),
+	fallbackChain=[1.5,5,30],ethChains=["Ethereum","Base","Arbitrum","Optimism","Linea","Ink","Scroll","zkSync Era"],
+	assets={
 		Algorand:"ALGO",Bitcoin:"BTC",BSquared:"BTC",CORE:"CORE",Flare:"FLR","Hyperliquid L1":"HYPE",
 		Mezo:"BTC",Monad:"MON",Near:"NEAR",Qubic:"QU",Solana:"SOL",Stacks:"STX",Starknet:"STRK",
 		Sui:"SUI",TON:"TON",XDC:"XDC","Bifrost Network":"BNC",Mixin:"XIN",XION:"XION",ZIGChain:"ZIG"
 	},
-	families:{
+	families={
 		Lending:"Lending|Uncollateralized Lending|Collateral Markets|Collateral Management",
 		Vault:"Yield|Yield Aggregator|Risk Curators|Onchain Capital Allocator|Basis Trading|Leveraged Farming|Farm|Indexes|Options Vault|CeDeFi",
 		LP:"Dexs|Liquidity Manager",
@@ -30,7 +65,7 @@ const {chainQuotes,fallbackChain,ethChains,assets,families,parameters:A}={
 		Network:"Chain|Payments|Decentralized BTC|Anchor BTC|Cross Chain Bridge",
 		Insurance:"Insurance"
 	},
-	parameters:{
+	A={
 		growthClip:[-30,30],missingGrowth:0,haircut:.65,year:365,tvlReference:1e8,missingAgeFallback:365,
 		familyPenalty:2,oddsPenalty:1,valueWarmup:25,oddsWarmup:60,
 		bootstrapDraws:192,bootstrapSeed:918273,bandQuantiles:[.1,.9],
@@ -42,38 +77,35 @@ const {chainQuotes,fallbackChain,ethChains,assets,families,parameters:A}={
 		claimMinutes:8,claimActions:2,firstSaleShare:.5,
 		peerCount:3,peerCategoryPenalty:1,peerFamilyPenalty:.45
 	}
-}
-const {entries,fromEntries:object,hasOwn,keys,values}=Object,{isFinite:finite,isInteger}=Number,
-	mechanisms={
-	Lending:[3,4,9,"supply","to deepest stablecoin market. Borrow <30% LTV if needed","utilization, LTV"],
-	Vault:[3,12,12,"deposit","in liquid yield vault. Hold shares","share price, exits"],
-	LP:[4,30,14,"pair","in deepest pool. Stay in range","depth, range"],
-	Perps:[4,25,14,"post","as margin. If needed, 1 unlevered min-size round trip/wk","fills, margin"],
-	Staking:[3,12,11,"stake","in pool. Hold receipt","slashing, unbonding"],
-	RWA:[3,25,16,"subscribe with","in KYC fund with open redemptions","NAV, redemption dates"],
-	Stablecoin:[4,18,13,"supply","to deepest reserve","peg, liquidity"],
-	Network:[3,15,13,"deposit","and verify settlement","return liquidity"],
-	Insurance:[3,25,14,"supply","to underwriting pool","claims, exit queue"],
-	Other:[3,20,13,"deposit","in the rewards product","eligible balance"],
-	},
-	plays={
-		CDP:["post","as collateral. Mint <30% LTV","peg, LTV"],
-		"CDP Manager":["post","in managed vault. Mint <30% LTV","debt ceiling, LTV"],
-		"Prediction Market":["post","as collateral. If needed, 2 min-size trades","fills, resolution"],
-		"Liquid Restaking":["restake","and hold liquid receipt","slashing, redemptions"],
-		Restaking:["restake","with operator. Hold receipt","delegation, unbonding"],
-		"Liquidity Manager":["pair","in managed range vault. Hold LP shares","range, rebalances"],
-		"Yield Aggregator":["deposit","in auto-compounding vault. Hold shares","harvests, share price"],
-		"Risk Curators":["supply","to liquid-market curator vault. Hold shares","caps, idle liquidity"],
-		"Onchain Capital Allocator":["deposit","in an allocator vault. Hold shares","allocations, idle liquidity"],
-		"Basis Trading":["deposit","in hedged vault. Hold shares","funding, hedge drift"],
-		"Leveraged Farming":["deposit","in farm at 1× if supported","debt, liquidation buffer"],
-		"Stablecoin Wrapper":["wrap","and hold receipt","peg, unwrap liquidity"],
-		Bridge:["bridge","via eligible lane. Verify receipt","return liquidity"],
-		"OTC Marketplace":["fund with","for eligible min-size order","settlement"],
-		"Crypto Card Issuer":["load","if card top-ups qualify","redemption"],
-		Privacy:["deposit","in eligible privacy pool","withdrawal access"],
-	},
+const {entries,fromEntries:object,groupBy,hasOwn,keys,values}=Object,{isFinite:finite,isInteger}=Number,
+	mechanisms=tableData(3,`
+Lending|3|4|9|supply|to deepest stablecoin market. Borrow <30% LTV if needed|utilization, LTV
+Vault|3|12|12|deposit|in liquid yield vault. Hold shares|share price, exits
+LP|4|30|14|pair|in deepest pool. Stay in range|depth, range
+Perps|4|25|14|post|as margin. If needed, 1 unlevered min-size round trip/wk|fills, margin
+Staking|3|12|11|stake|in pool. Hold receipt|slashing, unbonding
+RWA|3|25|16|subscribe with|in KYC fund with open redemptions|NAV, redemption dates
+Stablecoin|4|18|13|supply|to deepest reserve|peg, liquidity
+Network|3|15|13|deposit|and verify settlement|return liquidity
+Insurance|3|25|14|supply|to underwriting pool|claims, exit queue
+Other|3|20|13|deposit|in the rewards product|eligible balance`),
+	plays=tableData(0,`
+CDP|post|as collateral. Mint <30% LTV|peg, LTV
+CDP Manager|post|in managed vault. Mint <30% LTV|debt ceiling, LTV
+Prediction Market|post|as collateral. If needed, 2 min-size trades|fills, resolution
+Liquid Restaking|restake|and hold liquid receipt|slashing, redemptions
+Restaking|restake|with operator. Hold receipt|delegation, unbonding
+Liquidity Manager|pair|in managed range vault. Hold LP shares|range, rebalances
+Yield Aggregator|deposit|in auto-compounding vault. Hold shares|harvests, share price
+Risk Curators|supply|to liquid-market curator vault. Hold shares|caps, idle liquidity
+Onchain Capital Allocator|deposit|in an allocator vault. Hold shares|allocations, idle liquidity
+Basis Trading|deposit|in hedged vault. Hold shares|funding, hedge drift
+Leveraged Farming|deposit|in farm at 1× if supported|debt, liquidation buffer
+Stablecoin Wrapper|wrap|and hold receipt|peg, unwrap liquidity
+Bridge|bridge|via eligible lane. Verify receipt|return liquidity
+OTC Marketplace|fund with|for eligible min-size order|settlement
+Crypto Card Issuer|load|if card top-ups qualify|redemption
+Privacy|deposit|in eligible privacy pool|withdrawal access`),
 	{abs,ceil,exp,floor,log,max,min,round,sqrt}=Math
 const record=(keys,read)=>object(keys.map(k=>[k,read(k)])),unique=items=>[...new Set(items)],
 	DAY=86_400_000,
@@ -91,7 +123,8 @@ const byText=(a,b)=>(a>b)-(a<b),bySlug=(a,b)=>byText(a.slug,b.slug),
 	tally=(rs,get)=>record(["FARM","MARGINAL","SKIP"],v=>count(rs,p=>get(p)===v)),
 	word1=name=>name.toLowerCase().match(/[\p{L}\p{N}]+/u)?.[0]
 const hasToken=p=>p.mcap_usd>0||!!(p.gecko_id||p.symbol),
-	rawScore=p=>p.launchValue*p.tokenOdds*p.haircut,
+	rawScore=({launchValue,tokenOdds,haircut})=>launchValue*tokenOdds*haircut,
+	scoreOf=p=>max(1,round(rawScore(p))),
 	costUsd=n=>"$"+n.toFixed(2),
 	integer=n=>round(n).toLocaleString("en-US"),whole=n=>"$"+integer(n)
 const pct=(n,places=2)=>(n*100).toFixed(places)+"%",
@@ -128,14 +161,9 @@ function prepare(snap){
 			size:log(carriedTvl/A.tvlReference),rawSize:log(tvl/A.tvlReference)}
 	})
 }
-function tokenPoints(traded){
-	const tokens=new Map()
-	for(const p of traded.filter(p=>!p.productPeer).sort(rankBy("tvl_usd"))){
-		const k=p.gecko_id?"gecko:"+p.gecko_id:p.symbol?"symbol:"+p.symbol:p.slug
-		if(!tokens.has(k)) tokens.set(k,{...p,response:log(p.mcap_usd)})
-	}
-	return[...tokens.values()].sort(bySlug)
-}
+const tokenId=p=>p.gecko_id?"gecko:"+p.gecko_id:p.symbol?"symbol:"+p.symbol:p.slug,
+	tokenPoints=traded=>values(groupBy(traded.filter(p=>!p.productPeer).sort(rankBy("tvl_usd")),tokenId))
+		.map(([p])=>({...p,response:log(p.mcap_usd)})).sort(bySlug)
 const medianAge=rs=>quant(rs.map(p=>p.ageDays).filter(finite))??A.missingAgeFallback,
 	logAge=(p,fallback)=>log((p.ageDays??fallback)/A.year)
 function solve(matrix,target){
@@ -218,13 +246,15 @@ function fitValue(pts,terms,omit,alt){
 	if(kind==="median"||kind==="theilSen") coef[0]+=quant(errors())
 	const group=kind==="group"?read:null,offsets=new Map()
 	if(group) for(const [k,es] of Map.groupBy(errors(),(_,i)=>group(pts[i])))
-		if(k!=null) offsets.set(k,es.reduce((sum,e)=>sum+e,0)/(es.length+A.familyPenalty))
+		if(k!=null) offsets.set(k,sum(es)/(es.length+A.familyPenalty))
 	return{...fit,coefficients:coef,group,offsets}
 }
 const capLog=(fit,p)=>dot(capInputs(p,fit),fit.coefficients)+(fit.offsets.get(fit.group?.(p))??0),
 	capRatio=p=>p.mcap_usd/p.carriedTvl
+const leaveOut=(pts,group)=>[...Map.groupBy(pts,group).values()]
+	.map(test=>[pts.filter(p=>!test.includes(p)),test]).filter(([train])=>train.length)
 function folds(pts,walk,warmup=A.valueWarmup){
-	if(!walk) return pts.map((p,i)=>[pts.filter((_,j)=>i!==j),[p]])
+	if(!walk) return leaveOut(pts,p=>p)
 	const dated=pts.filter(p=>p.date!==null).sort((a,b)=>a.date-b.date||bySlug(a,b)),
 		groups=Map.groupBy(dated,p=>p.date),splits=[]
 	let i=0
@@ -235,7 +265,7 @@ function folds(pts,walk,warmup=A.valueWarmup){
 	return splits
 }
 
-const blindTests=["loo","walk"],
+const sum=ns=>ns.reduce((a,b)=>a+b,0),blindTests=["loo","walk"],
 	flagNote="untested assumption (no traded rows carry the flag)"
 const missStats=(es,n=es.length)=>({miss:n?exp(quant(es)):null,n,hits:[2,3].map(x=>n?inside(es,[0,log(x)])/n:null)})
 function termTest(term,withTerm,without){
@@ -250,16 +280,16 @@ function residuals(splits,terms,omit,alt){
 	})
 }
 
-const passes=({withTerm:a,without:b})=>blindTests.every(k=>a[k].n&&a[k].miss<b[k].miss)
+const lowerMiss=(a,b,k)=>a[k].n&&a[k].miss<b[k].miss,
+	passes=({withTerm:a,without:b})=>blindTests.every(k=>lowerMiss(a,b,k))
 	&&a.family.n&&a.family.miss<=b.family.miss+.1
-function selectFit(pts,inner=false){
-	const splits={loo:folds(pts),walk:folds(pts,true),family:[...Map.groupBy(pts,p=>p.family)]
-		.map(([f,test])=>[pts.filter(p=>p.family!==f),test]).filter(([train])=>train.length)},tests=keys(splits),
-		assess=(terms,alt,omit)=>({terms,candidate:alt,...record(tests,k=>missStats(residuals(splits[k],terms,omit,alt).map(abs)))}),
+function selectFit(pts,inner){
+	const splits={loo:folds(pts),walk:folds(pts,true),family:leaveOut(pts,p=>p.family)},tests=keys(splits),
+		assess=(terms,candidate,omit)=>({terms,candidate,...record(tests,k=>missStats(residuals(splits[k],terms,omit,candidate).map(abs)))}),
 		terms=["age","family","growth"],
 		trials=Array.from({length:2**terms.length},(_,mask)=>assess(terms.filter((_,i)=>mask&(1<<i)))),
-		mass=trial=>tests.reduce((product,k)=>product*(trial[k].miss??1),1),
-		better=(a,b)=>tests.every(k=>a[k].n&&a[k].miss<b[k].miss),
+		mass=trial=>tests.reduce((n,k)=>n*(trial[k].miss??1),1),
+		better=(a,b)=>tests.every(k=>lowerMiss(a,b,k)),
 		deployed=trials.filter((trial,mask)=>terms.every((_,i)=>!(mask&(1<<i))||better(trial,trials[mask^(1<<i)])))
 			.sort((a,b)=>mass(a)-mass(b))[0],
 		search=keys(candidates).map(term=>({term,withTerm:assess(deployed.terms,term),without:deployed})),
@@ -276,13 +306,13 @@ function selectFit(pts,inner=false){
 		validation:{baseline:assess(null),deployed,selected:winner,trials,evidence,search},
 		ranges:rangeTest(splits,winner),nested:nestedTest(splits.walk)}
 }
-const levels={80:[.1,.9],50:[.25,.75]},
-	bounds=errors=>record(keys(levels),k=>levels[k].map(q=>quant(errors,q))),
+const levels={80:[.1,.9],50:[.25,.75]},coverage=keys(levels),
+	bounds=errors=>record(coverage,k=>levels[k].map(q=>quant(errors,q))),
 	inside=(errors,[lo,hi])=>count(errors,e=>lo<=e&&e<=hi)
 function rangeTest({loo,walk},{terms,candidate}){
 	const errors=splits=>residuals(splits,terms,null,candidate),leftOut=errors(loo),quantiles=bounds(leftOut),
 		scores=walk.map(split=>[errors([split]),bounds(errors(folds(split[0])))]),n=scores.flatMap(([es])=>es).length,
-		heldOut=record(keys(levels),k=>n?scores.reduce((sum,[es,range])=>sum+inside(es,range[k]),0)/n:null)
+		heldOut=record(coverage,k=>n?scores.reduce((sum,[es,range])=>sum+inside(es,range[k]),0)/n:null)
 	return{quantiles,heldOut,n,loo80:inside(leftOut,quantiles[80])/leftOut.length}
 }
 function nestedTest(walk){
@@ -331,12 +361,13 @@ function attribution(p,ref,fit,odds){
 function oddsTest(splits,omit){
 	const scored=splits.flatMap(([train,test])=>{
 		const fit=fitOdds(train,omit)
-		return test.map(p=>({recorded:p.recorded,score:tokenOdds(fit,p)}))
-	}),groups=Map.groupBy(scored,p=>p.recorded),positive=groups.get(true)??[],negative=groups.get(false)??[]
+		return test.map(p=>[p.recorded,tokenOdds(fit,p)])
+	}),{true:positive=[],false:negative=[]}=groupBy(scored,p=>p[0])
 	let wins=0
-	for(const p of positive) for(const n of negative) wins+=p.score>n.score?1:p.score===n.score?.5:0
-	return{auc:positive.length&&negative.length?wins/(positive.length*negative.length):null,
-		...missStats(scored.map(({recorded,score})=>-log(recorded?score:1-score)))}
+	for(const [,p] of positive) for(const [,n] of negative) wins+=p>n?1:p===n?.5:0
+	const pairs=positive.length*negative.length
+	return{auc:pairs?wins/pairs:null,
+		...missStats(scored.map(([recorded,score])=>-log(recorded?score:1-score)))}
 }
 function bootstrap(pts,{terms,candidate:alt}){
 	let seed=A.bootstrapSeed
@@ -360,13 +391,14 @@ function evaluateFarm(fp,cap,{horizon:h=fp.horizon,quote=fp.quote,cost=1,share=1
 	q=fp.launchOdds[h],shared=0}={}){
 	const {entryGas,exitGas,slippage,delay,lockup}=quote,
 		holding=max(h,lockup)+delay,
+		{bridge,gas:gasPerTx}=fp.chain,
 		gas=(fp.testGas+entryGas+exitGas)*cost,
-		fees=(fp.chain.bridge+(cap+A.testUsd)*slippage/100)*cost,
+		fees=(bridge+(cap+A.testUsd)*slippage/100)*cost,
 		timeCost=wage(fp.handsOnMinutes+(weeks(h)-shared)*A.weeklyMinutes)*cost,
 		capitalCharge=cap*(A.riskFreeRate*holding/A.year)*cost,
 		loss=gas+fees+timeCost+capitalCharge,
 		drop=fp.conditionalValue*(cap/(fp.competingTvl+cap))*A.depositorShare*share,
-		claimSell=(fp.chain.gas*A.claimActions+wage(A.claimMinutes)+drop*slippage/100)*cost,
+		claimSell=(gasPerTx*A.claimActions+wage(A.claimMinutes)+drop*slippage/100)*cost,
 		payoff=drop-claimSell,
 		pStar=payoff>0?loss/payoff:null,
 		multiple=q*payoff/loss,
@@ -441,23 +473,23 @@ function farmPlan(p,review,curve,exitGrowth){
 		doubleCost:sizeFarm(fp,{horizon:h,cost:A.stressCost}),halfShare:sizeFarm(fp,{horizon:h,share:A.stressShare})
 	}}
 }
-const isFarm=p=>p.plan.verdict==="FARM",sumBy=(list,k)=>list.reduce((sum,p)=>sum+p[k],0)
+const isFarm=p=>p.plan.verdict==="FARM"
 function allocate(farms){
 	const budget=A.portfolioCapital,eligible=farms.length,overlap=min(...farms.map(p=>weeks(p.plan.horizon)))
 	for(let n=min(eligible,floor(budget/A.capitalLadder[0]));n>0;n--){
 		const shared=overlap*(1-1/n),
-			picks=farms.map(p=>({p,capital:sizeFarm(p.plan,{shared}).capital}))
-			.sort((a,b)=>a.capital-b.capital||a.p.rank-b.p.rank).slice(0,n),
-			minimum=sumBy(picks,"capital")
+			picks=farms.map(p=>[p,sizeFarm(p.plan,{shared}).capital])
+			.sort(([a,x],[b,y])=>x-y||a.rank-b.rank).slice(0,n),
+			minimum=sum(picks.map(([,cap])=>cap))
 		if(minimum>budget) continue
-		const score=sumBy(picks.map(({p})=>p),"score"),surplus=(budget-minimum)*100
+		const score=sum(picks.map(([p])=>p.score)),surplus=(budget-minimum)*100
 		let remaining=surplus
-		const positions=picks.map(({p,capital:cap},i)=>{
+		const positions=picks.map(([p,cap],i)=>{
 			const extra=i===n-1?remaining:floor(surplus*p.score/score)
 			remaining-=extra
 			return{slug:p.slug,name:p.name,...evaluateFarm(p.plan,cap+extra/100,{shared})}
 		})
-		return{budget,eligible,capital:budget,unallocated:0,positions,cost:sumBy(positions,"cost"),net:sumBy(positions,"net")}
+		return{budget,eligible,capital:budget,unallocated:0,positions,cost:sum(positions.map(p=>p.cost)),net:sum(positions.map(p=>p.net))}
 	}
 	return{budget,eligible,capital:0,unallocated:budget,positions:[],cost:0,net:0}
 }
@@ -495,7 +527,7 @@ function selfChecks({rows:rs,board,counts,stress,portfolio,reference,calibration
 	return[...boardChecks(board,snap),...checks({
 		"group counts":statuses.reduce((n,k)=>n+counts[k],0)===counts.total
 			&&counts.ranked===rs.length&&calibration.every(p=>p.mcap_usd>0&&!p.productPeer),
-		"value factors":rs.every(p=>max(1,round(rawScore(p)))===p.score),
+		"value factors":rs.every(p=>scoreOf(p)===p.score),
 		"attribution":rs.every(p=>abs(values(p.attribution).reduce((a,b)=>a*b,1)*reference.score/p.score-1)<1e-10),
 		"bootstrap bands":rs.every(p=>p.band.low>0&&p.band.low<=p.band.high&&p.tokenOdds>0&&p.tokenOdds<1),
 		"80% LOO coverage":abs(value.ranges.loo80-.8)<=.02,
@@ -529,7 +561,7 @@ function selfChecks({rows:rs,board,counts,stress,portfolio,reference,calibration
 	})]
 }
 function buildModel(snap){
-	const recs=prepare(snap),groups=Map.groupBy(recs,p=>p.status),pts=tokenPoints(groups.get("traded")??[]),
+	const recs=prepare(snap),groups=groupBy(recs,p=>p.status),pts=tokenPoints(groups.traded??[]),
 		categories=Map.groupBy(recs,p=>p.category),
 		review=new Date(Date.parse(snap.as_of)+A.reviewDays*DAY).toISOString().slice(0,10)
 	if(pts.length<3) throw new Error("Need 3 screened caps.")
@@ -541,14 +573,14 @@ function buildModel(snap){
 		validation=assess(),
 		odds={validation,evidence:[[2,"Age in status odds"],[1,"TVL in status odds"]]
 			.map(([omit,label])=>termTest(label,validation,assess(omit)))}
-	const rs=(groups.get("ranked")??[]).map(p=>{
+	const rs=(groups.ranked??[]).map(p=>{
 		const launchValue=exp(capLog(fit,p)),
 			s=tokenOdds(oddsFit,p),
 			haircut=p.flags.length?A.haircut:1,
 			[low,high]=band(resamples.map(fit=>exp(capLog(fit,p)))),
-			row={...p,launchValue,tokenOdds:s,haircut,score:max(1,round(launchValue*s*haircut)),
-			band:{low,high,weightedLow:low*s*haircut,weightedHigh:high*s*haircut},
+			row={...p,launchValue,tokenOdds:s,haircut,band:{low,high,weightedLow:low*s*haircut,weightedHigh:high*s*haircut},
 			peers:peersFor(p,pts)}
+		row.score=scoreOf(row)
 		const growth=p.category?quant(categories.get(p.category).map(r=>r.change_7d).filter(finite),A.exitGrowthQuantile):null
 		return{...row,plan:farmPlan(row,review,oddsFit,growth)}
 	}).sort(rankBy("score"))
@@ -556,12 +588,12 @@ function buildModel(snap){
 		reference=rs[floor(rs.length/2)]
 	for(const p of rs){
 		p.attribution=attribution(p,reference,fit,oddsFit)
-		p.ranges=record(keys(levels),k=>quantiles[k].map(q=>p.score*exp(q)))
+		p.ranges=record(coverage,k=>quantiles[k].map(q=>p.score*exp(q)))
 		const fp=p.plan
 		p.rangeFarm=p.ranges[80].map(v=>evaluateFarm(fp,fp.capital,{share:v/p.score}))
 	}
 	const watched=rs.filter(p=>p.watchlist),
-		counts={...record(statuses,k=>groups.get(k)?.length??0),total:recs.length,watchlistCovered:watched.length,
+		counts={...record(statuses,k=>groups[k]?.length??0),total:recs.length,watchlistCovered:watched.length,
 		watchlistTotal:snap.watchlist.length,valueFit:pts.length,oddsFit:oddsPts.length},
 		verdicts=tally(rs,p=>p.plan.verdict),farms=rs.filter(isFarm),
 		stress=record(["doubleCost","halfShare"],k=>({all:tally(rs,p=>p.plan.stress[k].verdict),
