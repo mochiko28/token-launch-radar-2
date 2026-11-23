@@ -1,67 +1,40 @@
 "use strict";
+const {chainQuotes,fallbackChain,ethChains,assets,families,parameters:A}=typeof module==="object"
+	? require(require("node:fs").existsSync(__dirname+"/../radar-defaults.json")?"../radar-defaults.json":"../data.js")
+	: LaunchRadarData.defaults
 const {entries,fromEntries,hasOwn,keys,values}=Object,{isFinite,isInteger}=Number,
-	chainQuotes=fromEntries(`Ethereum,4.5,9,25
-Bitcoin,3,9,60
-Solana,.08,1.8,8
-Base,.16,.8,8
-Arbitrum,.23,1.2,10
-Optimism,.19,1,10
-Binance,.18,1.2,9
-Polygon,.12,.9,9
-Avalanche,.3,1.5,12
-Monad,.15,1.2,12
-Ink,.17,1.1,10
-Plasma,.14,1.3,14
-Hyperliquid L1,.23,1.6,15
-Sui,.12,1.6,12
-Aptos,.12,1.5,12
-Stellar,.08,1.8,12
-Flare,.16,1.9,15
-Algorand,.09,2,12
-Ripple,.12,2.1,14
-Tron,1.2,3.5,16
-Linea,.24,1.3,15
-Mantle,.22,1.5,14
-Sonic,.15,1.5,12
-Scroll,.25,1.5,15
-xDai,.13,1.4,12
-Berachain,.24,1.5,15
-TON,.25,2,15
-Near,.18,2,15
-Starknet,.26,1.5,18
-Celo,.13,1.5,12
-zkSync Era,.24,1.5,16
-Unichain,.18,1.3,12
-World Chain,.21,1.5,12
-Ronin,.21,1.7,15
-Sei,.18,1.8,15
-Cardano,.32,2.5,20
-Plume Mainnet,.24,1.7,16
-Arc,.2,1.7,15
-Pharos,.25,2,18
-CORE,.27,2.3,18
-Bittensor,.32,2.7,18
-BSquared,.35,3,22
-Noble,.25,2,15
-Mezo,.34,2.6,17`.split("\n").map(row=>{
-	const [chain,...quote]=row.split(",")
-	return[chain,quote.map(Number)]
-})),
-	fallbackChain=[1.5,5,30],
-	mechanisms={Lending:[3,4,9,"Supply","Liquid markets only. No borrowing."],Vault:[3,12,12,"Deposit","Review strategy."],LP:[4,30,14,"Pair","Check pool depth and receipt."],Perps:[4,25,14,"Post","No leverage."],Staking:[3,12,11,"Stake","Check unbonding and slashing."],RWA:[3,25,16,"Subscribe with","Check KYC and exits."],Stablecoin:[4,18,13,"Supply","Check peg depth. No leverage."],Network:[3,15,13,"Deposit","Follow docs."],Insurance:[3,25,14,"Supply","Check claims and exit queue."],Other:[3,20,13,"Deposit","Check deposit docs."]},
-	ethChains=["Ethereum","Base","Arbitrum","Optimism","Linea","Ink","Scroll","zkSync Era"],
-	assets={Algorand:"ALGO",Bitcoin:"BTC",BSquared:"BTC",CORE:"CORE",Flare:"FLR","Hyperliquid L1":"HYPE",Mezo:"BTC",Monad:"MON",Near:"NEAR",Qubic:"QU",Solana:"SOL",Stacks:"STX",Starknet:"STRK",Sui:"SUI",TON:"TON",XDC:"XDC","Bifrost Network":"BNC",Mixin:"XIN",XION:"XION",ZIGChain:"ZIG"},
-	families={Lending:"Lending|Uncollateralized Lending|Collateral Markets|Collateral Management",Vault:"Yield|Yield Aggregator|Risk Curators|Onchain Capital Allocator|Basis Trading|Leveraged Farming|Farm|Indexes|Options Vault|CeDeFi",LP:"Dexs|Liquidity Manager",Perps:"Derivatives|Synthetics|Options|Interest Rate Derivatives|Prediction Market",Staking:"Liquid Staking|Liquid Restaking|Staking Pool|Restaking|Token Locker|Governance Incentives",RWA:"RWA",Stablecoin:"CDP|CDP Manager|Algo-Stables|Dual-Token Stablecoin|Stablecoin Wrapper|Stablecoin Issuer|Reserve Currency",Network:"Chain|Payments|Decentralized BTC|Anchor BTC|Cross Chain Bridge",Insurance:"Insurance"},
+	mechanisms={
+	Lending:[3,4,9,"supply","to the deepest stablecoin market. If required, borrow below 30% LTV","utilization and LTV"],
+	Vault:[3,12,12,"deposit","in a liquid yield vault and hold shares","share price and exits"],
+	LP:[4,30,14,"pair","in the deepest pool. Keep liquidity in range","pool depth and range"],
+	Perps:[4,25,14,"post","as margin. If required, make one unlevered minimum-size round trip weekly","fills and margin"],
+	Staking:[3,12,11,"stake","in the pool and hold the receipt","slashing and unbonding"],
+	RWA:[3,25,16,"subscribe with","in a KYC-gated fund with open redemptions","NAV and redemption dates"],
+	Stablecoin:[4,18,13,"supply","to the deepest stablecoin reserve","peg and reserve liquidity"],
+	Network:[3,15,13,"deposit","on the destination chain and check settlement","return liquidity"],
+	Insurance:[3,25,14,"supply","to an underwriting pool","claims and exit queue"],
+	Other:[3,20,13,"deposit","in the rewards product","eligible balance"],
+	},
+	plays={
+		CDP:["post","as collateral and mint below 30% LTV","peg and LTV"],
+		"CDP Manager":["post","in a managed vault and mint below 30% LTV","debt ceiling and LTV"],
+		"Prediction Market":["post","as collateral. If required, place two minimum-size trades","fills and resolution"],
+		"Liquid Restaking":["restake","and hold the liquid receipt","slashing and redemptions"],
+		Restaking:["restake","with an operator and hold the receipt","delegation and unbonding"],
+		"Liquidity Manager":["pair","in a managed range vault and hold LP shares","range and rebalances"],
+		"Yield Aggregator":["deposit","in an auto-compounding vault and hold shares","harvests and share price"],
+		"Risk Curators":["supply","to a curator vault with liquid markets. Hold shares","caps and idle liquidity"],
+		"Onchain Capital Allocator":["deposit","in an allocator vault and hold shares","allocations and idle liquidity"],
+		"Basis Trading":["deposit","in a hedged vault and hold shares","funding and hedge drift"],
+		"Leveraged Farming":["deposit","in a farm at 1× if supported","debt and liquidation buffer"],
+		"Stablecoin Wrapper":["wrap","and hold the receipt","peg and unwrap liquidity"],
+		Bridge:["bridge","on a qualifying lane. Verify receipt","return liquidity"],
+		"OTC Marketplace":["fund with","for a qualifying minimum-size order","settlement"],
+		"Crypto Card Issuer":["load","onto the card if top-ups qualify","redemption"],
+		Privacy:["deposit","in a qualifying privacy pool","withdrawal access"],
+	},
 	{abs,ceil,exp,floor,log,max,min,round,sqrt}=Math
 const record=(keys,read)=>fromEntries(keys.map(k=>[k,read(k)])),unique=items=>[...new Set(items)],
-	A={
-	growthClip:[-30,30],missingGrowth:0,haircut:.65,year:365,
-	tvlReference:1e8,missingAgeFallback:365,
-	familyPenalty:2,oddsPenalty:1,valueWarmup:25,oddsWarmup:60,
-	bootstrapDraws:192,bootstrapSeed:918273,bandQuantiles:[.1,.9],
-	hourlyUsd:20,depositorShare:.05,competingTvlShare:.2,capitalLadder:[1000,2500,5000,10000,25000,50000],portfolioCapital:10000,farmMultiple:2,stressCost:2,stressShare:.5,weeklyMinutes:2,routeHandsOnMinutes:6,verifyMinutes:8,exitTvlShare:.75,exitMinutes:10,exitGrowthQuantile:.1,reviewDays:14,horizons:[30,90,180,365],riskFreeRate:.04,testUsd:80,testMinutes:6,claimMinutes:8,claimActions:2,firstSaleShare:.5,
-	peerCount:3,peerCategoryPenalty:1,peerFamilyPenalty:.45
-},
 	DAY=86_400_000,
 	familyOf=new Map(entries(families).flatMap(([family,categories])=>
 	categories.split("|").map(category=>[category,family])))
@@ -350,7 +323,7 @@ function routeFor(chains,transactions){
 	return unique(chains).map(name=>{
 		const [gas,bridge,bridgeMinutes]=hasOwn(chainQuotes,name)?chainQuotes[name]:fallbackChain
 		return{name,gas,bridge,bridgeMinutes,total:bridge+gas*(transactions+A.claimActions)}
-	}).sort((a,b)=>a.total-b.total||a.bridgeMinutes-b.bridgeMinutes||byText(a.name,b.name))[0]
+	}).sort((a,b)=>a.total-b.total||a.bridgeMinutes-b.bridgeMinutes||byText(a.name,b.name))
 }
 function evaluateFarm(fp,cap,{horizon:h=fp.horizon,quote=fp.quote,cost=1,share=1,
 	q=fp.launchOdds[h],shared=0}={}){
@@ -393,16 +366,18 @@ function targetsFor({q,pStar,cost,drop,claimSell},{slippage}){
 	})}
 }
 const costTime=(min,fees=0)=>`${costUsd(wage(min)+fees)} · ${min} min`
-function ticketFor({family,category},chain,cap){
-	if(family==="LP") return`${whole(cap/2)} USDC + ${whole(cap/2)} USDT`
+function assetFor({family,category},chain){
 	const native=assets[chain]||(ethChains.includes(chain)?"ETH":chain+" native asset"),
-		network=/BTC$/.test(category)?"BTC":assets[chain]??"USDC",
-		asset={Staking:native,Network:network,Perps:category==="Prediction Market"?"USDC collateral":"USDC margin"}[family]||"USDC"
-	return`${whole(cap)} ${asset}`
+		network=/BTC$/.test(category)?"BTC":assets[chain]??"USDC"
+	return{Staking:native,Network:network,LP:"USDC/USDT"}[family]||"USDC"
 }
 function farmPlan(p,review,curve,exitGrowth){
-	const [actions,bps,depositMins,verb,guidance]=mechanisms[p.family],
-		transactions=2*actions,chain=routeFor(p.chains,transactions),{name,gas,bridge,bridgeMinutes}=chain,
+	const {name:protocol,category,family,website,url}=p,[actions,bps,depositMins,...base]=mechanisms[family],
+		[verb,entry,monitor]=category?.endsWith("Bridge")?plays.Bridge:hasOwn(plays,category)?plays[category]:base,
+		transactions=2*actions,routes=routeFor(p.chains,transactions),[chain]=routes,{name,gas,bridge,bridgeMinutes}=chain,
+		pick=routes.reduce((a,b)=>b.gas<a.gas?b:a),asset=assetFor(p,pick.name),
+		ticketFor=cap=>family==="LP"?`${whole(cap/2)} USDC + ${whole(cap/2)} USDT`:`${whole(cap)} ${asset}`,
+		action=`${verb} ${asset} on ${pick.name}`,
 		{verifyMinutes:verify,testUsd,exitMinutes,claimMinutes,weeklyMinutes:weekMins,firstSaleShare}=A,
 		prep=A.routeHandsOnMinutes+A.testMinutes,slippage=bps/100,
 		quote={entryGas:gas*(actions-1),exitGas:gas,slippage,delay:0,lockup:0},
@@ -418,21 +393,23 @@ function farmPlan(p,review,curve,exitGrowth){
 			`TVL < ${whole(p.tvl_usd*A.exitTvlShare)} (${pct(A.exitTvlShare,0)} of snapshot TVL)`,
 			`token announced or no token by day ${h}`],
 		testFees=bridge+fp.testGas+testUsd*slippage/100,entryFees=quote.entryGas+cap*slippage/100,
-		verified=costTime(verify),ticket=`${verb.toLowerCase()} ${ticketFor(p,name,cap)}`
-	if(exitGrowth!=null) exits.push(`7d TVL growth < ${exitGrowth.toFixed(2)}% two weeks running`)
+		verified=costTime(verify),ticket=`${verb} ${ticketFor(cap)}`,web=website||url,
+		route=routes.length>1?` Lowest gas (${costUsd(pick.gas)}/tx).`:"",
+		basis=pick!==chain?` Costs use ${name} (cheapest funded route). Requote.`:""
+	if(exitGrowth!=null) exits.push(`7d TVL growth < ${exitGrowth.toFixed(2)}% (${category} p10) two weeks running`)
 	const steps=[
-		[`If considering ${name}, verify rewards, asset, KYC, exits and deposit caps for ${whole(cap)}.`,verified],
+		[`If farming ${protocol}, ${web?`open ${web} and `:""}check rewards, assets, KYC, exits and deposit caps for ${whole(cap)} on ${pick.name}.${route}${basis}`,verified],
 		["If rules are pending or caps full, wait.",verified,`Recheck ${review} or on changes.`],
-		["If ineligible, exit blocked or a token recorded, stop.",verified],
-		[`If terms pass and quotes clear FARM, fund ${name}, deposit ${ticketFor(p,name,testUsd)} and withdraw it.`,
-			`${costTime(prep,testFees)} + ${2*bridgeMinutes} min funding. Reversible on receipt.`],
+		["If ineligible, exit blocked or token recorded, stop.",verified],
+		[`If terms pass and quotes clear FARM, fund ${pick.name}, deposit ${ticketFor(testUsd)} and withdraw it.`,
+			`${costTime(prep,testFees)} + ${2*bridgeMinutes} min funding.`],
 		["If rehearsal fails or runs late, stop.",`${costTime(verify+prep,testFees)} spent. Recover up to ${whole(testUsd)}.`],
-		[`If checks pass and quotes clear FARM, ${ticket}. ${guidance}`,
+		[`If checks pass and quotes clear FARM, ${ticket} ${entry}.`,
 			`${costTime(depositMins,entryFees)}. Gas + slip cap ${costUsd(entryFees)}. Exit gas ${costUsd(gas)}.`,
 			`${verdict} · launch within ${h} d: ${pct(q)} (q) vs p* ${pStar===null?"unreachable":pct(pStar)}.`,
 			`Else wait to ${review} for lower costs${fp.capped?" and cleared flags":""}`,`${costTime(0)} extra.`],
-		["If eligible, log receipt and TVL weekly.",`${costTime(weekMins)}/check.`],
-		[`If ${exits.join(", or ")}, withdraw.`,`${costTime(exitMinutes,gas)}. Honor lock and delay.`],
+		[`If eligible, log ${protocol} points, ${monitor} and TVL weekly.`,`${costTime(weekMins)}/check.`],
+		[`If ${exits.join(", or ")}, exit ${protocol} on ${pick.name}. Snapshot TVL was ${whole(p.tvl_usd)}.`,`${costTime(exitMinutes,gas)}. Honor lock and delay.`],
 		[`If eligible at launch, claim and sell ${firstSaleShare*100}% at ${whole(p.band.low)} circulating cap, rest near ${whole(p.band.high)}.`,
 			`${costTime(claimMinutes,result.claimSell-wage(claimMinutes))}. Buy back to undo.`]
 	]
@@ -440,9 +417,9 @@ function farmPlan(p,review,curve,exitGrowth){
 		const target=pay.targets[0],
 			need=target.drop===null?"higher launch odds":`launch odds ${oddsFactor(target.oddsRatio)} or a drop of ${costUsd(target.drop)}`
 		steps.push([`Revisit if a points program or snapshot is announced: the plan needs ${need} to break even.`,
-			`${costTime(weekMins)} per weekly check.`])
+			`${costTime(weekMins)}/check.`])
 	}
-	return{...fp,...result,ticket,steps,exits,transactions,pay,stress:{
+	return{...fp,...result,action,ticket,farmChain:pick.name,steps,exits,transactions,pay,stress:{
 		doubleCost:sizeFarm(fp,{horizon:h,cost:A.stressCost}),halfShare:sizeFarm(fp,{horizon:h,share:A.stressShare})
 	}}
 }
@@ -581,11 +558,11 @@ function buildModel(snap){
 const statuses=["traded","recorded","setAside","ranked"],band=xs=>A.bandQuantiles.map(q=>quant(xs,q)),
 	timing="Fixed-TVL age curve. Snapshot has no launch dates."
 const settings={parameters:A,chainQuotes,fallbackChain,mechanisms,families,timing,
-	notes:["Status uses cap, ID or symbol. Dedup by TVL. Audit cap/carried TVL.",timing,"Issuer haircut · "+flagNote,
+	notes:["Status uses cap, ID or symbol. Dedup by TVL.",timing,"Issuer haircut · "+flagNote,
 		"F(a) = age odds. q(H) = max(0,(F(a+H)−F(a))/(1−F(a))). Impute median age.",
-		"Eligible TVL share. No yield, tax or price moves.","First 2× ticket or best payoff/cost. Auto: best net, shortest hold.",
-		"Hold max(horizon, lockup) + delay. Slip on test, entry, exit, sale.",
-		"Gas: test/entry/exit. Claim gas: claim & sell. Growth exit: raw category 7d p10."]}
+		"Eligible TVL share. Excludes yield, tax, price moves.","First 2× ticket or best ratio. Auto picks best net, shortest hold.",
+		"Hold max(horizon, lockup) + delay. Slippage on test, entry, exit and sale.",
+		"Gas covers test, entry, exit, claim and sale. Quote borrow, mint and trade separately."]}
 const modelApi={buildModel,boardChecks,selfChecks,boardRows,digest,evaluateFarm,chooseFarm,oddsFactor,orderedRows,validSteps}
-if(typeof module==="object"&&module.exports) module.exports=modelApi
+if(typeof module==="object") module.exports=modelApi
 else globalThis.LaunchRadar=modelApi

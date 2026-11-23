@@ -44,16 +44,15 @@ const order=k=>cols[k][2]||"desc",filters=[
 	["Min TVL","tvl",["",1e7,5e7,1e8,5e8].map(String),"Any TVL"],
 	["Issuer","flag",["","flagged","clear"],"Any issuer","Flagged","No flags"]
 ]
-const ariaSort=st=>st.dir==="asc"?"ascending":"descending",defaults={q:"",sort:"rank",...fromEntries(filters.map(([,k,[first]])=>[k,first]))},
+const ariaSort=st=>st.dir==="asc"?"ascending":"descending",defaults={q:"",sort:"rank",...fromEntries(filters.map(([,k,[v]])=>[k,v]))},
 	titles={board:"Rankings",calibration:"Calibration",audit:"Top-20 audit",detail:"Protocol"},
 	bySlug=new Map(rs.map(p=>[p.slug,p]))
 function readRoute(){
 	const [path,query]=location.hash.slice(1).split("?"),[route,slug]=path.split("/"),qs=new URLSearchParams(query),
-		key=qs.get("sort"),dir=qs.get("dir"),sort=hasOwn(cols,key)?key:"rank",
-		st={route:hasOwn(titles,route)?route:"board",slug,q:qs.get("q")??"",sort,
-		compare:unique(qs.getAll("compare")).filter(s=>bySlug.has(s)).slice(0,3)}
-	st.dir=dir==="asc"||dir==="desc"?dir:order(sort)
-	for(const [,k,opts] of filters) st[k]=opts.find(v=>v===qs.get(k))??opts[0]
+		get=k=>qs.get(k),sort=hasOwn(cols,get("sort"))?get("sort"):"rank",dir=get("dir"),
+		st={route:hasOwn(titles,route)?route:"board",slug,q:get("q")??"",sort,
+			dir:["asc","desc"].includes(dir)?dir:order(sort),compare:unique(qs.getAll("compare")).filter(s=>bySlug.has(s)).slice(0,3)}
+	for(const [,k,opts] of filters) st[k]=opts.includes(get(k))?get(k):opts[0]
 	return st
 }
 function link(route,st,slug=""){
@@ -97,15 +96,14 @@ const {positions,capital,cost,net:gain,unallocated,eligible,budget}=portfolio,
 <div><h2>${short(budget)} watchlist portfolio</h2>
 <p>${positions.length}/${eligible} FARM · Shared checks
 <p>${unallocated?usd(unallocated)+" unallocated":"Score-weighted remainder"}</div>
-<div class=positions>${html(positions,p=>`<div>${pLink(p,st)}
-<small>${usd(p.capital)} capital</small><small>${money(p.cost)} cost · ${net(p.net)} net</small></div>`)}</div>
+<div class=positions>${html(positions,p=>`<div>${pLink(p,st)}<small>${usd(p.capital)} capital</small><small>${money(p.cost)} cost · ${net(p.net)} net</small></div>`)}</div>
 ${stats([["Capital",usd(capital)],["Cost",money(cost)],["Expected net",net(gain),tone(gain)]],"totals")}</section>`
 const best=rs.filter(({plan:p})=>p.pStar!==null&&p.q>=p.pStar).sort((a,b)=>b.plan.net-a.plan.net).slice(0,5),
 	plans=st=>panel("inset plans","Best plans that clear break-even",`<p>${grades.map(v=>verdicts[v]+" "+v).join(" · ")} · FARM ≥ 2p* with clear flags · MARGINAL ≥ p*
 ${html(best,p=>{
 	const f=p.plan
 	return`<div><b class=pos>${net(f.net)} net</b>${pLink(p,st)} ${badge(f.verdict)}
-<small>${esc(f.chain.name)} · ${usd(f.capital)} · ${f.horizon} d · ${money(f.cost)} cost<br>q ${pct(f.q)} vs p* ${pct(f.pStar)} · ${f.handsOnMinutes} min hands-on</small></div>`
+<small class=action>${esc(f.action)}</small><small>${usd(f.capital)} · ${f.horizon} d · ${money(f.cost)} cost<br>q ${pct(f.q)} vs p* ${pct(f.pStar)} · ${f.handsOnMinutes} min hands-on</small></div>`
 })||"No break-even plans."}`)
 const boardShell=st=>`${intro("Pre-token rankings","Farm horizons 30–365 d")}
 <div class=integrity role=group aria-label=Integrity></div>
@@ -122,8 +120,8 @@ ${inset("Expected yield by age",`<div id=yield></div>
 </aside></div>
 <details class="panel inset" id=check-help><summary>Integrity</summary><ul>
 <li>Export, hash, groups, watchlist, order, costs, miss, AUC
-<li>LOO: log-cap residuals. Walk-forward: prior rows.
-<li>Nested selection: midpoint split.
+<li>LOO uses log-cap residuals. Walk-forward uses prior rows.
+<li>Nested selection uses a midpoint split.
 </ul></details>`
 function filtered({scope,family,chain,verdict,flag,tvl,q,sort,dir}){
 	const query=q.trim().toLowerCase(),field=cols[sort][1],read=typeof field==="function"?field:p=>p[field]
@@ -282,7 +280,7 @@ function detail(r,st){
 	const {plan:fp,flags,band,ranges,rangeFarm:[low,high]}=r,
 		summary=`${esc(r.category||r.family)} · ${short(r.tvl_usd)} TVL · ${chg(r.change_7d)} 7d · ${days(r)} days listed`,
 		lbl=`<p class=kicker>Rank ${r.rank}/${ns.ranked}${r.watchlist?" · ◆ Watchlist":""}</p>`,
-		lead=`<p class=verdict>${badge(fp.verdict)} · ${esc(fp.ticket)} on ${esc(fp.chain.name)} · Launch within ${fp.horizon} d: ${pct(fp.q)} (q) vs p* ${maybe(fp.pStar,pct)} · ${net(fp.net)} expected`,
+		lead=`<p class=verdict>${badge(fp.verdict)} · ${esc(fp.ticket)} on ${esc(fp.farmChain)} · Launch within ${fp.horizon} d: ${pct(fp.q)} (q) vs p* ${maybe(fp.pStar,pct)} · ${net(fp.net)} expected`,
 		stressRows=[[null,"Base"],...scenarios].map(([k,lbl])=>{
 		const p=fp.stress[k]??fp,{all=verdicts,farm}=stress[k]??{}
 		return[lbl,usd(p.capital),badge(p.verdict),net(p.net),grades.map(v=>farm?`${all[v]} (${farm[v]})`:all[v]).join(" / ")]
@@ -291,8 +289,8 @@ function detail(r,st){
 		factors=[[usd(r.launchValue),"Value if launched"],[pct(r.tokenOdds),oddsLabel],[r.haircut.toFixed(2),"Issuer factor"]]
 	return`${back}${intro(esc(r.name),summary,lead,lbl)}
 <div class=detail><div>
-${inset("Farm decision tree",`<p>${r.family}
-<p class=range-net>Expected net low/high ${net(low.net)} / ${net(high.net)} · ${flips.join(" · ")||"verdict robust across 80% range"}
+${inset("Farm checklist",`<p>${r.family}
+<p class=range-net>Expected net ${net(low.net)} / ${net(high.net)} · ${flips.join(" · ")||"verdict robust across 80% range"}
 <h3>Exit triggers</h3><ul class=exits>${html(fp.exits,s=>`<li>${esc(s)}`)}</ul>${tree(fp.steps)}`)}
 ${inset(`Stress · ${fp.horizon} d · resized capital`,facts(["Scenario","Capital","Verdict","Expected net","Board F / M / S"],stressRows)+"<small>(Base FARM)</small>")}
 </div><div>
@@ -347,7 +345,7 @@ function drawer(){
 			entries({...chainQuotes,"Other chains":fallbackChain}).map(([chain,[gas,fund,min]])=>
 				[chain,money(gas),money(fund),min+" min"])],
 		["Mechanisms","Family|Actions|Fees|Time|Deposit",entries(mechanisms)
-			.map(([family,[actions,bps,min,,guidance]])=>[family,actions,bps+" bps",min+" min",guidance])],
+			.map(([f,[n,bps,min,verb,where]])=>[f,n,bps+" bps",min+" min",verb+" "+where])],
 		["Families","Family|Categories",entries(families).map(([f,cats])=>[f,cats.replaceAll("|",", ")])]
 	]
 	return`<ul>${html(notes,s=>`<li>${esc(s)}`)}</ul>${html(blocks,([title,heads,rs])=>`<h3>${title}</h3>${facts(heads.split("|"),rs)}`)}`

@@ -262,6 +262,7 @@ function readPage() {
     farms: read(".plans"), farmsVisible: visible(".plans"),
     farmLinks: [...document.querySelectorAll(".plans a")].map(a => a.getAttribute("href")),
     farmBadges: [...document.querySelectorAll(".plans .badge")].map(chip => chip.textContent),
+    farmActions: [...document.querySelectorAll(".plans .action")].map(hint => hint.textContent),
     positions: document.querySelectorAll(".positions > div").length,
     labels, steps,
     gas: document.querySelector(".gas")?.innerText.replace("\n", " · "), gasVisible: visible(".gas"),
@@ -422,10 +423,12 @@ async function shoot(output, destination) {
   const board = JSON.parse(readFileSync(join(output, "board.json"), "utf8")).rows;
   const boardBySlug = new Map(board.map(row => [row.slug, row]));
   const url = pathToFileURL(join(output, "dashboard", "index.html")).href;
-  const data = readFileSync(join(output, "data.js"), "utf8").trim();
-  const { snapshot } = JSON.parse(data.slice("globalThis.LaunchRadarData = ".length, -1));
+  const [data] = readFileSync(join(output, "data.js"), "utf8").split("\n", 1);
+  const { snapshot } = JSON.parse(data.slice("const LaunchRadarData = ".length, -1));
   const { value, odds, rows } = api.buildModel(snapshot);
-  const { exits, gas, chain, cost, transactions } = rows.find(row => row.slug === "upshift").plan;
+  const upshift = rows.find(row => row.slug === "upshift");
+  const { exits, gas, chain, cost, transactions, farmChain } = upshift.plan;
+  const modelBySlug = new Map(rows.map(row => [row.slug, row]));
   const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format;
   const gasLine = `${transactions} tx x ${money(chain.gas)} on ${chain.name} = ${money(gas)} · ${(100 * (gas / cost)).toFixed(1)}% of all-in cost`;
   const { selected, baseline, evidence, search } = value.validation;
@@ -479,7 +482,9 @@ async function shoot(output, destination) {
       if (name === "1-board.jpg" && (!info.farmsVisible || !info.farms?.includes("Best plans that clear break-even")
         || info.farmLinks.length !== 5 || new Set(info.farmLinks).size !== 5
         || info.farmBadges.length !== 5 || info.farmBadges.some(badge => badge !== "MARGINAL")
-        || info.farmLinks.some(href => !href.startsWith("#detail/") || !boardBySlug.has(decodeURIComponent(href.slice(8)))))) {
+        || info.farmActions.length !== 5
+        || info.farmLinks.some((href, i) => !href.startsWith("#detail/")
+          || modelBySlug.get(decodeURIComponent(href.slice(8)))?.plan.action !== info.farmActions[i]))) {
         throw new Error("The break-even panel did not render five linked MARGINAL plans.");
       }
       if (name === "calibration") {
@@ -506,7 +511,9 @@ async function shoot(output, destination) {
         || !/Launch within (30|90|180|365) d: [\d.]+% \(q\) vs p\*/.test(info.summary)
         || !info.oddsNote?.includes("no launch dates") || !info.oddsNote.includes("F walk-forward AUC")
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
-        || !info.steps[0].includes("deposit caps") || !info.steps.some(step => step.startsWith("If TVL"))
+        || ![upshift.name, farmChain, "Lowest gas", "deposit caps"].every(text => info.steps[0].includes(text))
+        || !info.steps.some(step => step.startsWith("If TVL") && step.includes(`${upshift.category} p10`))
+        || !info.steps.some(step => step.includes("allocator vault and hold shares"))
         || !info.gasVisible || info.gas !== gasLine || !info.exitsVisible
         || JSON.stringify(info.exits) !== JSON.stringify(exits) || !info.steps.some(step => step.startsWith("If " + exits[0]))
         || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps)
