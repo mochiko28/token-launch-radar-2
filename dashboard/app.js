@@ -1,7 +1,7 @@
 (function () {
  'use strict';
  const R = window.RadarModel, S = window.SNAPSHOT, app = document.getElementById('app');
- if (!R || !S || !window.TABLES) { app.innerHTML = '<p class="empty">No data: run main.ts to write data.js beside the page.</p>'; return; }
+ if (!R || !S || !window.TABLES) { app.innerHTML = '<p class="empty">Run main.ts to build the dashboard data.</p>'; return; }
 
  R.use(window.TABLES);
  const radar = R.build(S), fit = radar.fit, M = radar.model, rows = radar.rows, usd = R.usd;
@@ -19,8 +19,11 @@
  const maxImplied = rows[0].v.implied;
 
  const CLEAR = { q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' };
+ const PORTFOLIO = { ...CLEAR, scope: 'watch', verdict: 'farm-net', dep: '10000', sort: 'plan', dir: 'desc' };
  const DEF = { view: 'board', q: '', fam: '', chain: '', scope: 'all', verdict: '', sort: 'rank', dir: 'asc', p: '', vs: '', dep: '', bud: '25000', hr: String(M.hour_usd) };
- const HOURS = 8, HR = [0, 10, M.hour_usd, 50, 100];
+ const DEPOSITS = ['', 1000, 5000, 10000, 25000, 100000, 250000], RATES = [0, 10, M.hour_usd, 50, 100], BUDGETS = [10000, 25000, 50000, 100000, 250000, 1000000];
+ const PLANS = [['', 'Any'], ['farm', 'Farm'], ['marginal', 'Marginal'], ['skip', 'Skip'], ['farm-net', 'Farm + net > $0']];
+ const HOURS = 8;
  function readHash() {
   const st = Object.assign({}, DEF);
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
@@ -28,8 +31,8 @@
    const i = kv.indexOf('='), k = kv.slice(0, i);
    if (i > 0 && own(DEF, k)) try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch {}
   });
-  const ok = { view: 'board model aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000 100000 250000', hr: HR.join(' '), bud: '10000 25000 50000 100000 250000 1000000' };
-  Object.keys(ok).forEach((k) => { if (!ok[k].split(' ').includes(st[k])) st[k] = DEF[k]; });
+  const ok = { view: ['board', 'model', 'aside', 'trading'], scope: ['all', 'watch', 'early', 'outside', 'stable'], verdict: PLANS.map(([v]) => v), dir: ['asc', 'desc'], dep: DEPOSITS, hr: RATES, bud: BUDGETS };
+  Object.keys(ok).forEach((k) => { if (!ok[k].map(String).includes(st[k])) st[k] = DEF[k]; });
   if (!own(KEYS, st.sort)) st.sort = 'rank';
   return st;
  }
@@ -44,6 +47,7 @@
   rank: (r) => r.rank, name: (r) => r.p.name.toLowerCase(), tvl: (r) => r.p.tvl_usd, g: (r) => r.p.change_7d,
   age: (r) => r.v.age_used, value: (r) => r.v.implied, odds: (r) => r.v.time_factor, apr: (r) => r.v.apr, plan: (r) => r.plan.drop / r.plan.all_in
  };
+ const weightedNet = (r) => r.plan.drop * r.v.time_factor - r.plan.all_in;
  function filtered(st) {
   const q = st.q.trim().toLowerCase(), fams = st.fam ? st.fam.split(',') : [];
   const out = rows.filter((r) =>
@@ -51,7 +55,7 @@
    (!fams.length || fams.includes(r.v.family)) &&
    (!st.chain || r.p.chains.includes(st.chain)) &&
    (st.scope === 'all' || (st.scope === 'watch' ? r.watch : st.scope === 'outside' ? !r.watch : st.scope === 'stable' ? r.stable : r.below)) &&
-   (!st.verdict || r.plan.verdict === st.verdict));
+   (!st.verdict || (st.verdict === 'farm-net' ? r.plan.verdict === 'farm' && weightedNet(r) > 0 : r.plan.verdict === st.verdict)));
   const key = KEYS[st.sort], sign = st.dir === 'desc' ? -1 : 1;
   return out.sort((a, b) => { const x = key(a), y = key(b); if (x == null || y == null) return (x == null) - (y == null) || a.rank - b.rank; return (x < y ? -1 : x > y ? 1 : 0) * sign || a.rank - b.rank; });
  }
@@ -146,12 +150,25 @@
   [spotT.ok && sizeT.ok, `value miss ×${flatT.loo.toFixed(2)} flat → ×${sizeT.loo.toFixed(2)} fitted, held out 3 ways`]
  ];
  const failed = CHECKS.filter(([ok]) => !ok), passText = `${CHECKS.length - failed.length}/${CHECKS.length} self-checks pass`;
- const options = (values, cur, label) => values.map((v) => `<option value="${v}"${String(v) === cur ? ' selected' : ''}>${label(v)}</option>`).join('');
+
+ function portfolio(st, shown) {
+  const screened = filtered({ ...st, verdict: '' });
+  const best = screened.reduce((a, r) => !a || weightedNet(r) > weightedNet(a) ? r : a, null);
+  const kpi = (v, label) => `<div><small>${label}</small><b>${v}</b></div>`;
+  const sum = (f) => usd(shown.reduce((s, r) => s + f(r), 0));
+  return `<section class="portfolio" aria-label="Portfolio snapshot">
+   <p class="tags">${st.scope === 'watch' ? '<span class="tag wlt">Watchlist</span>' : ''}<span class="tag pre">Farm · weighted net &gt; $0</span><span class="tag">${st.dep ? usd(+st.dep) + ' per protocol' : 'Auto deposit'}</span></p>
+   <div class="pkpis">${kpi(shown.length + ' / ' + screened.length, 'Protocols qualified')}${kpi(sum((r) => r.plan.stake), 'Total capital needed')}${kpi(sum(weightedNet), 'Score-weighted net')}</div>
+   <p class="note">Drop × token-record score − gas, fees and time ($${st.hr}/h). The score measures token records today. Carry and stress losses are excluded.</p>
+   ${!shown.length && best ? `<p class="note">${screened.filter((r) => r.plan.net > 0).length} clear costs if rewarded. Best weighted net ${sg(weightedNet(best))} (${esc(best.p.name)}). <a href="${link({ verdict: '' })}">View screened plans →</a></p>` : ''}</section>`;
+ }
 
  function board(st) {
   const shown = filtered(st), fams = st.fam ? st.fam.split(',') : [];
+  const portfolioOn = st.verdict === 'farm-net';
   const watchCov = S.watchlist.filter((s) => bySlug[s]).length;
   const audit = R.farmFlips(rows);
+  const shownFarm = shown.filter((r) => r.plan.verdict === 'farm');
   const mid = (f) => rows.map(f).sort((a, b) => a - b)[rows.length >> 1];
   const chains = {}; rows.forEach((r) => r.p.chains.forEach((c) => { chains[c] = (chains[c] || 0) + 1; }));
   const famCount = {}; rows.forEach((r) => { famCount[r.v.family] = (famCount[r.v.family] || 0) + 1; });
@@ -160,6 +177,7 @@
    return `<th class="${cls || ''}${on ? ' sorted' : ''}"><a href="${link({ sort: k, dir: dir })}">${l}${on ? (st.dir === 'asc' ? ' ▲' : ' ▼') : ''}</a></th>`;
   };
   const seg = (key, opts) => `<div class="seg">${opts.map(([v, l]) => `<a href="${link({ [key]: v })}" class="${st[key] === v ? 'on' : ''}">${l}</a>`).join('')}</div>`;
+  const select = (key, label, vals, fmt) => `<label class="field"><span>${label}</span><select id="${key}">${vals.map((v) => `<option value="${v}"${String(v) === st[key] ? ' selected' : ''}>${fmt(v)}</option>`).join('')}</select></label>`;
   const famLinks = R.FAMILIES.map((f) => {
    const on = fams.includes(f[0]), next = on ? fams.filter((x) => x !== f[0]) : fams.concat(f[0]);
    return `<a href="${link({ fam: next.join(',') })}" class="chip f-${f[0]}${on ? ' on' : ''}"><i></i>${esc(f[1])} <b>${famCount[f[0]] || 0}</b></a>`;
@@ -180,20 +198,20 @@
     <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small><small class="factors">${usd(r.v.fitted)} × s ${pc(r.v.time_factor)}${r.v.haircut === 1 ? '' : ` × ${r.v.haircut}`}</small></td>
     <td class="num">${pc(r.v.time_factor)}</td>
     <td class="num apr">${(r.v.apr * 100).toFixed(1)}%</td>
-    <td class="plan">${verdictTag(pl.verdict)} <span class="pmult">pays ${mult(pl.drop / pl.all_in)}${pays(pl) ? '' : pl.pay_cap ? ` · ×${M.target_cover} at ${usd(pl.pay_cap)}` : ` · no deposit pays ×${M.target_cover}`}</span><small>${usd(pl.drop)} drop vs ${usd(pl.all_in)} ${pl.verdict === 'skip' ? 'to deposit · $0 research' : `cost · ${usd(pl.stake)} on ${esc(pl.chain)}`}</small><small class="farmcue">${farmBadge(pl)} ${esc(pl.risk)} · ~${usd(pl.round_trip)} round trip</small></td></tr>`;
+    <td class="plan">${verdictTag(pl.verdict)} <span class="pmult">pays ${mult(pl.drop / pl.all_in)}${pays(pl) ? '' : pl.pay_cap ? ` · ×${M.target_cover} at ${usd(pl.pay_cap)}` : ` · no deposit pays ×${M.target_cover}`}</span><small>${usd(pl.drop)} drop vs ${usd(pl.all_in)} ${pl.verdict === 'skip' ? 'to deposit · $0 research' : `cost · ${usd(pl.stake)} on ${esc(pl.chain)}`}</small><small class="farmcue">${farmBadge(pl)} ${esc(pl.risk)} · ~${usd(pl.round_trip)} round trip</small>${portfolioOn ? `<small class="up">${sg(weightedNet(r))} score-weighted net</small>` : ''}</td></tr>`;
   }).join('');
   const ctl = `<div class="ctl"><section class="filters">
    <label class="search"><input id="q" type="search" value="${esc(st.q)}" placeholder="Search name, category or chain" autocomplete="off" aria-label="Search"></label>
    <div class="field"><span>Scope</span>${seg('scope', [['all', 'All'], ['watch', 'Watchlist'], ['outside', 'Outside it'], ['early', 'Below $50M'], ['stable', 'Top 20, all variants']])}</div>
-   <div class="field"><span>Plan</span>${seg('verdict', [['', 'Any'], ['farm', 'Farm'], ['marginal', 'Marginal'], ['skip', 'Skip']])}</div>
-   <label class="field"><span>Deposit</span><select id="dep">${options(['', 1000, 5000, 10000, 25000, 100000, 250000], st.dep, (d) => d ? usd(d) : 'Auto: least that pays')}</select></label>
-   <label class="field"><span>Your hour</span><select id="hr">${options(HR, st.hr, (h) => `$${h}/h`)}</select></label>
+   <div class="field"><span>Plan</span>${seg('verdict', PLANS)}</div>
+   ${select('dep', 'Deposit', DEPOSITS, (d) => d ? usd(d) : 'Auto: least that pays')}
+   ${select('hr', 'Your hour', RATES, (h) => `$${h}/h`)}
    <label class="field"><span>Chain</span><select id="chain"><option value="">All chains</option>${Object.keys(chains).sort((a, b) => chains[b] - chains[a] || (a < b ? -1 : 1)).map((c) => `<option${c === st.chain ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
-   <div class="count">Top 20 at $${st.hr}/h: <b>${farmAt(+st.hr, st.dep)}</b> farm (${farmAt(0, st.dep)} at $0/h, ${farmAt(M.hour_usd, st.dep)} at $${M.hour_usd}/h) · farm verdicts holding at 3× gas: <b>${shown.filter((r) => r.plan.fees[1][3] === 'farm').length}</b>/${shown.filter((r) => r.plan.verdict === 'farm').length} · <b>${shown.length}</b> of ${rows.length} shown · <span id="drawn"></span> · <a download="launch-radar.csv" href="${csv(shown)}">CSV</a>${active ? ` · <a href="${link(CLEAR)}">clear filters</a>` : ''}</div>
+   <div class="count">Top 20 at $${st.hr}/h: <b>${farmAt(+st.hr, st.dep)}</b> farm (${farmAt(0, st.dep)} at $0/h, ${farmAt(M.hour_usd, st.dep)} at $${M.hour_usd}/h) · farm verdicts holding at 3× gas: <b>${shownFarm.filter((r) => r.plan.fees[1][3] === 'farm').length}</b>/${shownFarm.length} · <b>${shown.length}</b> of ${rows.length} shown · <span id="drawn"></span> · <a download="launch-radar.csv" href="${csv(shown)}">CSV</a>${active ? ` · <a href="${link(CLEAR)}">clear filters</a>` : ''}</div>
   </section>
-  <section class="filters basket"><label class="field"><span>Budget</span><select id="bud">${options([10000, 25000, 50000, 100000, 250000, 1000000], st.bud, usd)}</select></label>
+  <section class="filters basket">${select('bud', 'Budget', BUDGETS, usd)}
    <span>Basket, best net per dollar of the ${shown.length} shown, within ${usd(+st.bud)} and ${HOURS} h: ${pick.map((r) => `<a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a> ${usd(r.plan.stake)}`).join(' · ') || 'none pays'} → <b>${usd(cap)}</b>, ${hrs.toFixed(1)} h, net if rewarded <b class="up">+${usd(pick.reduce((s, r) => s + r.plan.net, 0))}</b></span></section>
-  <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div></section></div>`;
+  <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div>${portfolioOn ? '' : `<a class="chip pre" href="${link(PORTFOLIO)}">${usd(+PORTFOLIO.dep)} watchlist portfolio →</a>`}</section></div>`;
   return `<section class="strip">
    <div><b>${watchCov}/${S.watchlist.length}</b><span>watchlist covered</span></div>
    <div><b>${rows.length}</b><span>pre-token ranked, ${rows.filter((r) => r.below).length} under $50M</span></div>
@@ -205,7 +223,8 @@
   </section>
   <section class="hero slim">
    <div class="lead">
-    <h1>${rows.length} pre-token protocols, ranked by implied value${st.sort === 'rank' ? '' : `<small> · shown by ${{ g: '7-day change', age: 'days tracked', odds: 'score', apr: 'drop APR', plan: 'farm plan' }[st.sort] || st.sort} ${st.dir === 'asc' ? '▲' : '▼'}</small>`}</h1>
+    <h1>${portfolioOn ? 'Portfolio snapshot' : `${rows.length} pre-token protocols, ranked by implied value`}${st.sort === 'rank' ? '' : `<small> · shown by ${{ g: '7-day change', age: 'days tracked', odds: 'score', apr: 'drop APR', plan: 'farm plan' }[st.sort] || st.sort} ${st.dir === 'asc' ? '▲' : '▼'}</small>`}</h1>
+    ${portfolioOn ? portfolio(st, shown) : ''}
     ${active ? `<p class="note">${passText} · <a href="${link(CLEAR)}">unfiltered board</a></p>` : `${eq}
     <p class="checkline ${failed.length ? 'bad' : 'ok'}"><b>${passText}</b>, run on load: ${[5, 1, 6, 0].map((i) => CHECKS[i][1]).join(' · ')}${failed.map((c) => ' · ✗ ' + c[1]).join('')} · <a href="${link({ view: 'model' })}">all checks →</a></p>`}
     ${sensitivity(st, audit)}${ctl}
@@ -214,7 +233,7 @@
   </section>
   <div class="tablewrap"><table class="board">
    <thead><tr>${th('rank', 'Rank')}${th('name', 'Protocol')}<th>Family</th>${th('tvl', 'TVL', 'num')}${th('g', '7d', 'num')}${th('age', 'Tracked', 'num')}${th('value', 'Implied value · 50% band', 'val')}${th('odds', 'Score', 'num')}${th('apr', 'Drop APR', 'num')}${th('plan', 'Farm plan · if it launches', 'plan')}</tr></thead>
-   <tbody>${body || '<tr><td colspan="10" class="empty">No protocol matches these filters.</td></tr>'}</tbody></table></div>`;
+   <tbody>${body || `<tr><td colspan="10" class="empty">${portfolioOn ? 'No Farm plan has positive score-weighted net in this slice.' : 'No protocol matches these filters.'}</td></tr>`}</tbody></table></div>`;
  }
 
  function redTeam(r) {
@@ -261,10 +280,10 @@
       ${peers.map((x) => `<span class="peer" style="left:${pos(x.actual)}" title="${esc(x.p.name)} ${usd(x.actual)}"></span>`).join('')}
       <span class="mid" style="left:${pos(v.implied)}"></span>
      </div>
-     <p class="note">Shaded: the 50% band, ×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)}, the middle half of held-out misses; cut on other tokens it holds ${fit.band_wf[0]}/${fit.band_wf[1]} of the newest and ${fit.band_fam[0]}/${fit.band_fam[1]} family by family. Ticks: the peers' market caps below. A model's claim, not a price.</p>
+     <p class="note">The shaded 50% band spans the middle half of held-out misses (×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)}). Held-out coverage is ${fit.band_wf[0]}/${fit.band_wf[1]} newest and ${fit.band_fam[0]}/${fit.band_fam[1]} by family. Ticks mark peer market caps.</p>
     </section>
     <section class="card"><h2>Nearest trading peers <span>${esc(fam.label)}, closest TVL</span></h2>
-     ${tbl('mini', ['Protocol', '#TVL', '#Market cap', '#÷ TVL'], peers.map((x) => [`${esc(x.p.name)} <small>${esc(x.p.symbol || '')}</small>`, usd(x.tvl), usd(x.actual), mult(x.actual / x.tvl)]))}${((x) => x ? `<p class="note"><b>Against:</b> ${esc(x.p.name)}'s ${mult(x.actual / x.tvl)} would price ${esc(p.name)} at ${usd(p.tvl_usd * x.actual / x.tvl)}, not ${usd(v.fitted)}; the held-out curve misses ${esc(x.p.name)} itself ${mult(Math.max(x.actual / x.loo, x.loo / x.actual))}.</p>` : '')(peers.slice().sort((a, b) => Math.abs(Math.log(p.tvl_usd * b.actual / b.tvl / v.fitted)) - Math.abs(Math.log(p.tvl_usd * a.actual / a.tvl / v.fitted)))[0])}</section>
+     ${tbl('mini', ['Protocol', '#TVL', '#Market cap', '#÷ TVL'], peers.map((x) => [`${esc(x.p.name)} <small>${esc(x.p.symbol || '')}</small>`, usd(x.tvl), usd(x.actual), mult(x.actual / x.tvl)]))}${((x) => x ? `<p class="note">${esc(x.p.name)}'s ${mult(x.actual / x.tvl)} implies ${usd(p.tvl_usd * x.actual / x.tvl)} here. The curve fits ${usd(v.fitted)} here and misses that peer by ${mult(Math.max(x.actual / x.loo, x.loo / x.actual))} held out.</p>` : '')(peers.slice().sort((a, b) => Math.abs(Math.log(p.tvl_usd * b.actual / b.tvl / v.fitted)) - Math.abs(Math.log(p.tvl_usd * a.actual / a.tvl / v.fitted)))[0])}</section>
     <section class="card risk"><h2>Why this could be wrong <span>computed for this row</span></h2><ul>${redTeam(r).map((t) => `<li>${t}</li>`).join('')}</ul></section>
    </div>
    <section class="card planc"><h2>Farm plan <span>${pl.days} days on ${esc(pl.chain)}</span></h2>
@@ -281,7 +300,7 @@
     <ol class="steps">${pl.steps.map((s) => `<li><p><em>${esc(s.when)}</em>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>
     <div class="math">
      <p><b>Drop APR ${(v.apr * 100).toFixed(2)}% if it launches</b> = ${usd(v.fitted)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
-     <p>Dollar-days: (${pl.tranches.map((t) => `$${t[0].toLocaleString('en-US')} × ${pl.days - t[1]} d`).join(' + ')}) × ${(v.apr * 100).toFixed(2)}% ÷ 365 = <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${pl.hour}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${sg(pl.net)}</b>.</p><p><b>Fees</b> at ${pl.fees.map(([m, cost, net, verdict]) => `${m}× gas ${usd(cost)}, net ${sg(net)} (${verdict})`).join('; ')}.</p><p><b>Carry:</b> ${usd(pl.carry)} forgone at ${M.carry_rate * 100}% elsewhere; net ${sg(pl.net - pl.carry)} if the deposit earns no yield.</p><p><b>Capital:</b> ${st.dep ? 'your deposit' : pays(pl) ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}${pl.cert ? `; break-even certificate: $${pl.cert[2].toLocaleString('en-US')} pays ×${pl.cert[3].toFixed(3)}, $${pl.cert[0].toLocaleString('en-US')} only ×${pl.cert[1].toFixed(3)}` : ''}.</p>
+     <p>Dollar-days: (${pl.tranches.map((t) => `$${t[0].toLocaleString('en-US')} × ${pl.days - t[1]} d`).join(' + ')}) × ${(v.apr * 100).toFixed(2)}% ÷ 365 = <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${pl.hour}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${sg(pl.net)}</b>.</p><p><b>Fees</b> at ${pl.fees.map(([m, cost, net, verdict]) => `${m}× gas ${usd(cost)}, net ${sg(net)} (${verdict})`).join('; ')}.</p><p><b>Carry:</b> $${pl.stake.toLocaleString('en-US')} locked ${pl.days} days forgoes about ${usd(pl.carry)} at ${M.carry_rate * 100}% elsewhere. Net after carry at zero deposit yield is ${sg(pl.net - pl.carry)}.</p><p><b>Capital:</b> ${st.dep ? 'your deposit' : pays(pl) ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}${pl.cert ? `; break-even certificate: $${pl.cert[2].toLocaleString('en-US')} pays ×${pl.cert[3].toFixed(3)}, $${pl.cert[0].toLocaleString('en-US')} only ×${pl.cert[1].toFixed(3)}` : ''}.</p>
     </div>
    </section>
   </div>`;
@@ -299,7 +318,7 @@
   <p class="note">${pl ? `Baseline ${pl.verdict} on ${esc(pl.chain)}.` : `All ${rows.length} rows · ${st.dep ? usd(+st.dep) : 'Auto deposit'}${st.chain ? ' · ' + esc(st.chain) + ' where available' : ''}. + gains FARM, − loses FARM.`} One change at a time, with deposit and chain fixed.</p>
   ${tbl('mini', ['Input', 'Baseline', '#−50%', '#+50%', '#2×'], data.map(([k, label, v]) => [label, v, ...d[k].map(show), ...(d[k].length === 2 ? ['—'] : [])]))}
   <details><summary>Gas and stress rates</summary><p class="note">Gas per tx: ${gas.map(([c, n]) => `${esc(c)} $${n}`).join(' · ')} · fallback $${t.gas_default}.</p>
-  <p class="note">Stress losses by exposure: ${Object.entries(t.act).map(([k, a]) => `${esc(FAM[k] || 'Prediction markets')} ${p2(a[4][1])}`).join(' · ')}.</p></details></details>`;
+  <p class="note">Stress losses by exposure: ${Object.entries(t.act).map(([k, a]) => `${esc(FAM[k] || (k === 'restake' ? 'Restaking' : 'Prediction markets'))} ${p2(R.stressRate(k))} of ${{ capital: 'capital', side: 'side position' }[a[4][2]] || 'main stake'}`).join(' · ')}.</p></details></details>`;
  }
  const nm = (n, sub) => `<b>${esc(n)}</b><small>${esc(sub)}</small>`;
  function model() {
@@ -313,7 +332,7 @@
 
  function trading() {
   return `<section class="intro"><h1>${fit.n} tokens that trade: the model's calibration set</h1>
-   <p>Kept off the board: their market prices them. calibrate() pools TVL per token, leaves out exchanges and products, and fits ln(mcap ÷ TVL) on ln(TVL): value grows as TVL<sup>${fit.elasticity.toFixed(2)}</sup>. ${radar.listed_only} more record a token with no market cap.</p></section>
+   <p>calibrate() pools TVL per token, excludes exchanges and products, and fits ln(mcap ÷ TVL) on ln(TVL). Value grows as TVL<sup>${fit.elasticity.toFixed(2)}</sup>. ${radar.listed_only} more record a token with no market cap.</p></section>
    <div class="tablewrap">${tbl('board', ['Protocol', '#TVL', '#Market cap', '#÷ TVL', '#Fit without it', '#÷ market'], radar.live.map((l) => [nm(l.p.name, (l.p.symbol || '') + ' · ' + (l.p.category || '')), usd(l.tvl) + (l.members > 1 ? ` <small>${l.members} parts</small>` : ''), usd(l.actual), mult(l.actual / l.tvl), usd(l.loo), `<span class="${l.loo / l.actual > 2 || l.loo / l.actual < 0.5 ? 'down' : 'up'}">${mult(l.loo / l.actual)}</span>`]))}</div>`;
  }
 

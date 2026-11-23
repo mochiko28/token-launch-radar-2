@@ -1,3 +1,4 @@
+/* Model shared by the build and dashboard. */
 (function (root) {
  'use strict';
 
@@ -59,6 +60,7 @@
  }
  function bySlug(a, b) { return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0; }
 
+ // One curve-fit point per token.
  function calibrate(snap) {
   var tok = {}, order = [];
   snap.protocols.forEach((p) => {
@@ -95,6 +97,7 @@
    tests: tests, odds: launchOdds(snap) };
  }
 
+ // Logistic token-record score.
  function launchOdds(snap) {
   var peers = snap.protocols.filter((p) => p.tvl_usd > 0 && !productOf(p));
   var known = peers.map((p) => ageDays(snap.as_of, p.listed_at)).filter((a) => a != null).sort((a, b) => a - b);
@@ -150,6 +153,7 @@
  function sig(z) { return 1 / (1 + Math.exp(-z)); }
  function dot(w, x) { return x.reduce((s, v, i) => s + v * w[i], 0); }
 
+ // Held-out value terms on traded caps.
  function termTests(pts, asOf) {
   var ages = pts.map((q) => ageDays(asOf, q.p.listed_at));
   var mid = ages.filter((a) => a != null).sort((a, b) => a - b);
@@ -182,6 +186,7 @@
   T.forEach((t, i) => { var b = T[i < 3 ? i - 1 : 2]; t.ok = i ? t.loo < b.loo && t.wf < b.wf && t.lofo < b.lofo : null; });
   return { terms: T, wf_n: dated.length - cut, wf_train: cut, wf_from: dated[cut].p.listed_at };
  }
+ // Least squares by normal equations.
  function ols(pts, feats, yk) {
   var n = feats(pts[0]).length, A = [], v = [], i, j, r, t;
   for (i = 0; i < n; i++) { A.push([]); v.push(0); for (j = 0; j < n; j++) A[i].push(0); }
@@ -199,7 +204,7 @@
  function quantile(a, t) { var i = (a.length - 1) * t, lo = Math.floor(i); return a[lo] + (a[Math.min(lo + 1, a.length - 1)] - a[lo]) * (i - lo); }
  function predict(f, q) { return q.tc * Math.exp(f.fams[q.f].ln + f.b * q.x); }
 
- // Pooled slope, k pseudo-peers per family intercept.
+ // Pooled slope, k pseudo-peers per family (Infinity: one curve).
  function fitPoints(pts, k) {
   var g = {}, one = k === Infinity;
   pts.forEach((q) => { var f = one ? 'all' : q.f; (g[f] = g[f] || []).push(q); });
@@ -338,7 +343,7 @@
   return { base, changes };
  }
  function stepText(s) {
-  // Keep the cost and time tail under the cap.
+  // Reserve space for cost and time.
   var tail = '. Cost: about ' + usd(s.usd) + '. Time: ' + mins(s.min) + '.', head = s.when + ': ' + s.act;
   return (head.length + tail.length > 600 ? head.slice(0, 597 - tail.length) + '...' : head) + tail;
  }
@@ -361,7 +366,7 @@
   });
   rows.sort((a, b) => b.v.implied - a.v.implied || bySlug(a.p, b.p));
   rows.forEach((r, i) => { r.rank = i + 1; });
-  // TVL multiplier to pass the row above.
+  // TVL to gain a rank.
   rows.forEach((r, i) => {
    var up = i && rows[i - 1].v.implied, at = (f) => value(Object.assign({}, r.p, { tvl_usd: r.p.tvl_usd * f }), fit, snap.as_of, ageFallback, r.v.haircut).implied, lo = 1, hi = 2, k;
    if (!up) return;
@@ -386,7 +391,7 @@
     .sort((a, b) => b.s - a.s || bySlug(a.r.p, b.r.p)).forEach((o, i) => { o.r.draws.push(i + 1); if (i < 20) o.r.boot += 1 / 40; });
   }
   rows.forEach((r) => { var d = r.draws.sort((a, b) => a - b); r.rlo = d[4]; r.rhi = d[35]; delete r.draws; });
-  // Re-rank imputed ages at the observed quartiles.
+  // Age quartile sensitivity.
   var q = (t) => ages[Math.floor((ages.length - 1) * t)];
   rows.filter((r) => r.v.age == null).forEach((r) => {
    r.ageRange = [q(0.25), q(0.75)].map((a) => {

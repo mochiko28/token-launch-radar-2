@@ -1,3 +1,6 @@
+.portfolio{margin-bottom:12px;}
+.portfolio .pkpis{grid-template-columns:repeat(3,1fr);}
+.portfolio .note a{color:var(--accent);}
 :root{--b1:1px solid var(--line);--b2:1px solid var(--line2);
 --bg:#f6f3ec;--panel:#fffdf8;--panel2:#efe9dc;--line:#e4ddcd;--line2:#d3c9b4;
 --text:#1b2436;--muted:#4b5566;--dim:#6e7686;
