@@ -43,7 +43,7 @@ main{padding:20px 32px 24px;max-width:1440px;margin:0 auto;}
 .risk b{color:var(--red);}
 .hero.slim{grid-template-columns:2fr 1fr;align-items:start;}
 .lead h1{font-size:22px;line-height:1.22;font-weight:700;}
-.strip{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line);border:var(--b1);border-radius:var(--r);overflow:hidden;margin-bottom:14px;}
+.strip{display:grid;grid-template-columns:repeat(3,1fr) auto repeat(3,1fr);gap:1px;background:var(--line);border:var(--b1);border-radius:var(--r);overflow:hidden;margin-bottom:14px;}
 .strip div{background:var(--panel);padding:10px 14px;}
 .strip b{display:block;font:600 17px var(--mono);color:var(--text);}
 .strip div:first-child b{color:var(--amber);}
@@ -124,6 +124,7 @@ td.val .bar{display:inline-block;width:70px;height:6px;border-radius:3px;backgro
 td.val .bar i{display:block;height:100%;background:linear-gradient(90deg,#6fa596,var(--accent));border-radius:3px;}
 td.val b{font-weight:600;}
 td.val small{display:inline;margin-left:6px;font:11px var(--mono);color:var(--dim);}
+td.val small.factors{display:block;margin-left:78px;font-variant-numeric:tabular-nums;}
 td.apr{color:var(--amber);}
 td.plan{white-space:nowrap;}
 td.plan .pmult{font:11px var(--mono);color:var(--muted);margin-left:4px;}
@@ -197,6 +198,7 @@ td.proto{min-width:230px;}
 /* Slim cover: more of the ranking above the fold, nothing truncated. */
 .strip div{padding:7px 14px;}
 .strip b{font-size:16px;}
+.strip .miss b{font:600 12px/1.4 var(--sans);white-space:nowrap;}
 .checks{padding:8px 14px;}
 .strip span{white-space:nowrap;font-size:10.5px;}
 .checks li{padding:1px 0;font-size:11.5px;line-height:1.45;}

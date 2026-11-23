@@ -1,4 +1,4 @@
-/* Launch Radar. The page checks the board digest and shows held-out model results. */
+/* Audit: digest() checks board.json, termTests() tests value, farmPlan() costs and times steps. */
 (function () {
  'use strict';
  const R = window.RadarModel, S = window.SNAPSHOT, app = document.getElementById('app');
@@ -56,7 +56,7 @@
   return out.sort((a, b) => { const x = key(a), y = key(b); if (x == null || y == null) return (x == null) - (y == null) || a.rank - b.rank; return (x < y ? -1 : x > y ? 1 : 0) * sign || a.rank - b.rank; });
  }
 
- // FIELDS feed the CSV (raw) and the side-by-side view (formatted; dir marks the better side).
+ // Raw CSV and formatted comparison (dir marks the better side).
  const sg = (x) => (x < 0 ? '−' : '+') + usd(Math.abs(x)), p2 = (x) => (x * 100).toFixed(2) + '%';
  const FIELDS = [['Rank', (r) => r.rank, -1], ['Protocol', (r) => r.p.name], ['Family', (r) => fit.families[r.v.family].label], ['TVL', (r) => Math.round(r.p.tvl_usd), 0, usd],
   ['7-day change %', (r) => r.p.change_7d, 0, pct], ['Days tracked', (r) => r.v.age_used], ['Value if launched', (r) => Math.round(r.v.fitted), 1, usd],
@@ -130,9 +130,8 @@
    <p class="note">Leave-one-out miss by TVL band: ${fit.bands.map((b) => `<b>${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} ×${b.miss.toFixed(1)}</b> (${b.n} tokens; ${rows.filter((r) => r.p.tvl_usd >= b.lo && r.p.tvl_usd < b.hi).length} ranked)`).join(' · ')}.</p></div>`;
  }
 
- // Self-checks, computed on every load.
  const bRows = R.boardRows(radar), dig = R.digest(bRows), B = window.BOARD || {};
- const [flatT, spotT, sizeT] = fit.tests.terms;
+ const [flatT, spotT, sizeT, famT] = fit.tests.terms, curve = fit.k === Infinity ? sizeT : famT;
  const nTr = S.protocols.filter((p) => p.mcap_usd > 0).length, nAll = rows.length + radar.products.length + nTr + radar.listed_only;
  const CHECKS = [
   [nAll === S.protocols.length, `${nAll}/${S.protocols.length} protocols: ${rows.length} ranked, ${radar.products.length} set aside, ${nTr} trading (${fit.n} in fit), ${radar.listed_only} with a token but no cap`],
@@ -177,7 +176,7 @@
     <td class="num">${usd(r.p.tvl_usd)}</td>
     <td class="num ${r.p.change_7d >= 0.05 ? 'up' : r.p.change_7d <= -0.05 ? 'down' : ''}">${pct(r.p.change_7d)}</td>
     <td class="num${r.v.age == null ? ' est' : ''}" title="${r.v.age == null ? 'No listing date: the median age is used' : 'Listed ' + esc(r.p.listed_at)}">${r.v.age == null ? '~' : ''}${days(r.v.age_used)}</td>
-    <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small></td>
+    <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small><small class="factors">${usd(r.v.fitted)} × s ${pc(r.v.time_factor)}</small></td>
     <td class="num">${pc(r.v.time_factor)}</td>
     <td class="num apr">${(r.v.apr * 100).toFixed(1)}%</td>
     <td class="plan">${verdictTag(r.plan.verdict)} <span class="pmult">pays ${mult(r.plan.drop / r.plan.all_in)}${r.plan.verdict === 'farm' ? '' : r.plan.pay_cap ? ` · ×${M.target_cover} at ${usd(r.plan.pay_cap)}` : ` · no deposit pays ×${M.target_cover}`}</span><small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} ${r.plan.verdict === 'skip' ? 'to deposit · $0 research' : `cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}`}</small></td></tr>`;
@@ -198,7 +197,7 @@
    <div><b>${watchCov}/${S.watchlist.length}</b><span>watchlist covered</span></div>
    <div><b>${rows.length}</b><span>pre-token ranked, ${rows.filter((r) => r.below).length} under $50M</span></div>
    <div><b>${radar.products.length} · ${fit.n}</b><span>set aside · trading (fit)</span></div>
-   <div><b>×${sizeT.loo.toFixed(1)} · ×${sizeT.wf.toFixed(1)}</b><span>held-out miss, 2 tests</span></div>
+   <div class="miss"><b>held-out miss ×${curve.loo.toFixed(1)} LOO · ×${curve.wf.toFixed(1)} walk-forward</b><span>Median · flat baseline ×${flatT.loo.toFixed(1)} LOO · ×${flatT.wf.toFixed(1)} WF</span></div>
    <div><b>${O.auc_loo.toFixed(2)} · ${O.auc_wf.toFixed(2)}</b><span>score AUC: LOO · walk-fwd</span></div>
    <div><b>${farmN}</b><span>pay ×${M.target_cover} their costs</span></div>
    <div><b>${usd(mid((r) => r.plan.stake))} · ${R.mins(mid((r) => r.plan.minutes))}</b><span>median deposit · hands-on</span></div>
