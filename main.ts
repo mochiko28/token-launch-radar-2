@@ -28,6 +28,7 @@ const here = fileURLToPath(new URL('.', import.meta.url));
 const Radar = createRequire(import.meta.url)('./dashboard/model.js') as {
   build(s: Snapshot): { rows: unknown[]; products: unknown[]; live: unknown[]; fit: { slope: number; n: number } };
   boardRows(r: unknown): Row[];
+  farmFlips(rows: unknown[]): { base: number; changes: Record<string, number[]> };
   digest(rows: Row[]): string;
   use(tables: unknown): void;
 };
@@ -93,6 +94,7 @@ function boardIssue(board: Row[]): string | null {
 }
 const issue = boardIssue(rows);
 if (issue !== null) fail(`the board breaks a gate rule: ${issue}`);
+const { base, changes } = Radar.farmFlips(radar.rows);
 
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'board.json'), `${JSON.stringify({ as_of: snapshot.as_of, source: snapshot.source, model: 'dashboard/model.js', rows })}\n`);
@@ -114,5 +116,6 @@ writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: 65_
 process.stdout.write(
   `launch radar: ${snapshot.protocols.length} protocols; fit on ${radar.fit.n} trading tokens (size elasticity ${(1 + radar.fit.slope).toFixed(2)}); ` +
     `${rows.length} pre-token rows ranked, ${radar.products.length} products set aside; watchlist ${snapshot.watchlist.length}/${snapshot.watchlist.length} covered\n` +
+    `launch radar: ${base} baseline FARM; ${-changes.costs[2]!} lost at double cost and ${-changes.share[0]!} at half depositor share\n` +
     `launch radar: wrote board.json, data.js, dashboard/ (${pages.length} files), screenshots/ (${shots.length}) and dossier.json to ${out}\n`,
 );

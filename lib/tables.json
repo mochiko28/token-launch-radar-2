@@ -127,6 +127,8 @@
   "Corn": 0.02
  },
  "gas_default": 0.3,
+ "hour_usd": 25,
+ "drop_share": 0.1,
  "act": {
   "vault": [
    "Deposit {S} of USDC into the largest USDC vault {N} curates on {C}, straight from the vault page",
