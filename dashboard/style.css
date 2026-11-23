@@ -17,7 +17,7 @@ button,select,summary{cursor:pointer}
 h1{font-size:clamp(2.4rem,4vw,3.9rem);line-height:1;letter-spacing:-.06em}
 h2{font-size:1.14rem;line-height:1.25}
 .frame{width:min(1328px,95%);margin:auto}
-.site-header,.dialog-bar,.btn,.chip,.panel,.portfolio{background:#fff}
+.site-header,.dialog-bar,.btn,.chip,.panel{background:#fff}
 .mast,.bar,.dialog-bar,.portfolio,.equation{display:flex;align-items:center}
 .intro,.readings,.legend,.positions,.outcomes,.integrity,dl{display:flex}
 .mast{min-height:60px;gap:28px}
@@ -31,18 +31,19 @@ nav [aria-current=page]{text-decoration:underline}
 small,dt,.rank,.intro p,.curve,footer{color:var(--dim)}
 .intro,.bar,.dialog-bar,.metrics{justify-content:space-between}
 .integrity,.readings,.portfolio,.positions,.attribution dl{flex-wrap:wrap}
-.intro{align-items:end;margin:28px 0 24px}
+.intro{align-items:end;margin:12px 0 24px}
 .intro p{margin-top:8px}
-.integrity{gap:2px;margin:-12px 0 1em}
+.integrity{gap:2px;margin:-17px 0 8px}
 .chip{padding:2px;white-space:nowrap;font-size:.68rem}
 #checks-info,.back{margin-top:16px}
 .kpis,.groups,.board,.detail,.research,.rail,.detail>div,.filters,.steps li,.quotes{display:grid}
-.kpis{grid-template-columns:1.25fr 1.55fr 1fr .68fr;gap:12px;margin-bottom:19px}
+.kpis{grid-template-columns:1.25fr 1.55fr 1fr .68fr;gap:12px;margin:0 0 10px}
 .panel,.portfolio{border-radius:10px;min-width:0}
+.kpi{padding:5px 12px;line-height:1.25}
 .kpi strong{font-size:1.94rem}
-.groups{grid-template-columns:auto auto;gap:2px 8px}
+.groups{grid-template:auto/1fr 1fr}
 .readings,.band,.totals,.board,.detail,.research{gap:1rem}
-small,.readings span,svg,.back{display:block}
+:not(strong)>small,.readings span,svg,.back{display:block}
 .misses strong{font-size:1.4rem}
 small,dt,.curve,.attribution,.rail,.portfolio p,.hint,.back,.kpi{font-size:.8rem}
 .valuation,.portfolio,.metrics,.steps small{background:var(--bg)}
@@ -54,15 +55,17 @@ small,dt,.curve,.attribution,.rail,.portfolio p,.hint,.back,.kpi{font-size:.8rem
 :is(.filters,.quotes) label{font-size:.75rem;font-weight:700}
 :is(.filters,.quotes) :is(input,select){width:100%;height:34px;padding:4px 6px;border:var(--line);border-radius:5px}
 .scroll{overflow:auto}
-#results .scroll{max-height:414px}
-.portfolio+div #results .scroll{max-height:318px}
+#results .scroll{
+	max-height:511px;
+	.portfolio+div &{max-height:318px}
+}
 #results thead{position:sticky;top:0;z-index:1}
 table{width:100%;border-collapse:collapse}
 th{text-align:left}
 thead{background:#f3eff6;font-size:.75rem}
 .ranks{min-width:880px;font-size:.88rem;line-height:1.15}
 .ranks :is(td,th){padding:2px 7px}
-.ranks td{white-space:nowrap}
+.ranks :is(td,th small){white-space:nowrap}
 .hint,.compare{margin:0 16px 9px}
 tbody tr{border-bottom:var(--line)}
 .protocol,dd,.amount{font-weight:750}
@@ -72,7 +75,7 @@ tbody tr{border-bottom:var(--line)}
 .farm{background:#e1f3eb;color:#145a46}
 .marginal{background:#fbefd7;color:#754800}
 .skip{background:#f6e6e8;color:#893842}
-.inset,.valuation,.empty,.kpi{padding:14px 16px}
+.inset,.valuation,.empty{padding:14px 16px}
 svg{width:100%;height:146px}
 svg text{fill:var(--dim);font-size:11px}
 svg path{stroke:#e8e0ed}

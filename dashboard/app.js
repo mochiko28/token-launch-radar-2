@@ -32,7 +32,7 @@ const grades=keys(verdicts),
 	oddsLabel="Token status odds",
 	cols={
 	rank:["Rank","rank","asc"],name:["Protocol","name","asc"],
-	value:["Implied value","score"],odds:[oddsLabel,"tokenOdds"],tvl:["TVL","tvl_usd"],
+	value:["Implied value","score"],odds:["Token&nbsp;status odds","tokenOdds"],tvl:["TVL","tvl_usd"],
 	growth:["7d TVL","change_7d"],days:["Days listed","ageDays"],
 	verdict:["Verdict",p=>grades.indexOf(p.plan.verdict),"asc"],net:["Expected net",p=>p.plan.net]
 }
