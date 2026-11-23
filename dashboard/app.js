@@ -261,7 +261,7 @@
      <p class="note">Shaded: the 50% band, ×${fit.band_low.toFixed(2)}–×${fit.band_high.toFixed(2)}, the middle half of held-out misses; cut on other tokens it holds ${fit.band_wf[0]}/${fit.band_wf[1]} of the newest and ${fit.band_fam[0]}/${fit.band_fam[1]} family by family. Ticks: the peers' market caps below. A model's claim, not a price.</p>
     </section>
     <section class="card"><h2>Nearest trading peers <span>${esc(fam.label)}, closest TVL</span></h2>
-     ${tbl('mini', ['Protocol', '#TVL', '#Market cap', '#÷ TVL'], peers.map((x) => [`${esc(x.p.name)} <small>${esc(x.p.symbol || '')}</small>`, usd(x.tvl), usd(x.actual), mult(x.actual / x.tvl)]))}</section>
+     ${tbl('mini', ['Protocol', '#TVL', '#Market cap', '#÷ TVL'], peers.map((x) => [`${esc(x.p.name)} <small>${esc(x.p.symbol || '')}</small>`, usd(x.tvl), usd(x.actual), mult(x.actual / x.tvl)]))}${((x) => x ? `<p class="note"><b>Against:</b> ${esc(x.p.name)}'s ${mult(x.actual / x.tvl)} would price ${esc(p.name)} at ${usd(p.tvl_usd * x.actual / x.tvl)}, not ${usd(v.fitted)}; the held-out curve misses ${esc(x.p.name)} itself ${mult(Math.max(x.actual / x.loo, x.loo / x.actual))}.</p>` : '')(peers.slice().sort((a, b) => Math.abs(Math.log(p.tvl_usd * b.actual / b.tvl / v.fitted)) - Math.abs(Math.log(p.tvl_usd * a.actual / a.tvl / v.fitted)))[0])}</section>
     <section class="card risk"><h2>Why this could be wrong <span>computed for this row</span></h2><ul>${redTeam(r).map((t) => `<li>${t}</li>`).join('')}</ul></section>
    </div>
    <section class="card planc"><h2>Farm plan <span>${pl.days} days on ${esc(pl.chain)}</span></h2>
