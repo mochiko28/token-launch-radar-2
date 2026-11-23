@@ -186,7 +186,7 @@
   ],
   "stable": [
    "Mint or deposit {S} into {N}'s yield-bearing dollar on {C}",
-   "If {N}'s app lists a pool or money market for the receipt, move {s} there (many points programs count it twice); if none, keep it all in step 2",
+   "If {N}'s app lists a pool or money market for the receipt, move {s} there (many points programs count it twice); otherwise keep the original position",
    "pull the receipt back from any pool, then redeem it for USDC (some issuers redeem in 1-7 days)",
    "{N}'s yield-bearing dollar can be minted and redeemed on {C} by retail (not only whitelisted firms), its redemption delay is stated, and holding it earns points",
    [

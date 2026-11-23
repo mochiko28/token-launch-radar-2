@@ -1,37 +1,29 @@
-(function (root) {
+(function () {
 'use strict';
 
 var DAY = 86400000;
 var { abs, exp, floor, imul, log, max, min, pow, round, sqrt } = Math;
-var M = {
- version: 'radar-fit-3',
- ref_tvl: 1e8,
- ratio_floor: 0.02,
- ratio_cap: 20,
- growth_floor: -30,
- growth_cap: 50,
- odds_ridge: 1,
- farm_days: 90,
- carry_rate: 0.04,
- target_cover: 2,
- season_days: 365,
- product_haircut: 0.65
-};
+var REF = 1e8, RIDGE = 1, LO = .02, HI = 20;
+var M = {version: 'radar-fit-3',ref_tvl: REF,ratio_floor: LO,ratio_cap: HI,odds_ridge: RIDGE,
+ growth_floor: -30,growth_cap: 50,farm_days: 90,
+ carry_rate: .04,target_cover: 2,season_days: 365,product_haircut: .65};
 
 var FAMILIES = [], FAM_OF = {}, GAS = {}, GAS0 = 0.3, ACT = {};
 function use(t) {
- FAMILIES = api.FAMILIES = t.families; GAS = t.gas; GAS0 = t.gas_default; ACT = t.act; FAM_OF = {};
- M.hour_usd = t.hour_usd; M.drop_share = t.drop_share;
- FAMILIES.forEach(([key, , cats]) => cats.forEach(c => { FAM_OF[c] = key; }));
+ ({families:FAMILIES,gas:GAS,gas_default:GAS0,act:ACT,hour_usd:M.hour_usd,drop_share:M.drop_share} = t);
+ api.FAMILIES = FAMILIES;
+ FAM_OF = Object.fromEntries(FAMILIES.flatMap(([k,,cs]) => cs.map(c => [c,k])));
 }
-function family(p) { return FAM_OF[p.category] || 'infra'; }
-function gas(chain) { return GAS[chain] ?? GAS0; }
-
-var asc = (a, b) => a - b;
-function clamp(x, lo, hi) { return max(lo, min(hi, x)); }
-var growthOf = p => clamp(p.change_7d ?? 0, M.growth_floor, M.growth_cap);
-function hasToken(p) { return p.gecko_id != null || p.symbol != null || p.mcap_usd != null; }
-function trades(p) { return p.mcap_usd != null && p.mcap_usd > 0; }
+var family = p => FAM_OF[p.category] || 'infra', gas = c => GAS[c] ?? GAS0;
+var asc = (a,b) => a-b, known = n => n != null;
+var clamp = (x,lo,hi) => max(lo,min(hi,x));
+var growthOf = p => clamp(p.change_7d ?? 0,M.growth_floor,M.growth_cap);
+var ratioLog = (cap,tvl) => log(clamp(cap/tvl,LO,HI));
+var sum = (a,f) => a.reduce((s,x) => s+f(x),0);
+var without = (a,i) => a.filter((_,j) => i !== j);
+var median = a => a[a.length >> 1];
+var hasToken = p => known(p.gecko_id) || known(p.symbol) || known(p.mcap_usd);
+var trades = p => p.mcap_usd > 0;
 function ageDays(asOf, listed) {
  if (!listed) return null;
  var d = floor((Date.parse(asOf + 'T00:00:00Z') - Date.parse(listed + 'T00:00:00Z'))/DAY);
@@ -41,10 +33,10 @@ var LIQUID = /^Liquid (Staking|Restaking)$/;
 var VERSIONED = /\s([Vv]\d+(\.\d+)?|\d+\.\d+)$/;
 var WRAPPED = /\b(wrapped|staked|staking)\b/i;
 var EXCHANGE = /^(Binance|Coinbase|Bybit|Kraken|Bitget|OKX|Bitfinex|Gemini)\b/;
-function firstWord(n) { return n.toLowerCase().split(/[\s.-]+/)[0]; }
-function tokenWords(snap) {
+var firstWord = n => n.toLowerCase().split(/[\s.-]+/)[0];
+function tokenWords(ps) {
  var w = Object.create(null);
- snap.protocols.forEach(p => {if (hasToken(p) && firstWord(p.name).length >= 3) w[firstWord(p.name)] = p.name;});
+ ps.filter(hasToken).forEach(({name}) => {var k = firstWord(name); if (k.length >= 3) w[k] = name;});
  return w;
 }
 function productOf(p, forBoard) {
@@ -56,43 +48,42 @@ function productOf(p, forBoard) {
  return null;
 }
 function productFlag(p) {
- if (LIQUID.test(p.category)) return 'liquid-staking issuer: its receipt token is not a governance token; a drop is less certain';
+ if (LIQUID.test(p.category)) return 'liquid-staking issuer: receipt and governance tokens differ; drop uncertain';
  var base = p.name.replace(VERSIONED, '');
  return base !== p.name ? 'a version of ' + base + ': may share its token' : '';
 }
-function bySlug(a, b) { return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0; }
-
-function byDate({ p: a }, { p: b }) {
- return a.listed_at < b.listed_at ? -1 : a.listed_at > b.listed_at ? 1 : bySlug(a, b);
-}
+var cmp = (a,b) => (a>b)-(a<b);
+var bySlug = (a,b) => cmp(a.slug,b.slug);
+var byDate = ({p:a},{p:b}) => cmp(a.listed_at,b.listed_at) || bySlug(a,b);
 
 function calibrate(snap) {
- var tok = {}, order = [];
+ var tok = new Map();
  snap.protocols.forEach(p => {
   if (!trades(p) || p.tvl_usd <= 0 || productOf(p)) return;
   var k = p.gecko_id || p.symbol || p.slug;
-  if (!tok[k]) { tok[k] = { p, tvl: 0, mcap: 0, members: 0 }; order.push(k); }
-  var t = tok[k];
+  if (!tok.has(k)) tok.set(k,{p,tvl:0,mcap:0,members:0});
+  var t = tok.get(k);
   t.tvl += p.tvl_usd; t.members++;
   t.mcap = max(t.mcap, p.mcap_usd);
   if (p.tvl_usd > t.p.tvl_usd) t.p = p;
  });
- var pts = order.map(k => {
-  var t = tok[k];
-  var tc = t.tvl*(1 + growthOf(t.p)/100);
-  return {p: t.p,tvl: t.tvl,tc,mcap: t.mcap,members: t.members,f: family(t.p),x: log(tc/M.ref_tvl),y: log(clamp(t.mcap/tc,M.ratio_floor,M.ratio_cap)),
-   sx: log(t.tvl/M.ref_tvl), sy: log(clamp(t.mcap/t.tvl, M.ratio_floor, M.ratio_cap)) };
+ var pts = [...tok.values()].map(({p,tvl,mcap,members}) => {
+  var tc = tvl*(1+growthOf(p)/100);
+  return {p,tvl,tc,mcap,members,f: family(p),x: log(tc/REF),y: ratioLog(mcap,tc),sx: log(tvl/REF),sy: ratioLog(mcap,tvl)};
  });
  var tests = termTests(pts, snap.as_of), k = tests.terms[3].ok ? 0 : Infinity;
- var miss = pts.map((q, i) => log(q.mcap/predict(fitCurve(pts.filter((o, j) => j !== i), k), q)));
+ var miss = pts.map((q,i) => log(q.mcap/predict(fitCurve(without(pts,i),k),q)));
  var full = fitCurve(pts, k);
  pts.forEach((q, i) => { q.fit = round(predict(full, q)); q.loo = q.mcap/exp(miss[i]); q.err = abs(miss[i]); });
- var sorted = miss.slice().sort(asc);
- var hold = (cal,te) => {cal = cal.slice().sort(asc); var a = quantile(cal,0.25),b = quantile(cal,0.75); return [te.filter(m => m >= a && m <= b).length,te.length];};
- var di = pts.map((q,i) => i).filter(i => pts[i].p.listed_at).sort((i,j) => byDate(pts[i],pts[j])),dc = floor(di.length*0.6);
- var bandWf = hold(di.slice(0, dc).map(i => miss[i]), di.slice(dc).map(i => miss[i]));
- var bandFam = FAMILIES.reduce((s,f) => {var r = hold(miss.filter((m,i) => pts[i].f !== f[0]),miss.filter((m,i) => pts[i].f === f[0])); return [s[0] + r[0],s[1] + r[1]];},[0,0]);
- var q25 = quantile(sorted, 0.25), q75 = quantile(sorted, 0.75);
+ var band = a => [.25,.75].map(q => quantile(a.slice().sort(asc),q));
+ var hold = (cal,te) => {var [a,b] = band(cal); return [te.filter(m => m >= a && m <= b).length,te.length];};
+ var dated = pts.filter(q => q.p.listed_at).sort(byDate).map(q => miss[pts.indexOf(q)]), cut = floor(dated.length*.6);
+ var bandWf = hold(dated.slice(0,cut),dated.slice(cut));
+ var bandFam = FAMILIES.reduce(([n,t],[f]) => {
+  var [a,b] = hold(miss.filter((_,i) => pts[i].f !== f),miss.filter((_,i) => pts[i].f === f));
+  return [n+a,t+b];
+ },[0,0]);
+ var [q25,q75] = band(miss);
  var cuts = [0, 1e7, 3e7, 1e8, 1e15], bands = cuts.slice(0, -1).map((lo, b) => {
   var hi = cuts[b + 1], peers = pts.filter(q => q.tvl >= lo && q.tvl < hi);
   var m = peers.map(q => q.err).sort(asc);
@@ -104,32 +95,33 @@ function calibrate(snap) {
   tests, odds: launchOdds(snap) };
 }
 
-// Diagonalize the fit's normal equations in place.
 function solve(A, v) {
  var n = v.length;
- for (var i = 0; i < n; i++) for (var r = 0; r < n; r++) if (r !== i) {
+ for (var i=0;i<n;i++) for (var r=0;r<n;r++) if (r !== i) {
   var t = A[r][i]/A[i][i];
-  for (var j = 0; j < n; j++) A[r][j] -= t*A[i][j];
+  for (var j=0;j<n;j++) A[r][j] -= t*A[i][j];
   v[r] -= t*v[i];
  }
  return v.map((x, i) => x/A[i][i]);
 }
 function launchOdds(snap) {
  var peers = snap.protocols.filter(p => p.tvl_usd > 0 && !productOf(p));
- var known = peers.map(p => ageDays(snap.as_of, p.listed_at)).filter(a => a != null).sort(asc);
- var mid = known[known.length >> 1], fams = FAMILIES.slice(0, -1);
- var X = (p, a) => {
-  return [1, log(p.tvl_usd/M.ref_tvl), log(1 + a/365), log(1 + growthOf(p)/100)]
-   .concat(fams.map(f => family(p) === f[0] ? 1 : 0));
- };
- var pts = peers.map(p => {var a = ageDays(snap.as_of,p.listed_at); return {p,a,x: X(p,a ?? mid),y: hasToken(p) ? 1 : 0};});
+ var age = p => ageDays(snap.as_of,p.listed_at);
+ var mid = median(peers.map(age).filter(known).sort(asc)), fams = FAMILIES.slice(0,-1);
+ var X = (p,a) => [1,log(p.tvl_usd/REF),log(1+a/365),log(1+growthOf(p)/100),...fams.map(([f]) => +(family(p) === f))];
+ var pts = peers.map(p => {var a = age(p); return {p,a,x: X(p,a ?? mid),y: +hasToken(p)};});
  function logit(T, w0, steps) {
-  var n = T[0].x.length, w = [], it, i, j, g, H;
-  for (i = 0; i < n; i++) w.push(w0 ? w0[i] : 0);
-  for (it = 0; it < (steps || 25); it++) {
-   g = w.map((v, i) => i ? -M.odds_ridge*v : 0);
-   H = w.map((v, i) => w.map((u, j) => i === j ? (i ? M.odds_ridge : 1e-6) : 0));
-   T.forEach(q => {var pr = sig(dot(w,q.x)); for (i = 0; i < n; i++) {g[i] += (q.y - pr)*q.x[i]; for (j = 0; j < n; j++) H[i][j] += pr*(1 - pr)*q.x[i]*q.x[j];}});
+  var n = T[0].x.length, w = w0 ? w0.slice() : Array(n).fill(0);
+  for (var it = 0; it < (steps || 25); it++) {
+   var g = w.map((v,i) => i ? -RIDGE*v : 0);
+   var H = w.map((_,i) => w.map((_,j) => i === j ? (i ? RIDGE : 1e-6) : 0));
+   for (var {x,y} of T) {
+    var pr = sig(dot(w,x));
+    for (var i = 0; i < n; i++) {
+     g[i] += (y-pr)*x[i];
+     for (var j = 0; j < n; j++) H[i][j] += pr*(1-pr)*x[i]*x[j];
+    }
+   }
    solve(H, g).forEach((x, i) => { w[i] += x; });
   }
   return w;
@@ -139,82 +131,84 @@ function launchOdds(snap) {
   pos.forEach(a => { neg.forEach(b => { c += a.s > b.s ? 1 : a.s === b.s ? 0.5 : 0; }); });
   return c/(pos.length*neg.length);
  }
- var w = logit(pts), F = (p, a) => sig(dot(w, X(p, a)));
- var loo = pts.map((q, i) => ({ y: q.y, s: dot(logit(pts.filter((o, j) => j !== i), w, 3), q.x) }));
- var dated = pts.filter(q => q.a != null).sort((u, v) => v.a - u.a || bySlug(u.p, v.p));
+ var w = logit(pts), F = (p,a) => sig(dot(w,X(p,a)));
+ var loo = pts.map((q,i) => ({y: q.y,s: dot(logit(without(pts,i),w,3),q.x)}));
+ var dated = pts.filter(q => known(q.a)).sort((u,v) => v.a-u.a || bySlug(u.p,v.p));
  var cut = floor(dated.length*0.6);
  function held(cols) {
   var z = q => ({y: q.y,x: q.x.map((v,i) => cols.indexOf(i) < 0 ? v : 0)}),wd = logit(dated.slice(0,cut).map(z)),fw = {};
   return { wf: dated.slice(cut).map(q => ({ y: q.y, s: dot(wd, z(q).x) })),
    fam: pts.map(q => {var f = family(q.p); fw[f] = fw[f] || logit(pts.filter(o => family(o.p) !== f).map(z),w,4); return {y: q.y,s: dot(fw[f],z(q).x)};})};
  }
- var h0 = held([]), wf = h0.wf, lofo = h0.fam, ss = q => sig(q.s);
- var edges = [0, 180, 365, 730, 1095, 1e9], cohorts = edges.slice(0, 5).map((lo, c) => {
-  var m = pts.filter(q => q.a != null && q.a >= lo && q.a < edges[c + 1]), n = m.length || 1;
-  return {from: lo,n: m.length,actual: m.reduce((t,q) => t + q.y,0)/n,fitted: m.reduce((t,q) => t + F(q.p,q.a),0)/n};
+ var h0 = held([]), {wf,fam:lofo} = h0, ss = q => sig(q.s);
+ var y = q => q.y, edges = [0,180,365,730,1095,1e9], gaps = edges.slice(0,-1).map((lo,i) => {
+  var m = pts.filter(q => known(q.a) && q.a >= lo && q.a < edges[i+1]), n = m.length || 1;
+  return abs(sum(m,y)/n-sum(m,q => F(q.p,q.a))/n);
  });
- var S = pts.reduce((t,q) => t + q.y,0),n = pts.length,rate = dated.slice(0,cut).reduce((t,q) => t + q.y,0)/cut;
- var bri = (T, f) => T.reduce((t, q) => t + pow(f(q) - q.y, 2), 0)/T.length;
+ var S = sum(pts,y),n = pts.length,rate = sum(dated.slice(0,cut),y)/cut;
+ var bri = (T,f) => sum(T,q => pow(f(q)-q.y,2))/T.length;
  var brier = { loo: bri(loo, ss), loo_base: bri(pts, q => (S - q.y)/(n - 1)),
   wf: bri(wf, ss), wf_base: bri(wf, () => rate) };
  var boot = rnd => {var wb = logit(pts.map(() => pts[floor(rnd()*n)]),w,4); return (p,a) => sig(dot(wb,X(p,a)));};
  brier.fam = bri(lofo, ss);
- brier.fam_base = bri(pts,q => {var o = pts.filter(z => family(z.p) !== family(q.p)); return o.reduce((t,z) => t + z.y,0)/o.length;});
- var terms = [['all inputs',[]],['without TVL',[1]],['without days tracked',[2]],['without 7-day change',[3]],['without family',fams.map((f,i) => 4 + i)]]
-  .map(t => { var h = t[1].length ? held(t[1]) : h0; return [t[0], bri(h.wf, ss), bri(h.fam, ss)]; });
- return {terms,mid,auc_fam: auc(lofo),boot,brier,w,gap: max(...cohorts.map(c => abs(c.actual - c.fitted))),n: pts.length,with_token: pts.filter(q => q.y).length,auc_loo: auc(loo),auc_wf: auc(wf),wf_n: wf.length,
-  F };
+ brier.fam_base = bri(pts,q => {var o = pts.filter(z => family(z.p) !== family(q.p)); return sum(o,y)/o.length;});
+ var terms = [['all inputs',[]],['without TVL',[1]],['without days tracked',[2]],['without 7-day change',[3]],['without family',fams.map((_,i) => 4+i)]]
+  .map(([l,c]) => {var h = c.length ? held(c) : h0; return [l,bri(h.wf,ss),bri(h.fam,ss)];});
+ return {terms,mid,boot,brier,w,F,n,with_token:S,auc_loo:auc(loo),auc_wf:auc(wf),auc_fam:auc(lofo),wf_n:wf.length,gap:max(...gaps)};
 }
-function sig(z) { return 1/(1 + exp(-z)); }
-function dot(w, x) { return x.reduce((s, v, i) => s + v*w[i], 0); }
+var sig = z => 1/(1+exp(-z)), dot = (w,x) => x.reduce((s,v,i) => s+v*w[i],0);
 
 function termTests(pts, asOf) {
  var ages = pts.map(q => ageDays(asOf, q.p.listed_at));
- var mid = ages.filter(a => a != null).sort(asc);
+ var mid = median(ages.filter(known).sort(asc));
  pts.forEach((q, i) => {
   q.g = growthOf(q.p)/100;
-  q.age = ages[i] ?? mid[mid.length >> 1];
+  q.age = ages[i] ?? mid;
  });
  var dated = pts.filter(q => q.p.listed_at).sort(byDate);
  var cut = floor(dated.length*0.6);
  function score(make, spot) {
   var err = (m, q) => abs(log(q.mcap/(spot ? q.tvl : q.tc)) - m(q));
   var med = a => exp(quantile(a.sort(asc), 0.5));
-  var loo = pts.map((q, i) => err(make(pts.filter((o, j) => j !== i)), q));
+  var loo = pts.map((q,i) => err(make(without(pts,i)),q));
   var m = make(dated.slice(0, cut)), wf = dated.slice(cut).map(q => err(m, q));
   var lofo = pts.map(q => err(make(pts.filter(o => o.f !== q.f)), q));
   return { loo: med(loo), wf: med(wf), lofo: med(lofo) };
  }
- var T = [
+ var terms = [
   ['flat', 'one multiple, spot TVL', q => [1], 1],
   ['spot', 'size curve, spot TVL', q => [1, q.sx], 1],
   ['size', 'size curve, TVL carried a week', q => [1, q.x]],
   ['family', '+ category family', null],
   ['growth', '+ 7-day change, own weight', q => [1, q.x, log(1 + q.g)]],
   ['age', '+ days since listing', q => [1, q.x, log(1 + q.age/365)]]
- ].map(t => {
-  var r = score(t[2] ? tr => ols(tr,t[2],t[3] ? 'sy' : 'y') : tr => {var f = fitCurve(tr,0); return q => (f.fams[q.f].peers ? f.fams[q.f].ln : f.all) + f.b*q.x;},t[3]);
-  r.key = t[0]; r.label = t[1];
-  return r;
+ ].map(([key,label,x,spot]) => {
+  var make = x ? tr => ols(tr,x,spot?'sy' : 'y') : tr => {
+   var {fams,all,b} = fitCurve(tr,0);
+   return q => (fams[q.f].peers ? fams[q.f].ln : all) + b*q.x;
+  };
+  return {...score(make,spot),key,label};
  });
- T.forEach((t,i) => {var b = T[i < 3 ? i - 1 : 2]; t.ok = i ? t.loo < b.loo && t.wf < b.wf && t.lofo < b.lofo : null;});
- return { terms: T, wf_n: dated.length - cut, wf_train: cut, wf_from: dated[cut].p.listed_at };
+ terms.forEach((t,i) => {var b = terms[min(i-1,2)]; t.ok = i ? ['loo','wf','lofo'].every(k => t[k] < b[k]) : null;});
+ return {terms,wf_n: dated.length-cut,wf_train: cut,wf_from: dated[cut].p.listed_at};
 }
 function ols(pts, feats, yk) {
- var n = feats(pts[0]).length, A = [], v = [], i, j;
- for (i = 0; i < n; i++) { A.push([]); v.push(0); for (j = 0; j < n; j++) A[i].push(0); }
- pts.forEach(q => {var f = feats(q); for (i = 0; i < n; i++) {v[i] += f[i]*q[yk || 'y']; for (j = 0; j < n; j++) A[i][j] += f[i]*f[j];}});
+ var n = feats(pts[0]).length, v = Array(n).fill(0), A = v.map(() => v.slice());
+ pts.forEach(q => feats(q).forEach((x,i,f) => {
+  v[i] += x*q[yk];
+  for (var j = 0; j < n; j++) A[i][j] += x*f[j];
+ }));
  var w = solve(A, v);
  return q => dot(w, feats(q));
 }
-// FNV-1a board digest.
+// FNV-1a
 function digest(rows) {
  var h = 2166136261;
  rows.forEach(r => {var s = [r.rank,r.slug,r.name,r.implied_value_usd,JSON.stringify(r.farm)].concat(r.farm_steps).join('|'); for (var i = 0; i < s.length; i++) {h ^= s.charCodeAt(i); h = imul(h,16777619) >>> 0;}});
  return h.toString(16).padStart(8, '0');
 }
 function quantile(a,t) {var i = (a.length - 1)*t,lo = floor(i); return a[lo] + (a[min(lo + 1,a.length - 1)] - a[lo])*(i - lo);}
-function predict(f, q) { return q.tc*exp(f.fams[q.f].ln + f.b*q.x); }
+var predict = (f,q) => q.tc*exp(f.fams[q.f].ln+f.b*q.x);
 
 // Pooled slope, k pseudo-peers per family.
 function fitCurve(pts, k) {
@@ -232,12 +226,11 @@ function fitCurve(pts, k) {
  pts.forEach(q => { all += q.y - b*q.x; });
  all /= pts.length;
  var fams = {};
- FAMILIES.forEach(fd => {
-  var a = pts.filter(q => q.f === fd[0]), s = 0;
-  a.forEach(q => { s += q.y - b*q.x; });
-  var raw = a.length ? s/a.length : all;
-  var shrunk = one ? all : (a.length*raw + k*all)/(a.length + k);
-  fams[fd[0]] = { key: fd[0], label: fd[1], peers: a.length, raw: exp(raw), multiple: exp(shrunk), ln: shrunk };
+ FAMILIES.forEach(([key,label]) => {
+  var a = pts.filter(q => q.f === key), peers = a.length;
+  var raw = peers ? sum(a,q => q.y-b*q.x)/peers : all;
+  var ln = one ? all : (peers*raw + k*all)/(peers + k);
+  fams[key] = {key,label,peers,raw: exp(raw),multiple: exp(ln),ln};
  });
  return { b, all, fams };
 }
@@ -246,7 +239,7 @@ function value(p, fit, asOf, medianAge, haircut) {
  var fam = fit.families[family(p)];
  var growth = growthOf(p);
  var drift = 1 + growth/100, tvl = p.tvl_usd*drift;
- var size = pow(tvl/M.ref_tvl, fit.slope);
+ var size = pow(tvl/REF,fit.slope);
  var fitted = tvl*fam.multiple*size;
  var age = ageDays(asOf, p.listed_at), ageUsed = age ?? medianAge;
  var score = fit.odds.F(p, ageUsed);
@@ -282,9 +275,13 @@ function stressRate(kind) {
  if (kind === 'dex') return 1 - 2*sqrt(1 + rate)/(2 + rate);
  return kind === 'deriv' ? rate*M.farm_days : rate;
 }
+function cashFlow(p, odds, carry = false) {
+ var fixed = p.base.all + (carry ? p.carry : 0), gain = p.drop - p.claim.all;
+ return {net: odds*gain - fixed, threshold: gain > 0 ? fixed/gain : Infinity};
+}
 function farmPlan(p, v, dep, hour, on) {
  var hr = hour ?? M.hour_usd, {target_cover: target,farm_days: days,drop_share: share} = M;
- var { name, category, chains, tvl_usd: tvl } = p, { apr, caution, time_factor: score } = v;
+ var { name, category, chains, tvl_usd: tvl } = p, { apr, caution } = v;
  var main = chains[0], chain = main || 'its main chain';
  chains.slice(0, 3).forEach(c => { if (gas(c) < gas(chain)) chain = c; });
  if (on && chains.includes(on)) chain = on;
@@ -293,102 +290,101 @@ function farmPlan(p, v, dep, hour, on) {
  var mechanism = category === 'Derivatives' ? 'PERP' : /bridge/i.test(category) ? 'BRIDGE' : tag;
  var preflight = act[3] + (mechanism === 'PERP' ? ' and the market is perpetual' : '');
  var asset = /^(Bitcoin|Lightning)/.test(chain) ? 'BTC' : 'USDC';
- var amt = x => '$' + x.toLocaleString('en-US'), tx0 = gas(chain), weeks = round(days/7);
- var day0 = 'Day 0', week = 'Weeks 1-' + weeks, w = WEEKLY[kind], rwa = v.family === 'rwa';
- var fill = (t,n,side) => t.replace(/USDC/g,asset).replace(/\{S\}/g,amt(n)).replace(/\{s\}/g,amt(side)).replace(/\{N\}/g,name).replace(/\{C\}/g,chain);
- function steps(stake, gm) {
-  var tx = tx0*(gm || 1), side = round(stake/4);
+ var amt = x => '$'+x.toLocaleString('en-US'), tx0 = gas(chain), weeks = round(days/7);
+ var day0 = 'Day 0', week = 'Weeks 1-'+weeks, w = WEEKLY[kind], rwa = v.family === 'rwa', verify = 20;
+ var fill = (t,n,s) => t.replace(/USDC|\{[SsNC]\}/g,k => ({
+  USDC:asset,'{S}':amt(n),'{s}':amt(s),'{N}':name,'{C}':chain
+ })[k]);
+ var step = (when,act,min,usd = 0) => ({when,act,min,usd});
+ function steps(stake, gm = 1) {
+  var tx = tx0*gm, side = round(stake/4), put = i => fill(act[i],stake,side);
   return [
-   {act: `Kill test. Confirm ${fill(preflight,stake,side)}. Quote entry, upkeep and exit below ${usd(0.1*earn(stake))} (10% of the modeled drop). If any check fails, stop with $0 spent`,usd: 0,min: 15,when: day0},
-   {act: `Withdraw ${amt(stake+side)} of ${asset} from an exchange straight to a fresh wallet on ${chain}${tx0 < gas(main)?` (cheaper than ${main}, where it also runs)` : ''}; keep only farm funds in it`,
-    usd: 1 + tx, min: 15, when: day0 },
-   { act: fill(act[0], stake, side), usd: 2*tx, min: rwa ? 30 : 10, when: rwa ? 'Days 0-2' : day0 },
-   {act: fill(act[1],stake,side),usd: w ? weeks*(side*w[0] + w[1]*tx) : kind === 'restake' ? 0 : 2*tx,min: w ? weeks*10 : 10,when: w ? week : 'Day 1'},
-   {act: `Once a week for ${weeks} weeks, open the points or rewards page, re-check the position and re-deposit any claimed rewards in one transaction (no new principal)`,usd: weeks*tx,min: weeks*5,when: week},
-   {act: `Unwind: ${act[2]}; do it early if TVL falls below ${usd(tvl*0.75)} (25% under today's ${usd(tvl)}) or the team reports an incident`,usd: 2*tx,min: 15,when: 'Day ' + days},
-   {act: `At launch claim only through the protocol's own app; the model prices it near ${usd(v.fitted)} if launched, so sell the claim if its market cap opens above ${usd(v.cap_high)} (top of its 50% band; the model fits market cap, not FDV)`,usd: 2*tx,min: 15,when: 'At launch'}
+   step(day0,`Withdraw ${amt(stake+side)} ${asset} from an exchange to a fresh farm-only wallet on ${chain}${tx0 < gas(main)?` (cheaper than ${main}, also supported)` : ''}`,15,1+tx),
+   step(rwa?'Days 0-2' : day0,put(0),rwa?30 : 10,2*tx),
+   step(w?week : 'Day 1',put(1),w?weeks*10 : 10,w?weeks*(side*w[0]+w[1]*tx) : kind === 'restake'?0 : 2*tx),
+   step(week,`Weekly for ${weeks} weeks, check rewards and position. Re-deposit claimed rewards in one transaction without adding principal`,weeks*5,weeks*tx),
+   step('Day '+days,`Unwind: ${put(2)}. Exit early below ${usd(tvl*.75)} TVL (25% below ${usd(tvl)}) or on an incident report`,15,2*tx),
+   step('If claim opens',`If eligible, claim via the official app. Sell above ${usd(v.cap_high)} opening market cap (top of the 50% band around ${usd(v.fitted)}). Use market cap rather than FDV`,15,2*tx)
   ];
  }
- function total(st) {
-  var cost = 0, min = 5;
+ function total(st, min = verify) {
+  var cost = 0;
   st.forEach(s => { cost += s.usd; min += s.min; });
   return { cost, min, all: cost + min/60*hr };
  }
- // Tranches: [amount, entry day].
- function tranches(stake) {return kind === 'vault' ? [[stake,0],[round(stake/4),1]] : [[stake,kind === 'rwa' ? 2 : 0]];}
- function earn(stake) { return tranches(stake).reduce((a, [n, d]) => a + n*(days - d), 0)*apr/365; }
- // Bracket the first passing stake.
+ // [Amount, entry day]
+ var tranches = k => kind === 'vault' ? [[k,0],[round(k/4),1]] : [[k,rwa ? 2 : 0]];
+ var earn = k => sum(tranches(k),([n,d]) => n*(days-d))*apr/365;
+ // Bracket first passing stake.
  var cov = k => earn(k)/total(steps(k)).all, cap = k => k + round(k/4), cert = null;
  var stake = dep ? round(dep/1.25) : 20000;
  for (var k = 400; !dep && k <= 20000; k += 400) if (cov(k) >= target) {stake = k; if (k > 400) cert = [cap(k - 400),cov(k - 400),cap(k),cov(k)]; break;}
- var st = steps(stake),{cost,min: minutes,all} = total(st),side = round(stake/4),capital = stake + side,drop = earn(stake);
- var trip = cost - st.at(-1).usd;
- var verdictAt = (c, d = drop) => !caution && d >= target*c ? 'farm' : d >= c ? 'marginal' : 'skip';
- var verdict = verdictAt(all), ratio = drop/all;
- var need = share*target*all/max(drop, 1e-9);
+ var st = steps(stake), {cost,min:minutes,all} = total(st), side = round(stake/4), capital = cap(stake), drop = earn(stake);
+ var base = total(st.slice(0,-1)), claim = total(st.slice(-1),0);
+ var carry = capital*M.carry_rate*days/365, quoteCap = floor(drop*10)/100;
+ var verdictAt = (c,d = drop) => !caution && d >= target*c ? 'farm' : d >= c ? 'marginal' : 'skip';
+ var verdict = verdictAt(all), need = share*target*all/max(drop,1e-9);
  var pay = 0, at = c => cov(round(c/1.25));
  for (var c = 25000, lo = 0; !pay && c <= 1000000; lo = c, c = round(c*1.25)) if (at(c) >= target) {
   for (pay = floor(lo/1000)*1000 + 1000; at(pay) < target;) pay += 1000;
   cert = cert || [pay - 1000, at(pay - 1000), pay, at(pay)];
  }
- var extra = pay ? `it would pay ×${target} at ${amt(pay)} of capital` : `no deposit up to $1M pays ×${target} because its fees grow with the deposit`;
- var beforeTime = caution || verdict === 'farm' ? '' : `; before your time it nets ${drop >= cost?'+' : '−'}${usd(abs(drop-cost))}, and ${extra}`;
- var next = caution ? 'verify depositor eligibility before committing' : verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless a larger user allocation is announced' : 'farm it only with funds already on ' + chain;
- st.unshift({when: 'Before you start',usd: 0,min: 5,act: `Decide: ${caution?`${verdict} — ${caution}. ` : ''}${round(score*100)}% of peers like it record a token, so the score-weighted drop is ${usd(drop*score)} (×${(drop*score/all).toFixed(2)} the costs); if it launches, at ${amt(capital)} the modeled drop of ${usd(drop)} covers the plan's ${usd(all)}` +
-  ` of gas, fees and time ×${ratio.toFixed(2)}; with no reward it loses ${usd(all)}${beforeTime}; it pays ×${target} if at least ${(need*100).toFixed(1)}% of the token goes to depositors (assumed ${share*100}%; at ${share*50}% it pays ×${(ratio/2).toFixed(2)}, at ${share*200}% ×${(ratio*2).toFixed(2)}), so ${next}`});
- if (verdict === 'skip') {
-  st = [st[0],
-   {when: day0,usd: 0,min: 15,act: `Research only, no deposit: check whether ${fill(preflight,stake,side)}`},
-   {when: day0,usd: 0,min: 15,act: `Read ${name}'s docs and announcements for a stated user or depositor allocation; note the share, if any`},
-   {when: day0,usd: 0,min: 5,act: `Write down the trigger that flips this plan: an announced allocation of at least ${(need*100).toFixed(0)}% to depositors, ${pay?`capital of ${amt(pay)} to commit, ` : ''}or TVL below ${usd(tvl*pow(target*all/drop,1/v.slope))} (a deposit's drop grows as TVL^${v.slope.toFixed(2)}, other figures fixed)`},
-   {when: 'Day 30',usd: 0,min: 10,act: `Look again on a new snapshot; if the plan now pays ×${target}${caution?' and rewards are confirmed' : ''}, follow the full plan (${usd(capital)} capital, about ${usd(cost)} in fees, ${mins(round(minutes))} hands-on)`}];
- }
- var carry = capital*M.carry_rate*days/365, [stress, , base] = act[4];
- var fees = [0.5,3].map(m => {var a = total(steps(stake,m)); return [m,a.cost,drop - a.all,verdictAt(a.all)];});
- var shocks = { gas: [fees[0][3], verdictAt(total(steps(stake, 1.5)).all)],
-  hour: [0.5, 1.5].map(m => verdictAt(cost + minutes/60*(hr*m))),
-  share: [verdictAt(all, drop/2), verdictAt(all, drop*1.5)],
-  costs: [0.5, 1.5, 2].map(m => verdictAt(all*m)) };
+ var flip = tvl*pow(target*all/drop,1/v.slope);
+ var odds = cashFlow({base,claim,carry,drop},0,true).threshold;
+ st.unshift(
+  step('Verify · Day 0',`Check official reward rules, dates and share. Confirm ${fill(preflight,stake,side)}. Rehearse the unwind: ${fill(act[2],stake,side)}. Check funds, recovery and wait. Quote both legs ≤$${quoteCap.toFixed(2)} (10% of modeled drop)`,verify),
+  step('Stop','Closed, excluded or cannot exit? Keep funds unmoved. Verify after official changes',0),
+  step('Wait · by Day 30',`${verdict === 'skip'?'Research only. ' : ''}Missing evidence or poor quote/reward? Keep funds unmoved. Recheck on official news or by Day 30. Need ${(100*need).toFixed(1)}% to depositors${need > 1?' (above 100%)' : ''}${pay?` or reprice at ${amt(pay)}` : ''}${v.slope < 0 && isFinite(flip)?`. Recheck below ${usd(flip)} TVL (drop ∝ TVL^${v.slope.toFixed(2)})` : ''}. Reprice if funded on ${chain}`,10),
+  step('Eligible action · route total',`Fund if eligible, open and able to exit. Entry, upkeep and exit under ${usd(.1*drop)} (10% of revised drop). Require drop ≥${target}× fees and time at $${hr}/h. Fees sunk, capital exposed until exit. No claim loses ${usd(base.all)} before carry. With ${usd(carry)} carry, break-even odds ${odds <= 1?(odds*100).toFixed(1)+'%' : 'unreachable'}`,minutes-verify,cost)
+ );
+ var [stress, , exposure] = act[4];
+ var price = m => total(steps(stake,m));
+ var fees = [.5,3].map(m => {var {cost,all} = price(m); return [m,cost,drop-all,verdictAt(all)];});
+ var shifts = [.5,1.5], shocks = {
+  gas: [fees[0][3],verdictAt(price(1.5).all)],
+  hour: shifts.map(m => verdictAt(cost+minutes/60*(hr*m))),
+  share: shifts.map(m => verdictAt(all,drop*m)),
+  costs: [...shifts,2].map(m => verdictAt(all*m))
+ };
  var tr = tranches(stake);
- var loss = { capital, side, stake }[base || 'stake']*stressRate(kind);
+ var loss = { capital, side, stake }[exposure || 'stake']*stressRate(kind);
  var net = drop - all;
- return {mechanism,risk,round_trip: trip,stress,stress_usd: loss,carry,hour: hr,chain,gas: tx0,fees,shocks,stake: capital,eligible: tr.reduce((a,t) => a + t[0],0),tranches: tr,asset,steps: st,cost,minutes,all_in: all,
+ return {mechanism,risk,round_trip: cost-claim.cost,stress,stress_usd: loss,base,claim,carry,quoteCap,hour: hr,chain,gas: tx0,fees,shocks,stake: capital,eligible: tr.reduce((a,t) => a + t[0],0),tranches: tr,asset,steps: st,cost,minutes,all_in: all,
   days, drop, net, net_apr: net/capital*(365/days), need_share: need, pay_cap: pay, cert, verdict };
 }
-// Shocks move FARM counts one way.
 function farmFlips(rows) {
- var base = rows.filter(r => r.plan.verdict === 'farm').length, changes = {};
- Object.entries(rows[0].plan.shocks).forEach(([k, a]) => {
-  changes[k] = a.map((_, i) => rows.filter(r => r.plan.shocks[k][i] === 'farm').length - base);
- });
+ var base = rows.filter(r => r.plan.verdict === 'farm').length;
+ var changes = Object.fromEntries(Object.entries(rows[0].plan.shocks).map(([k,a]) =>
+  [k,a.map((_,i) => rows.filter(r => r.plan.shocks[k][i] === 'farm').length-base)]));
  return { base, changes };
 }
-function stepText(s) {
- // Keep the cost and time suffix.
- var tail = `. Cost: about ${usd(s.usd)}. Time: ${mins(s.min)}.`, head = s.when + ': ' + s.act;
+function stepText({usd:c,min:t,when,act},i) {
+ // Reserve the cost/time tail.
+ var tail = `. Cost: about ${usd(c)}. Time: ${mins(t)}.`;
+ var head = (i >= 4?'Eligible route · ' : '')+when+': '+act;
  var room = 600 - tail.length;
  return (head.length > room ? head.slice(0, room - 3) + '...' : head) + tail;
 }
 
 function build(snap) {
- var fit = calibrate(snap);
- var watch = new Set(snap.watchlist);
- var noToken = snap.protocols.filter(p => !hasToken(p) && p.tvl_usd > 0);
- var words = tokenWords(snap);
- var pre = noToken.filter(p => watch.has(p.slug) || !productOf(p, true));
- var products = noToken.map(p => ({ p, kind: productOf(p, true) })).filter(x => x.kind && !watch.has(x.p.slug))
+ var fit = calibrate(snap), {protocols: ps,as_of: date,floor_usd: floorTvl} = snap;
+ var wl = new Set(snap.watchlist), watched = p => wl.has(p.slug), words = tokenWords(ps);
+ var noToken = ps.filter(p => !hasToken(p) && p.tvl_usd > 0);
+ var pre = noToken.filter(p => watched(p) || !productOf(p,true));
+ var products = noToken.map(p => ({p,kind: productOf(p,true)})).filter(x => x.kind && !watched(x.p))
   .sort((a, b) => b.p.tvl_usd - a.p.tvl_usd || bySlug(a.p, b.p));
- var ages = pre.filter(p => watch.has(p.slug) || !productOf(p)).map(p => ageDays(snap.as_of,p.listed_at)).filter(a => a != null).sort(asc);
- var medianAge = ages.length ? ages[ages.length >> 1] : 365;
+ var ages = pre.filter(p => watched(p) || !productOf(p)).map(p => ageDays(date,p.listed_at)).filter(known).sort(asc);
+ var midAge = median(ages) ?? 365, val = (p,h) => value(p,fit,date,midAge,h);
  var rows = pre.map(p => {
-  var flag = productFlag(p),wordMatch = words[firstWord(p.name)],v = value(p,fit,snap.as_of,medianAge,flag ? M.product_haircut : 1);
+  var flag = productFlag(p),wordMatch = words[firstWord(p.name)],v = val(p,flag ? M.product_haircut : 1);
   if (wordMatch || flag) v.caution = wordMatch ? wordMatch + "'s token may already cover it" : LIQUID.test(p.category) ? 'liquid-staking drop is uncertain' : flag;
-  return {p,v,plan: farmPlan(p,v),watch: watch.has(p.slug),below: p.tvl_usd < snap.floor_usd,wordMatch,flag};
+  return {p,v,plan: farmPlan(p,v),watch: watched(p),below: p.tvl_usd < floorTvl,wordMatch,flag};
  });
  rows.sort((a, b) => b.v.implied - a.v.implied || bySlug(a.p, b.p));
  rows.forEach((r, i) => { r.rank = i + 1; });
- rows.forEach((r, i) => {
-  var up = i && rows[i - 1].v.implied,at = f => value({...r.p,tvl_usd: r.p.tvl_usd*f},fit,snap.as_of,medianAge,r.v.haircut).implied,lo = 1,hi = 2,k;
+ rows.forEach((r,i) => {
+  var {p,v} = r, up = i && rows[i-1].v.implied;
+  var at = f => val({...p,tvl_usd:p.tvl_usd*f},v.haircut).implied, lo = 1, hi = 2, k;
   if (!up) return;
   for (k = 0; k < 12 && at(hi) <= up; k++) { lo = hi; hi *= 2; }
   if (at(hi) <= up) return;
@@ -396,8 +392,8 @@ function build(snap) {
   r.flip = hi;
  });
  var { F, mid, boot } = fit.odds;
- var ALT = {'without momentum': r => r.v.fitted*pow(r.p.tvl_usd/r.v.tvl_next,1 + fit.slope)*F({...r.p,change_7d: 0},r.v.age_used)*r.v.haircut,
-  'score without age': r => r.v.fitted*F(r.p, mid)*r.v.haircut,
+ var ALT = {'without momentum': ({p,v}) => v.fitted*pow(p.tvl_usd/v.tvl_next,1+fit.slope)*F({...p,change_7d:0},v.age_used)*v.haircut,
+  'score without age': ({p,v}) => v.fitted*F(p,mid)*v.haircut,
   'if launched': r => r.v.fitted };
  for (var [k, score] of Object.entries(ALT)) {
   rows.slice().sort((a, b) => score(b) - score(a) || bySlug(a.p, b.p))
@@ -408,8 +404,8 @@ function build(snap) {
  for (var d = 0; d < 40; d++) {
   var bs = fit.points.map(() => fit.points[floor(rnd()*fit.points.length)]),bf = fitCurve(bs,fit.k),Fb = boot(rnd);
   rows.map(r => {
-   var qb = Fb(r.p, r.v.age_used);
-   return {r,s: r.v.tvl_next*exp(bf.fams[r.v.family].ln + bf.b*log(r.v.tvl_next/M.ref_tvl))*qb*r.v.haircut};
+   var {tvl_next: t,family: f,age_used: a,haircut: h} = r.v;
+   return {r,s: t*exp(bf.fams[f].ln + bf.b*log(t/REF))*Fb(r.p,a)*h};
   })
    .sort((a,b) => b.s - a.s || bySlug(a.r.p,b.r.p)).forEach((o,i) => {o.r.draws.push(i + 1); if (i < 20) o.r.boot += 1/40;});
  }
@@ -421,10 +417,10 @@ function build(snap) {
    return { age: a, rank: 1 + rows.filter(o => o !== r && o.v.implied > val).length };
   });
  });
- rows.forEach(r => { r.stable = r.rank <= 20 && Object.keys(r.alt).every(k => r.alt[k] <= 20); });
+ rows.forEach(r => {r.stable = r.rank <= 20 && Object.values(r.alt).every(n => n <= 20);});
  var live = fit.points.map(q => ({p: q.p,tvl: q.tvl,members: q.members,family: q.f,fit: q.fit,loo: round(q.loo),actual: q.mcap}))
   .sort((a, b) => b.actual - a.actual || bySlug(a.p, b.p));
- var listed = snap.protocols.filter(p => hasToken(p) && !trades(p)).length;
+ var listed = ps.filter(p => hasToken(p) && !trades(p)).length;
  var audit = rows.slice(0, 20).map(r => {
   var { p, v } = r, band = fit.bands.find(b => p.tvl_usd >= b.lo && p.tvl_usd < b.hi);
   var exclusion = hasToken(p) ? 'Token recorded' : productOf(p, true);
@@ -447,6 +443,7 @@ function boardRows(radar) {
  });
 }
 
-var api = { use, digest, FAMILIES, farmPlan, farmFlips, stressRate, build, boardRows, usd, mins };
-if (typeof module === 'object' && module.exports) module.exports = api; else root.RadarModel = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this);
+var api = { use, digest, FAMILIES, farmPlan, cashFlow, farmFlips, stressRate, build, boardRows, usd, mins };
+if (typeof module === 'object' && module.exports) module.exports = api;
+else globalThis.RadarModel = api;
+})();
