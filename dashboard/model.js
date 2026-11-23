@@ -331,8 +331,9 @@
    costs: [0.5, 1.5, 2].map(m => verdictAt(all * m)) };
   var tr = tranches(stake);
   var stressUsd = { capital, side, stake }[base || 'stake'] * stressRate(kind);
+  var net = drop - all;
   return { mechanism, risk, round_trip: roundTrip, stress, stress_usd: stressUsd, carry, hour: hr, chain, gas: tx0, fees, shocks, stake: capital, eligible: tr.reduce((a, t) => a + t[0], 0), tranches: tr, asset, steps: st, cost, minutes, all_in: all,
-   days, drop, net: drop - all, need_share: needShare, pay_cap: payCap, cert, verdict };
+   days, drop, net, net_apr: net / capital * (365 / days), need_share: needShare, pay_cap: payCap, cert, verdict };
  }
  // Shocks move FARM counts one way.
  function farmFlips(rows) {
@@ -412,7 +413,7 @@
     farm_steps: pl.steps.map(stepText),
     token_status: 'pre-token', on_watchlist: watch, implied_low_usd: v.low, implied_high_usd: v.high,
     farm: { mechanism, risk, round_trip_usd: +pl.round_trip.toFixed(2), capital_usd: pl.stake,
-     cost_usd: +pl.cost.toFixed(2), minutes, drop_usd: +pl.drop.toFixed(2), stress, stress_usd: +pl.stress_usd.toFixed(2), verdict } };
+     cost_usd: +pl.cost.toFixed(2), minutes, drop_usd: +pl.drop.toFixed(2), net_usd: +pl.net.toFixed(2), net_apr_if_launched: pl.net_apr, days: pl.days, stress, stress_usd: +pl.stress_usd.toFixed(2), verdict } };
   });
  }
 

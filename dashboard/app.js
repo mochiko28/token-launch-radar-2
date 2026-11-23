@@ -71,11 +71,12 @@
 
  const pays = p => p.drop >= cover * p.all_in;
  const sg = x => (x < 0 ? '−' : '+') + usd(abs(x));
+ const netUsd = p => `<b class=${p.net < 0 ? 'down' : 'up'}>${sg(p.net)}</b>`;
  const FIELDS = [['Rank', r => r.rank, -1], ['Protocol', r => r.p.name], ['Family', r => fit.families[r.v.family].label], ['TVL', r => round(r.p.tvl_usd), 0, usd],
   ['7-day change %', r => r.p.change_7d, 0, pct], ['Days tracked', r => r.v.age_used], ['Value if launched', r => round(r.v.fitted), 1, usd],
   ['Token-record score', r => +r.v.time_factor.toFixed(3), 1, x => pc(x)], ['Implied value', r => round(r.v.implied), 1, usd], ['50% band', r => usd(r.v.low) + '–' + usd(r.v.high)], ['Drop APR', r => +r.v.apr.toFixed(4), 1, x => pc(x, 2)], ['Verdict', r => r.plan.verdict], ['Capital', r => r.plan.stake, -1, usd],
   ['Gas & fees', r => +r.plan.cost.toFixed(2), -1, usd], ['Hours', r => +(r.plan.minutes / 60).toFixed(1), -1], ['Modeled drop', r => +r.plan.drop.toFixed(2), 1, usd],
-  ['Net if it launches', r => +r.plan.net.toFixed(2), 1, sg], ['Verdict at 3x gas', r => r.plan.fees[1][3]], ['Stress loss', r => +r.plan.stress_usd.toFixed(2), -1, usd],
+  ['Net if it launches', r => +r.plan.net.toFixed(2), 1, sg], ['Est. net APR if it launches', r => +r.plan.net_apr.toFixed(4), 1, x => pc(x, 2)], ['Verdict at 3x gas', r => r.plan.fees[1][3]], ['Stress loss', r => +r.plan.stress_usd.toFixed(2), -1, usd],
   ['Capital for x2', r => (pays(r.plan) ? r.plan.stake : r.plan.pay_cap || ''), -1, x => (x ? usd(x) : 'none to $1M')]];
  const csv = shown => 'data:text/csv;charset=utf-8,' + encodeURIComponent([FIELDS.map(f => f[0])].concat(shown.map(r => FIELDS.map(f => { const x = f[1](r); return typeof x === 'string' ? '"' + x.replace(/"/g, '""') + '"' : x; }))).join('\n'));
  function compare(a, b) {
@@ -215,7 +216,7 @@ ${tbl('mini tests', ['Score s · held-out Brier', '#Walk-fwd', '#Family out'],
 <td class="val"><span class=bar><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(v.implied)}</b><small>${usd(v.low)}–${usd(v.high)}</small><small class=factors>${usd(v.fitted)} × s ${pc(v.time_factor)}${v.haircut === 1 ? '' : ` × ${v.haircut}`}</small></td>
 <td class=num>${pc(v.time_factor)}</td>
 <td class="num apr">${pc(v.apr, 1)}</td>
-<td class=plan>${verdictTag(pl.verdict)} <span class=pmult>pays ${mult(pl.drop / pl.all_in)}${pays(pl) ? '' : pl.pay_cap ? ` · ×${cover} at ${usd(pl.pay_cap)}` : ` · no deposit pays ×${cover}`}</span><small>${usd(pl.drop)} drop vs ${usd(pl.all_in)} ${pl.verdict === 'skip' ? 'to deposit · $0 research' : `cost · ${usd(pl.stake)} on ${esc(pl.chain)}`}</small><small class="farmcue">${farmBadge(pl)} ${esc(pl.risk)} · ~${usd(pl.round_trip)} round trip</small>${port ? `<small class=up>${sg(weightedNet(r))} score-weighted net</small>` : ''}</td></tr>`;
+<td class=plan>${verdictTag(pl.verdict)} <span class=pmult>pays ${mult(pl.drop / pl.all_in)}${pays(pl) ? '' : pl.pay_cap ? ` · ×${cover} at ${usd(pl.pay_cap)}` : ` · no deposit pays ×${cover}`}</span><small>${netUsd(pl)} net · <span class=num>${pc(pl.net_apr, 2)} est. net APR</span></small><small>${usd(pl.drop)} drop vs ${usd(pl.all_in)} ${pl.verdict === 'skip' ? 'to deposit · $0 research' : `cost · ${usd(pl.stake)} on ${esc(pl.chain)}`}</small><small class="farmcue">${farmBadge(pl)} ${esc(pl.risk)} · ~${usd(pl.round_trip)} round trip</small>${port ? `<small class=up>${sg(weightedNet(r))} score-weighted net</small>` : ''}</td></tr>`;
   }).join('');
   const ctl = `<div class=ctl><section class=filters>
 <label class=search><input id=q type=search value="${esc(st.q)}" placeholder="Name, category, chain" autocomplete="off" aria-label="Search"></label>
@@ -310,6 +311,7 @@ ${sensitivity(st, audit)}${ctl}
  ${kpi(usd(pl.cost), 'Gas &amp; fees')}
  ${kpi(mins(pl.minutes), 'Hands-on')}
  ${kpi(usd(pl.drop), 'Drop if it launches')}
+<div><small>Net if deployed &amp; rewarded</small>${netUsd(pl)} · <b>${pc(pl.net_apr, 2)}</b><small>Est. net APR</small></div>
 <div><small>If it launches</small>${verdictTag(pl.verdict)}</div>
 </div>
 <p class="farmcue">${farmBadge(pl)} <b>${esc(pl.risk)}</b> · ${usd(pl.round_trip)} modeled round trip in gas and activity fees before claim.<br>Stress case: ${esc(pl.stress)} → <b>${usd(pl.stress_usd)}</b> loss (×${(pl.stress_usd / Math.max(pl.drop, 1e-9)).toFixed(1)} modeled drop).</p>
@@ -318,7 +320,7 @@ ${sensitivity(st, null, pl)}
 <ol class=steps>${pl.steps.map(s => `<li><p><em>${esc(s.when)}</em>${esc(s.act)}.</p><span class=cost>${usd(s.usd)}</span><span class=time>${mins(s.min)}</span></li>`).join('')}</ol>
 <div class=math>
 <p><b>Drop APR ${pc(v.apr, 2)} if it launches</b> = ${usd(v.fitted)} × ${share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
-<p>Dollar-days: (${pl.tranches.map(t => `${dollars(t[0])} × ${pl.days - t[1]} d`).join(' + ')}) × ${pc(v.apr, 2)} ÷ 365 = <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${mins(pl.minutes)} at $${pl.hour}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${sg(pl.net)}</b>.</p><p><b>Fees</b> at ${pl.fees.map(([m, cost, net, verdict]) => `${m}× gas ${usd(cost)}, net ${sg(net)} (${verdict})`).join('; ')}.</p><p><b>Carry:</b> ${dollars(pl.stake)} for ${pl.days} days forgoes ${usd(pl.carry)} at ${M.carry_rate * 100}% elsewhere. Net at zero deposit yield ${sg(pl.net - pl.carry)}.</p><p><b>Capital:</b> ${st.dep ? 'your deposit' : pays(pl) ? `least that pays ×${cover} ($500–$25K)` : `$25K cap; no deposit pays ×${cover}`}${pl.cert ? `; break-even certificate: ${dollars(pl.cert[2])} pays ×${pl.cert[3].toFixed(3)}, ${dollars(pl.cert[0])} only ×${pl.cert[1].toFixed(3)}` : ''}.</p>
+<p>Dollar-days: (${pl.tranches.map(t => `${dollars(t[0])} × ${pl.days - t[1]} d`).join(' + ')}) × ${pc(v.apr, 2)} ÷ 365 = <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${mins(pl.minutes)} at $${pl.hour}/h), net ${netUsd(pl)}. Est. net APR = net ÷ funded capital (including reserve) × 365 ÷ ${pl.days} days.</p><p><b>Fees</b> at ${pl.fees.map(([m, cost, net, verdict]) => `${m}× gas ${usd(cost)}, net ${sg(net)} (${verdict})`).join('; ')}.</p><p><b>Carry:</b> ${dollars(pl.stake)} for ${pl.days} days forgoes ${usd(pl.carry)} at ${M.carry_rate * 100}% elsewhere. Net at zero deposit yield ${sg(pl.net - pl.carry)}.</p><p><b>Capital:</b> ${st.dep ? 'your deposit' : pays(pl) ? `least that pays ×${cover} ($500–$25K)` : `$25K cap; no deposit pays ×${cover}`}${pl.cert ? `; break-even certificate: ${dollars(pl.cert[2])} pays ×${pl.cert[3].toFixed(3)}, ${dollars(pl.cert[0])} only ×${pl.cert[1].toFixed(3)}` : ''}.</p>
 </div>
 </section>
 </div>`;
