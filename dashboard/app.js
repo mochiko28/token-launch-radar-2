@@ -141,7 +141,7 @@
   [bRows.every((b) => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every((t) => / Cost: .+ Time: /.test(t))), `${bRows.length}/${bRows.length} plans, every step costed and timed`],
   [B.digest === dig && B.rows === rows.length, `screen = board.json at Auto deposit, digest ${dig}`],
   [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.auc_fam > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base && O.brier.fam < O.brier.fam_base, `score beats base rate held out 3 ways: AUC ${O.auc_loo.toFixed(2)}/${O.auc_wf.toFixed(2)}/${O.auc_fam.toFixed(2)}`],
-  [rows.slice(0, 10).every((r) => r.boot >= 0.8), `ranks 1–${rows.findIndex((r) => r.boot < 1)} top 20 in all 40 refits (fails if a top 10 drops in >20%)`],
+  [rows.slice(0, 10).every((r) => r.boot >= 0.8), `ranks 1–${rows.findIndex((r) => r.boot < 1)} top 20 in all 40 refits`],
   [O.gap < 0.2, `score within ${Math.round(O.gap * 100)} pts of every age cohort`],
   [spotT.ok && sizeT.ok, `value miss ×${flatT.loo.toFixed(2)} flat → ×${sizeT.loo.toFixed(2)} fitted, held out 3 ways`]
  ];
@@ -204,7 +204,7 @@
   </section>
   <section class="hero slim">
    <div class="lead">
-    <h1>${rows.length} pre-token protocols, ranked by token value × token-record score</h1>
+    <h1>${rows.length} pre-token protocols, ranked by token value × token-record score${st.sort === 'rank' ? '' : `<small> · shown by ${{ g: '7-day change', age: 'days tracked', odds: 'score', apr: 'drop APR', plan: 'farm plan' }[st.sort] || st.sort} ${st.dir === 'asc' ? '▲' : '▼'}</small>`}</h1>
     ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link(CLEAR)}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>${ctl}` : `<p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × s</p>
     <p class="checkline ${CHECKS.every((c) => c[0]) ? 'ok' : 'bad'}"><b>${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass</b>, run on load: ${[5, 1, 6, 0].map((i) => CHECKS[i][1]).join(' · ')}${CHECKS.filter((c) => !c[0]).map((c) => ' · ✗ ' + c[1]).join('')} · <a href="${link({ view: 'model' })}">all checks →</a></p>${ctl}`}
    </div>
@@ -266,17 +266,17 @@
    </div>
    <section class="card planc"><h2>Farm plan <span>${pl.days} days on ${esc(pl.chain)}</span></h2>
     <div class="pkpis">
-     <div><small>Capital</small><b>${usd(pl.stake)}</b></div>
+     <div><small>Capital${pl.verdict === 'skip' ? ' if deposited' : ''}</small><b>$${pl.stake.toLocaleString('en-US')}</b></div>
      <div><small>Gas &amp; fees</small><b>${usd(pl.cost)}</b></div>
      <div><small>Hands-on</small><b>${R.mins(pl.minutes)}</b></div>
-     <div><small>Expected drop</small><b>${usd(pl.drop)}</b></div>
+     <div><small>Drop if it launches</small><b>${usd(pl.drop)}</b></div>
      <div><small>If it launches</small>${verdictTag(pl.verdict)}</div>
     </div>
     <div class="steph"><span></span><span>When · what to do</span><span>Cost</span><span>Time</span></div>
     <ol class="steps">${pl.steps.map((s) => `<li><p><em>${esc(s.when)}</em>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>
     <div class="math">
      <p><b>Drop APR ${(v.apr * 100).toFixed(2)}% if it launches</b> = ${usd(v.fitted)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
-     <p>Dollar-days: (${pl.tranches.map((t) => `${usd(t[0])} × ${pl.days - t[1]} d`).join(' + ')}) × ${(v.apr * 100).toFixed(2)}% ÷ 365 = <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${pl.hour}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>.</p><p><b>Stress</b> (${esc(p.category || FAM[v.family])}): ${esc(pl.stress)} would cost about <b>${usd(pl.stress_usd)}</b>, ×${(pl.stress_usd / Math.max(pl.drop, 1e-9)).toFixed(1)} the modeled drop.</p><p><b>Fees</b> at ${pl.fees.map((f) => `${f[0]}× gas ${usd(f[1])}, net ${f[2] < 0 ? '−' : '+'}${usd(Math.abs(f[2]))} (${f[3]})`).join('; ')}.</p><p><b>Carry:</b> ${usd(pl.stake)} locked ${pl.days} days forgoes about ${usd(pl.carry)} at ${M.carry_rate * 100}% elsewhere; the deposit's own yield usually covers it, and if it earns nothing the net is ${pl.net - pl.carry >= 0 ? '+' : '−'}${usd(Math.abs(pl.net - pl.carry))}.</p><p><b>Capital:</b> ${st.dep ? 'your deposit' : pl.verdict === 'farm' ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}.</p>
+     <p>Dollar-days: (${pl.tranches.map((t) => `$${t[0].toLocaleString('en-US')} × ${pl.days - t[1]} d`).join(' + ')}) × ${(v.apr * 100).toFixed(2)}% ÷ 365 = <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${pl.hour}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>.</p><p><b>Stress</b> (${esc(p.category || FAM[v.family])}): ${esc(pl.stress)} would cost about <b>${usd(pl.stress_usd)}</b>, ×${(pl.stress_usd / Math.max(pl.drop, 1e-9)).toFixed(1)} the modeled drop.</p><p><b>Fees</b> at ${pl.fees.map((f) => `${f[0]}× gas ${usd(f[1])}, net ${f[2] < 0 ? '−' : '+'}${usd(Math.abs(f[2]))} (${f[3]})`).join('; ')}.</p><p><b>Carry:</b> $${pl.stake.toLocaleString('en-US')} locked ${pl.days} days forgoes about ${usd(pl.carry)} at ${M.carry_rate * 100}% elsewhere; the deposit's own yield usually covers it, and if it earns nothing the net is ${pl.net - pl.carry >= 0 ? '+' : '−'}${usd(Math.abs(pl.net - pl.carry))}.</p><p><b>Capital:</b> ${st.dep ? 'your deposit' : pl.verdict === 'farm' ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}.</p>
     </div>
    </section>
   </div>`;

@@ -109,7 +109,6 @@
     .concat(fams.map(function (f) { return family(p) === f[0] ? 1 : 0; }));
   };
   var pts = peers.map(function (p) { var a = ageDays(snap.as_of, p.listed_at); return { p: p, a: a, x: X(p, a == null ? mid : a), y: hasToken(p) ? 1 : 0 }; });
-  // Newton steps from w0 (zeros, or the full fit's weights).
   function logit(T, w0, steps) {
    var n = T[0].x.length, w = [], it, i, j, k, t, g, H;
    for (i = 0; i < n; i++) w.push(w0 ? w0[i] : 0);
@@ -138,17 +137,14 @@
     fam: pts.map(function (q) { var f = family(q.p); fw[f] = fw[f] || logit(pts.filter(function (o) { return family(o.p) !== f; }).map(z), w, 4); return { y: q.y, s: dot(fw[f], z(q).x) }; }) };
   }
   var h0 = held([]), wf = h0.wf, lofo = h0.fam, ss = function (q) { return sig(q.s); };
-  // Cohort check: each age cohort's token share against the fitted mean.
   var edges = [0, 180, 365, 730, 1095, 1e9], cohorts = edges.slice(0, 5).map(function (lo, c) {
    var m = pts.filter(function (q) { return q.a != null && q.a >= lo && q.a < edges[c + 1]; }), n = m.length || 1;
    return { from: lo, n: m.length, actual: m.reduce(function (t, q) { return t + q.y; }, 0) / n, fitted: m.reduce(function (t, q) { return t + F(q.p, q.a); }, 0) / n };
   });
-  // Brier score against the base rate, both held out the same way.
   var S = pts.reduce(function (t, q) { return t + q.y; }, 0), n = pts.length, rate = dated.slice(0, cut).reduce(function (t, q) { return t + q.y; }, 0) / cut;
   var bri = function (T, f) { return T.reduce(function (t, q) { return t + Math.pow(f(q) - q.y, 2); }, 0) / T.length; };
   var brier = { loo: bri(loo, ss), loo_base: bri(pts, function (q) { return (S - q.y) / (n - 1); }),
    wf: bri(wf, ss), wf_base: bri(wf, function () { return rate; }) };
-  // A bootstrap refit on resampled peers.
   var boot = function (rnd) { var wb = logit(pts.map(function () { return pts[Math.floor(rnd() * n)]; }), w, 4); return function (p, a) { return sig(dot(wb, X(p, a))); }; };
   brier.fam = bri(lofo, ss);
   brier.fam_base = bri(pts, function (q) { var o = pts.filter(function (z) { return family(z.p) !== family(q.p); }); return o.reduce(function (t, z) { return t + z.y; }, 0) / o.length; });
@@ -242,7 +238,6 @@
   return { b: b, all: all, fams: fams };
  }
 
- /* Implied value of one protocol, every factor kept for the detail view. */
  function value(p, fit, asOf, ageFallback) {
   var fam = fit.families[family(p)];
   var growth = clamp(p.change_7d == null ? 0 : p.change_7d, M.growth_floor, M.growth_cap);
@@ -256,7 +251,7 @@
 
   // Drop APR: drop_share of the value over the season's dollar-days.
   var apr = fitted * M.drop_share / (tvlNext * (Math.min(ageUsed, M.season_days) + M.farm_days)) * 365;
-  return { family: fam.key, growth: growth, growth_imputed: p.change_7d == null,tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
+  return { slope: fit.slope, family: fam.key, growth: growth, growth_imputed: p.change_7d == null,tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
    fitted: Math.round(fitted), age: age, age_used: ageUsed, time_factor: timeF, f0: f0, implied: implied,
    low: Math.round(implied * fit.band_low), high: Math.round(implied * fit.band_high), cap_high: Math.round(fitted * fit.band_high), multiple: implied / p.tvl_usd, apr: apr };
  }
@@ -285,13 +280,13 @@
   if (on && p.chains.indexOf(on) >= 0) chain = on;
   var kind = p.category === 'Prediction Market' ? 'predict' : v.family;
   var asset = /^(Bitcoin|Lightning)/.test(chain) ? 'BTC' : 'USDC';
-  var tx0 = gas(chain), weeks = Math.round(M.farm_days / 7);
+  var amt = function (x) { return '$' + x.toLocaleString('en-US'); }, tx0 = gas(chain), weeks = Math.round(M.farm_days / 7);
   function steps(stake, gm) {
    var tx = tx0 * (gm || 1), side = Math.round(stake / 4), act = ACT[kind];
-   var fill = function (t) { return t.replace(/USDC/g, asset).replace(/\{S\}/g, usd(stake)).replace(/\{s\}/g, usd(side)).replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain); };
+   var fill = function (t) { return t.replace(/USDC/g, asset).replace(/\{S\}/g, amt(stake)).replace(/\{s\}/g, amt(side)).replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain); };
    return [
     { act: 'Kill test, go on only if all hold: ' + fill(act[3]) + '; and a deposit-and-withdraw quote totals under ' + usd(0.1 * earn(stake)) + ' (10% of the modeled drop). If any fails, stop with $0 spent', usd: 0, min: 15, when: 'Day 0' },
-    { act: 'Withdraw ' + usd(stake + side) + ' of ' + asset + ' from an exchange straight to a fresh wallet on ' + chain + (gas(chain) < gas(main[0]) ? ' (cheaper than ' + main[0] + ', where it also runs)' : '') + '; keep only farm funds in it',
+    { act: 'Withdraw ' + amt(stake + side) + ' of ' + asset + ' from an exchange straight to a fresh wallet on ' + chain + (gas(chain) < gas(main[0]) ? ' (cheaper than ' + main[0] + ', where it also runs)' : '') + '; keep only farm funds in it',
      usd: 1 + tx, min: 15, when: 'Day 0' },
     { act: fill(act[0]), usd: 2 * tx, min: v.family === 'rwa' ? 30 : 10, when: v.family === 'rwa' ? 'Days 0-2' : 'Day 0' },
     { act: fill(act[1]), usd: WEEKLY[kind] ? weeks * (side * WEEKLY[kind][0] + WEEKLY[kind][1] * tx) : 2 * tx, min: kind in WEEKLY ? weeks * 10 : 10, when: kind in WEEKLY ? 'Weeks 1-' + weeks : 'Day 1' },
@@ -305,7 +300,6 @@
   function tranches(stake) { return kind === 'vault' ? [[stake, 0], [Math.round(stake / 4), 1]] : [[stake, kind === 'rwa' ? 2 : 0]]; }
   function eligible(stake) { return tranches(stake).reduce(function (a, t) { return a + t[0]; }, 0); }
   function earn(stake) { return tranches(stake).reduce(function (a, t) { return a + t[0] * (M.farm_days - t[1]); }, 0) * v.apr / 365; }
-  // Auto: the least deposit ($500 steps, to $25K) that pays target_cover.
   var stake = dep ? Math.round(dep / 1.25) : 20000;
   for (var k = 400; !dep && k <= 20000; k += 400) {
    if (earn(k) >= M.target_cover * total(steps(k)).all) { stake = k; break; }
@@ -319,18 +313,16 @@
   for (var c = 25000; !payCap && c <= 1000000; c = Math.round(c * 1.25)) {
    var kk = Math.round(c / 1.25); if (earn(kk) >= M.target_cover * total(steps(kk)).all) payCap = Math.ceil(c / 1000) * 1000;
   }
-  st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: ' + Math.round(v.time_factor * 100) + '% of peers like it record a token, so the score-weighted drop is ' + usd(drop * v.time_factor) + ' (×' + (drop * v.time_factor / t.all).toFixed(2) + ' the costs); if it launches, at ' + usd(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
+  st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: ' + Math.round(v.time_factor * 100) + '% of peers like it record a token, so the score-weighted drop is ' + usd(drop * v.time_factor) + ' (×' + (drop * v.time_factor / t.all).toFixed(2) + ' the costs); if it launches, at ' + amt(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
    ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + (verdict === 'farm' ? '' : '; before your time it nets ' + (drop >= t.cost ? '+' : '−') + usd(Math.abs(drop - t.cost)) + ', and ' + (payCap ? 'it would pay ×' + M.target_cover + ' at about ' + usd(payCap) + ' of capital' : 'no deposit up to $1M pays ×' + M.target_cover + ' because its fees grow with the deposit')) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
    '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%; at 5% it pays ×' + (drop / t.all / 2).toFixed(2) + ', at 20% ×' + (drop / t.all * 2).toFixed(2) + '), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
-  // Below ×1: a $0 research plan.
   if (verdict === 'skip') {
    st = [st[0],
     { when: 'Day 0', usd: 0, min: 15, act: 'Research only, no deposit: check whether ' + ACT[kind][3].replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain) },
     { when: 'Day 0', usd: 0, min: 15, act: 'Read ' + p.name + '\'s docs and announcements for a stated user or depositor allocation; note the share, if any' },
-    { when: 'Day 0', usd: 0, min: 5, act: 'Write down the trigger that flips this plan: an announced allocation of at least ' + (needShare * 100).toFixed(0) + '% to depositors, ' + (payCap ? 'capital of about ' + usd(payCap) + ' to commit, ' : '') + 'or TVL falling below ' + usd(p.tvl_usd * 0.5) + ' with no change in odds (a smaller pool to share)' },
+    { when: 'Day 0', usd: 0, min: 5, act: 'Write down the trigger that flips this plan: an announced allocation of at least ' + (needShare * 100).toFixed(0) + '% to depositors, ' + (payCap ? 'capital of about ' + usd(payCap) + ' to commit, ' : '') + 'or TVL below ' + usd(p.tvl_usd * Math.pow(M.target_cover * t.all / drop, 1 / v.slope)) + ' (a deposit\'s drop grows as TVL^' + v.slope.toFixed(2) + ', other figures fixed)' },
     { when: 'Day 30', usd: 0, min: 10, act: 'Look again on a new snapshot; if the plan now pays ×' + M.target_cover + ', follow the full plan (' + usd(capital) + ' capital, about ' + usd(t.cost) + ' in fees, ' + mins(Math.round(t.min)) + ' hands-on)' }];
   }
-  // Capital carry at carry_rate: shown, not charged.
   var carry = capital * M.carry_rate * M.farm_days / 365, stress = ACT[kind][4];
   return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map(function (m) { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, drop >= M.target_cover * a.all ? 'farm' : drop >= a.all ? 'marginal' : 'skip']; }), stake: capital, eligible: eligible(stake), tranches: tranches(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
    days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, verdict: verdict };
@@ -375,7 +367,6 @@
    })
     .sort(function (a, b) { return b.s - a.s || bySlug(a.r.p, b.r.p); }).forEach(function (o, i) { o.r.draws.push(i + 1); if (i < 20) o.r.boot += 1 / 40; });
   }
-  // 80% rank range: 5th lowest to 5th highest rank.
   rows.forEach(function (r) { var d = r.draws.sort(function (a, b) { return a - b; }); r.rlo = d[4]; r.rhi = d[35]; delete r.draws; });
   // Imputed ages: rank re-taken at the 25th and 75th percentile of observed ages.
   var q = function (t) { return ages[Math.floor((ages.length - 1) * t)]; };
