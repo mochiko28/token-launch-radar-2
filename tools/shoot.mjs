@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 
 const width = 1440;
 const height = 980;
+const detailHeight = 1080;
 const minimum = 300 * 1024;
 const maximum = 350_000;
 
@@ -151,19 +152,28 @@ function encodeJpeg(png, work, candidates = []) {
 
 const shots = [
   { name: "1-board.jpg", hash: "#board" },
-  { name: "2-detail.jpg", hash: "#detail/upshift" },
+  { name: "2-detail.jpg", hash: "#detail/upshift", viewHeight: detailHeight },
   { name: "3-filtered.jpg", hash: "#board?scope=watchlist&verdict=FARM" }
 ];
+const pages = [...shots, { name: "calibration", hash: "#calibration", probeOnly: true }];
 
 function readPage() {
   const read = selector => document.querySelector(selector)?.textContent.trim();
   const rows = [...document.querySelectorAll("tr[data-slug]")];
   const watchlist = new Set(globalThis.LaunchRadarData.snapshot.watchlist);
+  const visible = selector => {
+    const box = document.querySelector(selector)?.getBoundingClientRect();
+    return Boolean(box && box.height && box.top >= 0 && box.bottom <= innerHeight && box.right <= innerWidth);
+  };
   return {
     checks: read("#checks"), title: read("h1"), count: read("#row-count"), first: read("tbody tr th a"),
     portfolio: read(".portfolio h2"), verdict: read(".plan-panel .badge"),
     positions: document.querySelectorAll(".positions > div").length,
     steps: [...document.querySelectorAll(".plan-steps p")].map(step => step.textContent),
+    depositVisible: visible(".plan-steps li:nth-child(3) p"),
+    attribution: read(".attribution"), attributionVisible: visible(".attribution"),
+    peersVisible: visible(".detail-aside section:last-child"),
+    curve: read(".curve"), heldOut: read(".misses"),
     stress: read(".detail-aside .facts"), rowCheck: read("#row-check"),
     rowPass: document.querySelector("#row-check")?.dataset.pass,
     chart: read(".chart-note"), scope: document.querySelector("#filter-scope")?.value,
@@ -222,14 +232,14 @@ async function shootBidi(url, work, port, verify) {
     await call("session.new", { capabilities: {} });
     await call("session.subscribe", { events: ["log.entryAdded"] });
     const { context } = await call("browsingContext.create", { type: "tab" });
-    await call("browsingContext.setViewport", { context, viewport: { width, height }, devicePixelRatio: 1 });
     async function evaluate(expression) {
       const answer = await call("script.evaluate", { expression, target: { context }, awaitPromise: true });
       if (answer.type === "exception") throw new Error(answer.exceptionDetails.text);
       return JSON.parse(answer.result.value);
     }
     const images = [];
-    for (const { name, hash } of shots) {
+    for (const { name, hash, probeOnly, viewHeight = height } of pages) {
+      await call("browsingContext.setViewport", { context, viewport: { width, height: viewHeight }, devicePixelRatio: 1 });
       await call("browsingContext.navigate", { context, url: url + hash, wait: "complete" });
       const info = await evaluate(`(async () => {
         document.documentElement.style.scrollbarWidth = "none";
@@ -239,7 +249,7 @@ async function shootBidi(url, work, port, verify) {
       })()`);
       if (errors.length) throw new Error(errors.join("\n"));
       verify(name, info);
-      images.push({ name, info, ...await captureJpeg(call, context, work) });
+      if (!probeOnly) images.push({ name, info, ...await captureJpeg(call, context, work) });
     }
     await call("session.end", {});
     if (errors.length) throw new Error(errors.join("\n"));
@@ -278,9 +288,9 @@ async function shootCli(output, work, verify) {
   writeFileSync(join(dashboard, "capture-probe.js"), `${readPage}\n(${installProbe})();\n`);
   const url = pathToFileURL(page).href;
   const images = [];
-  for (const { name, hash } of shots) {
+  for (const { name, hash, probeOnly, viewHeight = height } of pages) {
     const png = join(work, name + ".png");
-    const browser = startFirefox(work, ["--window-size", `${width},${height}`, "--screenshot", png, url + hash],
+    const browser = startFirefox(work, ["--window-size", `${width},${viewHeight}`, "--screenshot", png, url + hash],
       'user_pref("browser.dom.window.dump.enabled", true);\n');
     try {
       for (let attempt = 0; attempt < 150; attempt++) {
@@ -296,7 +306,7 @@ async function shootCli(output, work, verify) {
       if (!result || !existsSync(png)) throw new Error(`Firefox did not return diagnostics and a PNG for ${name}.\n${browser.output.stderr}`);
       const info = JSON.parse(result[1]);
       verify(name, info);
-      images.push({ name, info, ...encodeJpeg(png, work) });
+      if (!probeOnly) images.push({ name, info, ...encodeJpeg(png, work) });
     } finally {
       await browser.stop();
     }
@@ -320,7 +330,7 @@ async function shoot(output, destination) {
     const verify = (name, info) => {
       const check = /^(\d+)\/(\d+) self-checks pass$/.exec(info.checks);
       if (!check || check[1] !== check[2] || Number(check[1]) === 0) throw new Error(`${name}: ${info.checks}`);
-      if (info.width !== width || info.height !== height || info.dpr !== 1) {
+      if (info.width !== width || info.height !== (name === "2-detail.jpg" ? detailHeight : height) || info.dpr !== 1) {
         throw new Error(`Unexpected Firefox viewport ${info.width}×${info.height} at DPR ${info.dpr}.`);
       }
       if (info.scrollbar) throw new Error(`${name}: page scrollbar occupies ${info.scrollbar}px`);
@@ -335,12 +345,20 @@ async function shoot(output, destination) {
       if (info.rows.length && (info.rowPass !== "true" || !info.rowCheck.startsWith(`${info.rows.length}/${info.rows.length} rows match board.json`))) {
         throw new Error(`${name}: ${info.rowCheck}`);
       }
+      if (["1-board.jpg", "calibration"].includes(name) && (!/carried TVL.*n=\d+/.test(info.curve)
+        || !["Leave-one-out", "Walk-forward", "Family hold-out"].every(label => info.heldOut?.includes(label)))) {
+        throw new Error(`${name}: calibration summary is incomplete.`);
+      }
       if (name === "1-board.jpg" && (info.rows.length !== board.length || !info.chart)) throw new Error("The full board did not render.");
       if (name === "2-detail.jpg" && (info.verdict !== "FARM" || info.steps.length < 3
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
         || !info.steps[0].includes("deposit caps") || !info.steps.some(step => step.startsWith("Exit if TVL"))
+        || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps)
+        || !info.attributionVisible || !info.depositVisible || !info.peersVisible
+        || !["TVL size", "7d carry", "Age on odds", "Issuer"].every(label => info.attribution?.includes(label))
+        || !/^Deposit \$[\d,]+ USDC .*Max gas \+ slippage \$[\d.]+ \([\d.]+% of capital\)\. Abort/.test(info.steps[2])
         || !info.stress?.includes("depositor share"))) {
-        throw new Error("The detail route must show a farm plan, eligibility and resized stress.");
+        throw new Error("The detail route must show board-matched farm steps, attribution, deposit limits and resized stress.");
       }
       if (name === "3-filtered.jpg" && (!info.portfolio || info.positions < 3 || info.scope !== "watchlist" || info.filter !== "FARM"
         || !info.rows.length || info.rows.some(row => row[6] !== "FARM" || !row[7]))) {
@@ -351,12 +369,13 @@ async function shoot(output, destination) {
     mkdirSync(destination, { recursive: true });
     for (const { name, info, bytes, encoder } of images) {
       const dimensions = jpegSize(bytes);
-      if (dimensions[0] !== width || dimensions[1] !== height) throw new Error("Unexpected screenshot dimensions.");
+      if (dimensions[0] !== width || dimensions[1] !== info.height) throw new Error("Unexpected screenshot dimensions.");
       writeFileSync(join(destination, name), bytes);
       const content = [info.title, info.count, info.rowCheck, info.first, info.chart, info.verdict, info.portfolio].filter(Boolean).join(" · ");
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
     }
     console.log("Firefox reported no console errors or uncaught exceptions.");
+    console.log("Calibration route and detail attribution, deposit visibility and board-matched steps pass.");
   } finally {
     spawnSync("find", [work, "-mindepth", "1", "-delete"]);
     rmdirSync(work);

@@ -161,10 +161,10 @@ function report(output, input) {
   const { fit, validation } = model.value;
   const curve = fit.names.map((name, i) => `${name}=${fit.coefficients[i].toFixed(6)}`).join(", ");
   console.log(`Log market-cap fit (${valueFit} tokens, TVL divided by $100M): ${curve}`);
-  for (const [key, label] of [["loo", "LOO"], ["walk", "Walk-forward"]]) {
+  for (const [key, label] of [["loo", "LOO"], ["walk", "Walk-forward"], ["family", "Family hold-out"]]) {
     console.log(`${label} median miss ${validation.selected[key].miss.toFixed(3)}x vs ${validation.baseline[key].miss.toFixed(3)}x flat (n=${validation.selected[key].n})`);
     const result = model.odds.validation[key];
-    console.log(`${label} token odds AUC ${result.auc.toFixed(3)} (n=${result.n} of ${oddsFit})`);
+    if (result) console.log(`${label} token odds AUC ${result.auc.toFixed(3)} (n=${result.n} of ${oddsFit})`);
   }
   console.log("Token odds are the logistic probability of a snapshot token record given TVL and listing age. The snapshot has no launch dates.");
   console.log(Object.entries(model.verdicts).map(([name, n]) => `${name} ${n}`).join(" | "));
