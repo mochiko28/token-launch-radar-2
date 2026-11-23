@@ -48,8 +48,10 @@ function compactDashboard(dir: string) {
     const path = join(dir, file);
     writeFileSync(path, format(readFileSync(path, "utf8")));
   };
-  // Preserve JavaScript line breaks for automatic semicolon insertion.
-  for (const file of ["app.js", "model.js"]) write(file, source => source.replace(/^\t+|\n(?=\n)/gm, ""));
+  // Keep statement boundaries and the unindented template data intact.
+  for (const file of ["app.js", "model.js"]) write(file, source => source
+    .replace(/(?<=[({[,]|=>)\n\t+|\n\t*(?=[\]})])/g, "")
+    .replace(/^\t+|\n(?=\n)/gm, ""));
   write("style.css", source => source.replace(/(?<=[{};])\n\t*(?=\S)/g, ""));
   write("index.html", source => source.replace(/(?<=>)\n(?=<)/g, ""));
 }

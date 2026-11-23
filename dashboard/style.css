@@ -17,7 +17,7 @@ h2{font-size:1.14rem;line-height:1.25}
 body>header{background:var(--ink);color:var(--sheet);border-bottom:2px solid var(--signal)}
 .chip,.panel,dialog,.dialog-top{background:var(--sheet)}
 .brand,.mast,.bar,.dialog-top,.portfolio,.equation{display:flex;align-items:center}
-.intro,.readings,.legend,.positions,.flows,.integrity,dl,nav{display:flex}
+.intro,.readings,.legend,.positions,.integrity,dl,nav{display:flex}
 .mast{min-height:56px;gap:32px}
 .brand{gap:8px;font-weight:700}
 .brand span,[aria-current]{color:var(--signal)}
@@ -28,7 +28,7 @@ nav{gap:24px;margin-right:auto}
 .btn{padding:4px 12px;background:var(--signal);color:var(--ink)}
 #checks,.rank,.kicker,footer{font:.76rem monospace}
 small,dt,.curve,footer{color:var(--dim)}
-.intro,.bar,.dialog-top,.metrics{justify-content:space-between}
+.intro,.bar,.dialog-top{justify-content:space-between}
 .integrity,.readings,.portfolio,.positions,.drivers dl{flex-wrap:wrap}
 .intro{align-items:end;margin:12px 0 24px}
 .integrity{gap:2px;margin:-17px 0 8px}
@@ -44,7 +44,7 @@ small,dt,.curve,footer{color:var(--dim)}
 :not(strong)>small,.readings span,svg,.back{display:block}
 .misses strong{font-size:1.4rem}
 small,dt,.curve,.drivers,.rail,.portfolio p,.hint,.back,.kpi{font-size:.8rem}
-.valuation,.portfolio,.metrics,.steps small,thead,.rank{background:var(--wash)}
+.valuation,.portfolio,.decision,.steps small,thead,.rank{background:var(--wash)}
 .board,.detail,.research{align-items:start}
 .board{grid:auto/1fr 310px}
 .rail,.detail>div,.legend,.equation{gap:12px}
@@ -98,17 +98,18 @@ circle{fill:var(--mark)}
 .plans b{float:right}
 .pay{padding-top:8px}
 .portfolio{gap:12px 24px;margin-bottom:16px}
-.positions,.positions>div,.flows>div{flex:1}
-.detail{grid:auto/6fr 5fr}
+.positions,.positions>div{flex:1}
+.detail{grid:auto/5fr 6fr}
+.decision{border-left:3px solid var(--signal);padding:8px;margin:4px 0}
 .detail>div{min-width:0}
-.metrics,.flows,.steps li,.filters{gap:8px}
-.metrics{padding:8px}
+.steps li,.filters{gap:8px}
 .steps{list-style:none;margin:6px 0 0;padding:0}
 .steps li{grid:auto/7fr 3fr}
 .steps small{align-self:center;padding:4px 6px}
 .detail h3,.steps p,.quote p,.facts,.kpi h2,.exits,.range-net{font-size:.85rem}
+.quote .decision p{font-size:1rem}
 .exits{margin:0;padding-left:1.25em}
-.half-q,.quotes,.metrics,.pay,.equation{margin-block:8px}
+.half-q,.quotes,.pay,.equation{margin-block:8px}
 .quotes{grid:auto/repeat(auto-fit,minmax(80px,1fr));gap:6px}
 .amount{font-size:2.8rem}
 .drivers,.band,.steps li{padding:4px 0}
@@ -125,6 +126,5 @@ dialog{margin:0 0 0 auto;height:100%;max-height:none;width:min(640px,100%);borde
 	.kpis,.filters{grid:auto/1fr 1fr}
 	.filters label:first-child{grid-column:span 2}
 	.detail,.research{grid:auto/1fr}
-	.metrics{flex-wrap:wrap}
 }
 @media(max-width:500px){.kpis,.rail,.steps li{grid:auto/1fr}}

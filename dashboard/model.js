@@ -128,6 +128,7 @@ const hasToken=p=>p.mcap_usd>0||!!(p.gecko_id||p.symbol),
 	costUsd=n=>"$"+n.toFixed(2),
 	integer=n=>round(n).toLocaleString("en-US"),whole=n=>"$"+integer(n)
 const pct=(n,places=2)=>(n*100).toFixed(places)+"%",
+	decisionQ=q=>pct(q,5),decisionUsd=n=>Number(n.toFixed(2)),
 	oddsFactor=n=>n===null?"unreachable":"x"+n.toFixed(2),
 	wage=min=>min*A.hourlyUsd/60,
 	weeks=days=>floor(days/7),
@@ -543,6 +544,11 @@ function selfChecks({rows:rs,board,counts,stress,portfolio,reference,calibration
 				&&close(noToken,-loss)&&close(withToken,payoff-loss)
 				&&close(net,(1-q)*noToken+q*withToken)
 				&&(payoff<=0?pStar===null:close(pStar,loss/payoff))
+		}),
+		"displayed decision net":plans.every(({q,withToken,noToken,net})=>{
+			const odds=parseFloat(decisionQ(q))/100,
+				expected=odds*decisionUsd(withToken)+(1-odds)*decisionUsd(noToken)
+			return abs(expected-net)<=.01&&abs(expected-decisionUsd(net))<=.01
 		}),
 		"Break-even":samples.length>=3&&[0,floor(samples.length/2),-1].every(i=>{
 			const p=samples.at(i),{odds:q,dropRatio:share}=p.pay.targets[0]

@@ -153,11 +153,14 @@ function encodeJpeg(png, work, candidates = []) {
 }
 
 const shots = [
-  { name: "1-board.jpg", hash: "#board" },
+  { name: "1-board.jpg", hash: "#board", viewHeight: 1050 },
   { name: "2-detail.jpg", hash: "#detail/upshift", viewHeight: detailHeight },
   { name: "3-filtered.jpg", hash: "#board?scope=watchlist&verdict=SKIP" }
 ];
-const pages = [...shots, { name: "calibration", hash: "#calibration", probeOnly: true }];
+const pages = [...shots,
+  { name: "mezzanine", hash: "#detail/mezzanine", viewHeight: detailHeight, probeOnly: true },
+  { name: "calibration", hash: "#calibration", probeOnly: true }
+];
 
 function readPage() {
   const read = selector => document.querySelector(selector)?.textContent.trim();
@@ -185,6 +188,7 @@ function readPage() {
     return Boolean(box && box.height && box.top >= 0 && box.bottom <= innerHeight && box.right <= innerWidth);
   };
   const form = document.querySelector("#quote");
+  const decision = () => [...document.querySelectorAll(".decision p")].map(p => p.textContent.trim());
   const halfOdds = () => read(".half-q");
   let quotePass, defaultHalfOdds;
   if (form) {
@@ -194,22 +198,25 @@ function readPage() {
     const horizon = form.elements.horizon;
     const defaulted = () => inputs.every(input => input.nextElementSibling.textContent === "Default");
     const fieldsValid = inputs.map(input => input.name).join() === "entryGas,exitGas,slippage,delay,lockup";
-    quotePass = fieldsValid && defaulted() && initial.includes("No token") && initial.includes("Break-even p*")
+    quotePass = fieldsValid && defaulted() && initial.includes("No token") && initial.includes("Needs q ≥ p*")
       && horizon?.value === "0" && [...horizon.options].map(option => option.value).join() === "0,30,90,180,365"
       && visible("#quote select");
     if (quotePass) {
       const update = control => control.dispatchEvent(new Event("input", { bubbles: true }));
-      const metrics = () => Object.fromEntries([...document.querySelectorAll("#quote-result dt")]
-        .map(node => [node.textContent, node.nextElementSibling.textContent]));
-      const amount = value => Number(value.replace("−", "-").replace(/[^\d.-]/g, ""));
+      const metrics = () => {
+        const lines = decision();
+        const [, , , carry, threshold, expected] = lines;
+        const net = Number(expected.split(" = ")[0].replace("−", "-").replace(/[^\d.-]/g, ""));
+        const [, pStar, q, verdict] = /^Needs q ≥ p\* = ([\d.]+%); model q = ([\d.]+%) → (\w+)$/.exec(threshold) ?? [];
+        return { carry, pStar, q, verdict, net };
+      };
       const select = h => { horizon.value = h; update(horizon); };
       const best = [...horizon.options].slice(1).map(option => {
         select(option.value);
         const result = metrics();
-        quotePass &&= Boolean(result[`Launch within ${option.value} d (q)`])
-          && read("#quote-result").includes(`${option.value}d at`);
+        quotePass &&= Boolean(result.q) && result.carry.endsWith(`for ${option.value} d`);
         return result;
-      }).sort((a, b) => amount(b["Expected net"]) - amount(a["Expected net"]))[0];
+      }).sort((a, b) => b.net - a.net)[0];
       select(0);
       quotePass &&= read("#quote-result") === initial && JSON.stringify(metrics()) === JSON.stringify(best);
       const values = [10000, 7, 1, 12, 45];
@@ -218,10 +225,8 @@ function readPage() {
       inputs.forEach((input, i) => { input.value = values[i]; });
       update(inputs[0]);
       const after = metrics();
-      quotePass &&= after["Break-even p*"] !== before["Break-even p*"]
-        && after["Launch within 30 d (q)"] === before["Launch within 30 d (q)"]
-        && after["Expected net"] !== before["Expected net"] && after["Quote verdict"] === "SKIP"
-        && read("#quote-result").includes("57d at")
+      quotePass &&= after.pStar !== before.pStar && after.q === before.q
+        && after.net !== before.net && after.verdict === "SKIP" && after.carry.endsWith("for 57 d")
         && /^Quoted gas on .+ = \$/.test(read(".gas"))
         && halfOdds() !== defaultHalfOdds && halfOdds().includes("SKIP")
         && inputs.every(input => input.nextElementSibling.textContent === "Quoted");
@@ -268,7 +273,8 @@ function readPage() {
     checks: read("#checks"), checksPass: document.querySelector("#checks")?.dataset.pass,
     integrity, integrityPass, integrityLines, integrityWidth, helpPass, title: read("h1"), count: read("#shown"), first: read("tbody tr th a"),
     portfolio: read(".portfolio"),
-    summary: read(".verdict"), defaultHalfOdds,
+    summary: read(".route"), defaultHalfOdds,
+    decision: decision(), decisionVisible: visible(".decision"),
     coverage: read(".coverage"), nested: read(".nested"),
     valueRange: read(".value-range"), rangeFarm: read(".range-net"),
     oddsNote: read(".pay + p"), pay: read(".pay"), payVisible: visible(".pay"),
@@ -276,6 +282,8 @@ function readPage() {
     farmLinks: [...document.querySelectorAll(".plans a")].map(a => a.getAttribute("href")),
     farmBadges: [...document.querySelectorAll(".plans .badge")].map(chip => chip.textContent),
     farmActions: [...document.querySelectorAll(".plans .action")].map(hint => hint.textContent),
+    farmOutcomes: [...document.querySelectorAll(".plans .outcomes")].map(line => line.textContent),
+    oddsInline: rows.every(row => !row.querySelector(".skip") || /\S\u00a0q$/.test(row.cells[8].querySelector("small").textContent)),
     positions: document.querySelectorAll(".positions > div").length,
     labels, steps,
     gas: document.querySelector(".gas")?.innerText.replace("\n", " · "), gasVisible: visible(".gas"),
@@ -284,7 +292,7 @@ function readPage() {
     planVisible: visible(".steps"),
     quoteVisible: visible(".quote"), quotePass,
     attribution: read(".drivers"), attributionVisible: visible(".drivers"),
-    peersVisible: visible(".detail > :last-child > :last-child"),
+    peersVisible: visible(".peers"),
     curve: read(".curve"), heldOut: read(".misses"), timing: read(".research") && read("#view .inset p"),
     capMisses: [...document.querySelectorAll(".misses strong")].map(node => node.textContent),
     oddsMisses: read(".odds-misses")?.match(/[\d.]+×/g),
@@ -292,7 +300,7 @@ function readPage() {
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     assumptions: read("#assumptions .drawer ul"),
     assumptionTables: [...document.querySelectorAll("#assumptions table")].map(table => table.textContent),
-    stress: read(".detail .facts"), stressVisible: visible(".detail .facts"), rowCheck: chips[0]?.textContent,
+    stress: read(".stress .facts"), stressVisible: visible(".stress"), rowCheck: chips[0]?.textContent,
     rowPass: chips[0]?.dataset.pass,
     chart: read("#yield p"), chartVisible: visible("#yield svg"), labelsFit,
     chartBounds: [plotBox, ...boxes].map(box => box?.toJSON()),
@@ -443,7 +451,7 @@ async function shoot(output, destination) {
   const url = pathToFileURL(join(output, "dashboard", "index.html")).href;
   const data = readFileSync(join(output, "data.js"), "utf8").trim();
   const { snapshot } = JSON.parse(data.slice("globalThis.LaunchRadarData = ".length, -1));
-  const { value, odds, rows } = api.buildModel(snapshot);
+  const { value, odds, rows, assumptions } = api.buildModel(snapshot);
   const upshift = rows.find(row => row.slug === "upshift");
   const { exits: rawExits, gas, chain, cost, transactions } = upshift.plan;
   const exits = rawExits.map(displaySigns);
@@ -462,6 +470,10 @@ async function shoot(output, destination) {
     }
   }
   const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format;
+  const signedMoney = value => {
+    const rounded = Number(value.toFixed(2));
+    return (rounded > 0 ? "+" : "") + displaySigns(money(rounded));
+  };
   const gasLine = `${transactions} tx x ${money(chain.gas)} on ${chain.name} = ${money(gas)} · ${(100 * (gas / cost)).toFixed(1)}% of all-in cost`;
   const { selected, baseline, evidence, search } = value.validation;
   const termRows = [...evidence, ...odds.evidence,
@@ -487,7 +499,8 @@ async function shoot(output, destination) {
       if (["1-board.jpg", "3-filtered.jpg"].includes(name) && (!info.integrityPass || !info.helpPass)) {
         throw new Error(`${name}: integrity strip or explanation failed (${info.integrityLines} lines, widths ${info.integrityWidth}, help ${info.helpPass}): ${info.integrity.join(" · ")}`);
       }
-      if (info.width !== width || info.height !== (name === "2-detail.jpg" ? detailHeight : height) || info.dpr !== 1) {
+      const page = pages.find(page => page.name === name);
+      if (info.width !== width || info.height !== (page.viewHeight ?? height) || info.dpr !== 1) {
         throw new Error(`Unexpected Firefox viewport ${info.width}×${info.height} at DPR ${info.dpr}.`);
       }
       if (info.scrollbar) throw new Error(`${name}: page scrollbar occupies ${info.scrollbar}px`);
@@ -504,6 +517,7 @@ async function shoot(output, destination) {
       }
       if (info.rows.length) {
         if (!info.rangesInline) throw new Error(`${name}: implied-value range moved off the figure's line`);
+        if (!info.oddsInline) throw new Error(`${name}: expected net multiplier and q can wrap separately`);
         const top = [...slugs].map(slug => modelBySlug.get(slug))
           .filter(row => row.ageDays != null && Number.isFinite(row.plan.expectedYield))
           .sort((a, b) => b.plan.expectedYield - a.plan.expectedYield || a.rank - b.rank)
@@ -527,10 +541,32 @@ async function shoot(output, destination) {
       if (name === "1-board.jpg" && (!info.farmsVisible || !info.farms?.includes("Best plans that clear break-even")
         || info.farmLinks.length !== 5 || new Set(info.farmLinks).size !== 5
         || info.farmBadges.length !== 5 || info.farmBadges.some(badge => badge !== "MARGINAL")
-        || info.farmActions.length !== 5
-        || info.farmLinks.some((href, i) => !href.startsWith("#detail/")
-          || modelBySlug.get(decodeURIComponent(href.slice(8)))?.plan.action !== info.farmActions[i]))) {
+        || info.farmActions.length !== 5 || info.farmOutcomes.length !== 5
+        || info.farmLinks.some((href, i) => {
+          const plan = modelBySlug.get(decodeURIComponent(href.slice(8)))?.plan;
+          return !href.startsWith("#detail/") || plan?.action !== info.farmActions[i]
+            || info.farmOutcomes[i] !== `Token ${signedMoney(plan.withToken)} · No token ${signedMoney(plan.noToken)}`;
+        }))) {
         throw new Error("The break-even panel did not render five linked MARGINAL plans.");
+      }
+      if (page.hash.startsWith("#detail/")) {
+        const { name: protocol, plan } = modelBySlug.get(page.hash.slice(8));
+        const { withToken, noToken, q, pStar, verdict, gas, fees, timeCost, capitalCharge, chain, holding, net } = plan;
+        const odds = `${(100 * q).toFixed(5)}%`;
+        const rate = (100 * assumptions.parameters.riskFreeRate).toFixed(0);
+        const expected = [
+          `Token in window (q = ${odds}): ${signedMoney(withToken)}`,
+          `No token: ${signedMoney(noToken)} · costs rounded`,
+          `Gas ${money(gas)} + funding ${money(chain.bridge)} + slippage ${money(fees - chain.bridge)} + hands-on time ${money(timeCost)}`,
+          `+ Capital carry ${money(capitalCharge)} at a ${rate}%/yr stablecoin base rate for ${holding} d`,
+          `Needs q ≥ p* = ${(100 * pStar).toFixed(2)}%; model q = ${odds} → ${verdict}`,
+          `Expected net ${signedMoney(net)} = q × token net − (1 − q) × no-token cost`
+        ];
+        if (!info.decisionVisible || JSON.stringify(info.decision) !== JSON.stringify(expected)
+          || !info.checks.endsWith(" · 1/1 rows match")) {
+          throw new Error(`${name}: Decision mismatch or out of view (${info.decision.join(" | ")}).`);
+        }
+        console.log(`${protocol} · ${info.checks}\nDecision\n${info.decision.join("\n")}`);
       }
       if (name === "calibration") {
         if (!info.timing?.includes("F walk-forward AUC")) throw new Error("Missing launch calibration.");
@@ -553,7 +589,7 @@ async function shoot(output, destination) {
         || !/^80% \$.*–\$.* · 50% \$.*–\$/u.test(info.valueRange)
         || !/Expected net.*(robust across 80% range|flips to .+ at (low|high) end)/iu.test(info.rangeFarm)
         || info.labels.map(label => label.split(" ")[0]).join() !== "1,2a,2b,2c,3a,3b,3c,4,5,6,7"
-        || !/Launch within (30|90|180|365) d: [\d.]+% \(q\) vs p\*/.test(info.summary)
+        || info.summary !== `${upshift.plan.ticket} on ${chain.name}`
         || !info.oddsNote?.includes("No launch dates") || !info.oddsNote.includes("F walk-forward AUC")
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
         || ![upshift.name, chain.name, "deposit caps", "cheapest priced route"].every(text => info.steps[0].includes(text))
