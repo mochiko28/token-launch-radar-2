@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { buildDossier } from "./vendor/makefun-board.ts";
 import modelApi from "./dashboard/model.js";
 import { assetChecks } from "./tools/check-board.mjs";
-import tables from "./lib/tables.json" with { type: "json" };
 
 function options(args: string[]) {
   let input = "/input/snapshot.json";
@@ -36,7 +35,7 @@ function run() {
   if (dossier.byteLength > 1.5 * 1024 * 1024) throw new Error("Dossier exceeds the gate's 1.5 MiB limit.");
   const dossierText = JSON.parse(new TextDecoder().decode(dossier)).text;
   if (/^\[Cut at 65536 bytes:/m.test(dossierText)) throw new Error("Dashboard source exceeds the dossier text budget.");
-  const data = JSON.stringify({ snapshot, boardDigest, tables });
+  const data = JSON.stringify({ snapshot, boardDigest });
   writeFileSync(join(output, "board.json"), boardText);
   writeFileSync(join(output, "data.js"), `globalThis.LaunchRadarData = ${data};\n`);
   writeFileSync(join(output, "dossier.json"), dossier);
