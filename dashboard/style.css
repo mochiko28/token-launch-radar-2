@@ -17,27 +17,28 @@ button,select,summary{cursor:pointer}
 h1{font-size:clamp(2.4rem,4vw,3.9rem);line-height:1;letter-spacing:-.06em}
 h2{font-size:1.14rem;line-height:1.25}
 .frame{width:min(1328px,95%);margin:auto}
-.site-header,.dialog-bar,.btn,.chip,.panel{background:#fff}
-.mast,.bar,.dialog-bar,.portfolio,.equation{display:flex;align-items:center}
-.intro,.readings,.legend,.positions,.outcomes,.integrity,dl{display:flex}
+body>header,.dialog-top,.btn,.chip,.panel{background:#fff}
+.brand,.mast,.bar,.dialog-top,.portfolio,.equation{display:flex;align-items:center}
+.intro,.readings,.legend,.positions,.flows,.integrity,dl{display:flex}
 .mast{min-height:60px;gap:28px}
-.brand{font-weight:bold}
+.brand{gap:6px;font-weight:700}
+.brand span{font-size:1.35em}
 nav{display:flex;gap:25px;margin-right:auto}
 nav [aria-current=page]{text-decoration:underline}
-[aria-current=page],[aria-sort] a,.watch,.back,.rank-note,.steps h3{color:var(--ink)}
+[aria-current=page],[aria-sort] a,.brand span,.watch,.back,.kicker,.steps h3{color:var(--ink)}
 .btn,.chip,.panel,.portfolio{border:var(--line)}
 .btn{padding:6px 11px}
-#checks,.rank,.rank-note,footer{font:.76rem monospace}
+#checks,.rank,.kicker,footer{font:.76rem monospace}
 small,dt,.rank,.intro p,.curve,footer{color:var(--dim)}
-.intro,.bar,.dialog-bar,.metrics{justify-content:space-between}
-.integrity,.readings,.portfolio,.positions,.attribution dl{flex-wrap:wrap}
+.intro,.bar,.dialog-top,.metrics{justify-content:space-between}
+.integrity,.readings,.portfolio,.positions,.drivers dl{flex-wrap:wrap}
 .intro{align-items:end;margin:12px 0 24px}
 .intro p{margin-top:8px}
 .integrity{gap:2px;margin:-17px 0 8px}
 .chip{padding:2px;white-space:nowrap;font-size:.68rem}
-#checks-info,.back{margin-top:16px}
+#check-help,.back{margin-top:16px}
 .kpis,.groups,.board,.detail,.research,.rail,.detail>div,.filters,.steps li,.quotes{display:grid}
-.kpis{grid-template-columns:1.25fr 1.55fr 1fr .68fr;gap:12px;margin:0 0 10px}
+.kpis{grid-template-columns:1.25fr 1.55fr 1fr .68fr;gap:12px;margin-bottom:10px}
 .panel,.portfolio{border-radius:10px;min-width:0}
 .kpi{padding:5px 12px;line-height:1.25}
 .kpi strong{font-size:1.94rem}
@@ -45,27 +46,26 @@ small,dt,.rank,.intro p,.curve,footer{color:var(--dim)}
 .readings,.band,.totals,.board,.detail,.research{gap:1rem}
 :not(strong)>small,.readings span,svg,.back{display:block}
 .misses strong{font-size:1.4rem}
-small,dt,.curve,.attribution,.rail,.portfolio p,.hint,.back,.kpi{font-size:.8rem}
+small,dt,.curve,.drivers,.rail,.portfolio p,.hint,.back,.kpi{font-size:.8rem}
 .valuation,.portfolio,.metrics,.steps small{background:var(--bg)}
 .board,.detail,.research{align-items:start}
 .board{grid-template-columns:1fr 310px}
 .rail,.detail>div{gap:14px}
 .bar{padding:14px 16px 9px}
 .filters{grid-template-columns:1.4fr repeat(6,1fr);gap:8px;padding:0 16px 9px}
-:is(.filters,.quotes) label{font-size:.75rem;font-weight:700}
-:is(.filters,.quotes) :is(input,select){width:100%;height:34px;padding:4px 6px;border:var(--line);border-radius:5px}
-.scroll{overflow:auto}
-#results .scroll{
-	max-height:511px;
-	.portfolio+div &{max-height:318px}
+:is(.filters,.quotes){
+	label{font-size:.75rem;font-weight:700}
+	:is(input,select){width:100%;height:34px;padding:4px 6px;border:var(--line);border-radius:5px}
 }
+.scroll{overflow:auto}
+#results .scroll{max-height:511px;.portfolio+div &{max-height:318px}}
 #results thead{position:sticky;top:0;z-index:1}
 table{width:100%;border-collapse:collapse}
 th{text-align:left}
 thead{background:#f3eff6;font-size:.75rem}
 .ranks{min-width:880px;font-size:.88rem;line-height:1.15}
 .ranks :is(td,th){padding:2px 7px}
-.ranks :is(td,th small){white-space:nowrap}
+.ranks :is(td,small){white-space:nowrap}
 .hint,.compare{margin:0 16px 9px}
 tbody tr{border-bottom:var(--line)}
 .protocol,dd,.amount{font-weight:750}
@@ -85,34 +85,35 @@ svg path{stroke:#e8e0ed}
 svg circle{fill:var(--dot)}
 .legend{gap:12px;font:.7rem monospace}
 .legend span::before{content:"● ";color:var(--dot)}
-.best-plans div,.pay,.steps li,.attribution,.band{border-top:var(--line)}
-.best-plans b{float:right}
+.plans div,.pay,.steps li,.drivers,.band{border-top:var(--line)}
+.plans b{float:right}
 .pay{margin:8px 0;padding-top:7px}
 .portfolio{gap:12px 26px;padding:12px 16px;margin-bottom:16px}
-.positions,.positions>div,.outcomes>div{flex:1}
+.positions,.positions>div,.flows>div{flex:1}
 .back+.intro{margin:10px 0 20px}
 .detail{grid-template-columns:6fr 5fr}
 .detail>div{min-width:0}
-.metrics,.outcomes,.steps li{gap:8px}
+.metrics,.flows,.steps li{gap:8px}
 .metrics{padding:8px;margin-block:8px}
 .steps{list-style:none;margin:6px 0 0;padding:0}
 .steps li{grid-template-columns:7fr 3fr;padding:5px 0}
 .steps small{align-self:center;padding:4px 6px}
-.steps h3,.outcomes h3,.steps p,.quote p,.facts,.kpi h2{font-size:.85rem}
-.half-q,.quotes{margin:7px 0}
+.detail h3,.steps p,.quote p,.facts,.kpi h2,.exits,.range-net{font-size:.85rem}
+.exits{margin:0;padding-left:1.25em}
+.half-q,.quotes{margin-block:7px}
 .quotes{grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:6px}
 .amount{font-size:2.8rem}
-.range-farm{color:var(--dim);font-size:.85rem}
+.range-net{color:var(--dim)}
 .equation{gap:14px;margin:8px 0}
-.attribution,.band{padding:5px 0}
-.attribution dl{gap:1em}
+.drivers,.band{padding:5px 0}
+.drivers dl{gap:1em}
 .inset h2{margin-bottom:.4em}
 .facts :is(td,th){padding:7px}
 .research{grid-template-columns:7fr 5fr}
-footer{padding-block:20px}
+footer{padding:20px 0}
 dialog{margin:0 0 0 auto;height:100%;max-height:none;width:min(640px,100%);border:0}
-.dialog-bar,.drawer{padding:16px}
-.dialog-bar{position:sticky;top:0}
+.dialog-top,.drawer{padding:16px}
+.dialog-top{position:sticky;top:0}
 @media(max-width:1130px){.board{grid-template-columns:1fr}.rail{grid-template-columns:1fr 1fr}}
 @media(max-width:780px){
 	.mast{flex-wrap:wrap;gap:5px 12px}

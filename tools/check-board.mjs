@@ -159,7 +159,8 @@ function report(output, input) {
   const { traded, recorded, setAside, ranked, watchlistCovered, watchlistTotal, total, valueFit, oddsFit } = model.counts;
   console.log(`${traded} traded with cap + ${recorded} token recorded without cap + ${setAside} products set aside + ${ranked} pre-token ranked = ${total} | watchlist ${watchlistCovered}/${watchlistTotal}`);
   const { fit, validation } = model.value;
-  const curve = fit.names.map((name, i) => `${name}=${fit.coefficients[i].toFixed(6)}`).join(", ");
+  const names = ["intercept", "logCarriedTvl", ...fit.features.map(([, name]) => name)];
+  const curve = names.map((name, i) => `${name}=${fit.coefficients[i].toFixed(6)}`).join(", ");
   console.log(`Log market-cap fit (${valueFit} tokens, TVL divided by $100M): ${curve}`);
   for (const [key, label] of [["loo", "LOO"], ["walk", "Walk-forward"], ["family", "Family hold-out"]]) {
     console.log(`${label} median miss ${validation.selected[key].miss.toFixed(3)}x vs ${validation.baseline[key].miss.toFixed(3)}x flat (n=${validation.selected[key].n})`);

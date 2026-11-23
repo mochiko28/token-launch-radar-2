@@ -8,7 +8,7 @@ import api from "../dashboard/model.js";
 
 const width = 1440;
 const height = 980;
-const detailHeight = 1260;
+const detailHeight = 1340;
 const minimum = 300 * 1024;
 const maximum = 350_000;
 
@@ -87,7 +87,7 @@ function jpegSize(bytes) {
   throw new Error("Could not find JPEG dimensions.");
 }
 
-const fits = bytes => bytes.length >= minimum && bytes.length <= maximum;
+const fits = bytes => bytes.length >= minimum && bytes.length < maximum;
 
 async function captureJpeg(call, context, work) {
   const capture = async format => {
@@ -161,6 +161,11 @@ const pages = [...shots, { name: "calibration", hash: "#calibration", probeOnly:
 function readPage() {
   const read = selector => document.querySelector(selector)?.textContent.trim();
   const rows = [...document.querySelectorAll("tr[data-slug]")];
+  const tableBottom = document.querySelector("#results .scroll")?.getBoundingClientRect().bottom;
+  const completeRows = rows.filter(row => {
+    const box = row.getBoundingClientRect();
+    return box.top >= 0 && box.bottom <= Math.min(tableBottom, innerHeight);
+  }).length;
   const watchlist = new Set(globalThis.LaunchRadarData.snapshot.watchlist);
   const visible = selector => {
     const box = document.querySelector(selector)?.getBoundingClientRect();
@@ -204,6 +209,7 @@ function readPage() {
         && after["Launch within 30 d (q)"] === before["Launch within 30 d (q)"]
         && after["Expected net"] !== before["Expected net"] && after["Quote verdict"] === "SKIP"
         && read("#quote-result").includes("57d at")
+        && read(".gas").startsWith("Quoted gas = $")
         && halfOdds() !== defaultHalfOdds && halfOdds().includes("SKIP")
         && inputs.every(input => input.nextElementSibling.textContent === "Quoted");
       inputs.forEach(input => { input.value = ""; });
@@ -227,7 +233,7 @@ function readPage() {
     else steps.push(parts.join(" "));
   }
   const chips = [...document.querySelectorAll(".integrity button")];
-  const help = document.querySelector("#checks-info");
+  const help = document.querySelector("#check-help");
   const integrity = chips.map(chip => chip.textContent);
   const integrityLines = new Set(chips.map(chip => chip.offsetTop)).size;
   const integrityWidth = chips.length ? [chips[0].parentElement.clientWidth, chips.reduce((sum, chip) => sum + chip.offsetWidth, 0)] : [];
@@ -251,31 +257,35 @@ function readPage() {
     portfolio: read(".portfolio"),
     summary: read(".verdict"), defaultHalfOdds,
     coverage: read(".coverage"), nested: read(".nested"),
-    valueRange: read(".value-range"), rangeFarm: read(".range-farm"),
+    valueRange: read(".value-range"), rangeFarm: read(".range-net"),
     oddsNote: read(".pay + p"), pay: read(".pay"), payVisible: visible(".pay"),
-    farms: read(".best-plans"), farmsVisible: visible(".best-plans"),
-    farmLinks: [...document.querySelectorAll(".best-plans a")].map(a => a.getAttribute("href")),
-    farmBadges: [...document.querySelectorAll(".best-plans .badge")].map(chip => chip.textContent),
+    farms: read(".plans"), farmsVisible: visible(".plans"),
+    farmLinks: [...document.querySelectorAll(".plans a")].map(a => a.getAttribute("href")),
+    farmBadges: [...document.querySelectorAll(".plans .badge")].map(chip => chip.textContent),
     positions: document.querySelectorAll(".positions > div").length,
     labels, steps,
+    gas: document.querySelector(".gas")?.innerText.replace("\n", " · "), gasVisible: visible(".gas"),
+    exits: [...document.querySelectorAll(".exits li")].map(li => li.textContent),
+    exitsVisible: visible(".exits"),
     planVisible: visible(".steps"),
     quoteVisible: visible(".quote"), quotePass,
-    attribution: read(".attribution"), attributionVisible: visible(".attribution"),
+    attribution: read(".drivers"), attributionVisible: visible(".drivers"),
     peersVisible: visible(".detail > :last-child > :last-child"),
     curve: read(".curve"), heldOut: read(".misses"), timing: read(".research") && read("#view .inset p"),
     capMisses: [...document.querySelectorAll(".misses strong")].map(node => node.textContent),
     oddsMisses: read(".odds-misses")?.match(/[\d.]+×/g),
     termRows: [...document.querySelectorAll("#term-tests tbody tr")].map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     assumptions: read("#assumptions .drawer ul"),
+    assumptionTables: [...document.querySelectorAll("#assumptions table")].map(table => table.textContent),
     stress: read(".detail .facts"), stressVisible: visible(".detail .facts"), rowCheck: chips[0]?.textContent,
     rowPass: chips[0]?.dataset.pass,
-    chart: read("#yield-chart p"), scope: document.querySelector("#filter-scope")?.value,
+    chart: read("#yield p"), scope: document.querySelector("#filter-scope")?.value,
     filter: document.querySelector("#filter-verdict")?.value,
     rows: rows.map(row => {
       const { slug, factors } = row.dataset;
       return [slug, Number(row.cells[0].textContent), ...factors.split(",").map(Number), row.querySelector(".badge").textContent, watchlist.has(slug)];
     }),
-    width: innerWidth, height: innerHeight, dpr: devicePixelRatio,
+    completeRows, width: innerWidth, height: innerHeight, dpr: devicePixelRatio,
     scrollbar: innerWidth - document.documentElement.clientWidth
   };
 }
@@ -414,7 +424,10 @@ async function shoot(output, destination) {
   const url = pathToFileURL(join(output, "dashboard", "index.html")).href;
   const data = readFileSync(join(output, "data.js"), "utf8").trim();
   const { snapshot } = JSON.parse(data.slice("globalThis.LaunchRadarData = ".length, -1));
-  const { value, odds } = api.buildModel(snapshot);
+  const { value, odds, rows } = api.buildModel(snapshot);
+  const { exits, gas, chain, cost, transactions } = rows.find(row => row.slug === "upshift").plan;
+  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format;
+  const gasLine = `${transactions} tx x ${money(chain.gas)} on ${chain.name} = ${money(gas)} · ${(100 * (gas / cost)).toFixed(1)}% of all-in cost`;
   const { selected, baseline, evidence, search } = value.validation;
   const termRows = [...evidence, ...odds.evidence,
     { term: "Flat cap / TVL ratio", withTerm: selected, without: baseline, verdict: "Baseline" }, ...search
@@ -460,7 +473,9 @@ async function shoot(output, destination) {
         || !info.nested?.includes(`Nested walk-forward ${value.nested.miss.toFixed(2)}×`))) {
         throw new Error(`${name}: calibration summary is incomplete.`);
       }
-      if (name === "1-board.jpg" && (info.rows.length !== board.length || !info.chart)) throw new Error("The full board did not render.");
+      if (name === "1-board.jpg" && (info.rows.length !== board.length || info.completeRows < 10 || !info.chart)) {
+        throw new Error(`The full board did not render with 10 complete rows in view (${info.completeRows}).`);
+      }
       if (name === "1-board.jpg" && (!info.farmsVisible || !info.farms?.includes("Best plans that clear break-even")
         || info.farmLinks.length !== 5 || new Set(info.farmLinks).size !== 5
         || info.farmBadges.length !== 5 || info.farmBadges.some(badge => badge !== "MARGINAL")
@@ -478,6 +493,9 @@ async function shoot(output, destination) {
         if (!info.assumptions?.includes("untested assumption (no traded rows carry the flag)")) {
           throw new Error("Missing issuer haircut note in Assumptions.");
         }
+        if (!info.assumptionTables.some(table => table.includes("Gas/tx") && /Other chains\$1\.50/.test(table))) {
+          throw new Error("Missing chain gas assumptions or fallback.");
+        }
         console.log("Calibration terms (median miss / within 3×):");
         for (const row of info.termRows) console.log(`  ${row.join(" | ")}`);
       }
@@ -489,6 +507,8 @@ async function shoot(output, destination) {
         || !info.oddsNote?.includes("no launch dates") || !info.oddsNote.includes("F walk-forward AUC")
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
         || !info.steps[0].includes("deposit caps") || !info.steps.some(step => step.startsWith("If TVL"))
+        || !info.gasVisible || info.gas !== gasLine || !info.exitsVisible
+        || JSON.stringify(info.exits) !== JSON.stringify(exits) || !info.steps.some(step => step.startsWith("If " + exits[0]))
         || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps)
         || !info.attributionVisible || !info.planVisible || !info.quoteVisible || !info.quotePass || !info.peersVisible
         || !["TVL size", "7d carry", "Age on odds", "Issuer"].every(label => info.attribution?.includes(label))
@@ -512,7 +532,8 @@ async function shoot(output, destination) {
       writeFileSync(join(destination, name), bytes);
       const content = [info.title, info.count, info.rowCheck, info.first, info.chart, info.summary, info.defaultHalfOdds, info.portfolio].filter(Boolean).join(" · ");
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
-      if (name === "1-board.jpg") console.log(`  DOM ready in ${info.loadMs} ms · ${info.coverage} · ${info.nested}`);
+      if (name === "1-board.jpg") console.log(`  ${info.completeRows} complete rows in view · DOM ready in ${info.loadMs} ms · ${info.coverage} · ${info.nested}`);
+      if (name === "2-detail.jpg") console.log(`  ${info.gas}\n  ${info.exits.join("\n  ")}`);
       if (info.valueRange) console.log(`  ${info.valueRange} · ${info.rangeFarm}`);
       if (info.integrity.length) console.log(`  ${info.integrityLines} integrity line · ${info.integrity.join(" · ")}`);
     }
