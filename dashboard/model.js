@@ -28,6 +28,7 @@
  function gas(chain) { return GAS[chain] != null ? GAS[chain] : GAS0; }
 
  function clamp(x, lo, hi) { return max(lo, min(hi, x)); }
+ var growthOf = p => clamp(p.change_7d ?? 0, M.growth_floor, M.growth_cap);
  function hasToken(p) { return p.gecko_id != null || p.symbol != null || p.mcap_usd != null; }
  function trades(p) { return p.mcap_usd != null && p.mcap_usd > 0; }
  function ageDays(asOf, listed) {
@@ -73,14 +74,14 @@
   });
   var pts = order.map(k => {
    var t = tok[k];
-   var tc = t.tvl * (1 + clamp(t.p.change_7d || 0, M.growth_floor, M.growth_cap) / 100);
+   var tc = t.tvl * (1 + growthOf(t.p) / 100);
    return { p: t.p, tvl: t.tvl, tc, mcap: t.mcap, members: t.members, f: family(t.p), x: log(tc / M.ref_tvl), y: log(clamp(t.mcap / tc, M.ratio_floor, M.ratio_cap)),
     sx: log(t.tvl / M.ref_tvl), sy: log(clamp(t.mcap / t.tvl, M.ratio_floor, M.ratio_cap)) };
   });
   var tests = termTests(pts, snap.as_of), k = tests.terms[3].ok ? 0 : Infinity;
   var miss = pts.map((q, i) => log(q.mcap / predict(fitPoints(pts.filter((o, j) => j !== i), k), q)));
   var full = fitPoints(pts, k);
-  pts.forEach((q, i) => { q.fit = round(predict(full, q)); q.loo = q.mcap / exp(miss[i]); });
+  pts.forEach((q, i) => { q.fit = round(predict(full, q)); q.loo = q.mcap / exp(miss[i]); q.err = abs(miss[i]); });
   var sorted = miss.slice().sort((u, v) => u - v);
   var hold = (cal, te) => { cal = cal.slice().sort((u, v) => u - v); var a = quantile(cal, 0.25), b = quantile(cal, 0.75); return [te.filter(m => m >= a && m <= b).length, te.length]; };
   var di = pts.map((q, i) => i).filter(i => pts[i].p.listed_at).sort((i, j) => pts[i].p.listed_at < pts[j].p.listed_at ? -1 : pts[i].p.listed_at > pts[j].p.listed_at ? 1 : bySlug(pts[i].p, pts[j].p)), dc = floor(di.length * 0.6);
@@ -88,8 +89,10 @@
   var bandFam = FAMILIES.reduce((s, f) => { var r = hold(miss.filter((m, i) => pts[i].f !== f[0]), miss.filter((m, i) => pts[i].f === f[0])); return [s[0] + r[0], s[1] + r[1]]; }, [0, 0]);
   var q25 = quantile(sorted, 0.25), q75 = quantile(sorted, 0.75);
   var cuts = [0, 1e7, 3e7, 1e8, 1e15], bands = cuts.slice(0, 4).map((lo, b) => {
-   var m = pts.map((q, i) => q.tvl >= lo && q.tvl < cuts[b + 1] ? abs(miss[i]) : -1).filter(x => x >= 0).sort((u, v) => u - v);
-   return { lo, hi: cuts[b + 1], n: m.length, miss: exp(quantile(m, 0.5)) };
+   var hi = cuts[b + 1], peers = pts.filter(q => q.tvl >= lo && q.tvl < hi);
+   var m = peers.map(q => q.err).sort((a, b) => a - b);
+   var ratios = peers.map(q => q.mcap / q.tvl).sort((a, b) => a - b);
+   return { lo, hi, n: m.length, miss: exp(quantile(m, 0.5)), p95: ratios.length ? quantile(ratios, 0.95) : null };
   });
   return { bands, k, slope: full.b, elasticity: 1 + full.b, base: exp(full.all), families: full.fams, n: pts.length, points: pts,
    band_low: exp(q25), band_high: exp(q75), band_wf: bandWf, band_fam: bandFam,
@@ -101,7 +104,7 @@
   var known = peers.map(p => ageDays(snap.as_of, p.listed_at)).filter(a => a != null).sort((a, b) => a - b);
   var mid = known[known.length >> 1], fams = FAMILIES.slice(0, -1);
   var X = (p, a) => {
-   return [1, log(p.tvl_usd / M.ref_tvl), log(1 + a / 365), log(1 + clamp(p.change_7d || 0, M.growth_floor, M.growth_cap) / 100)]
+   return [1, log(p.tvl_usd / M.ref_tvl), log(1 + a / 365), log(1 + growthOf(p) / 100)]
     .concat(fams.map(f => family(p) === f[0] ? 1 : 0));
   };
   var pts = peers.map(p => { var a = ageDays(snap.as_of, p.listed_at); return { p, a, x: X(p, a == null ? mid : a), y: hasToken(p) ? 1 : 0 }; });
@@ -155,7 +158,7 @@
   var ages = pts.map(q => ageDays(asOf, q.p.listed_at));
   var mid = ages.filter(a => a != null).sort((a, b) => a - b);
   pts.forEach((q, i) => {
-   q.g = clamp(q.p.change_7d || 0, M.growth_floor, M.growth_cap) / 100;
+   q.g = growthOf(q.p) / 100;
    q.age = ages[i] == null ? mid[mid.length >> 1] : ages[i];
   });
   var dated = pts.filter(q => q.p.listed_at).sort((a, b) => a.p.listed_at < b.p.listed_at ? -1 : a.p.listed_at > b.p.listed_at ? 1 : bySlug(a.p, b.p));
@@ -228,7 +231,7 @@
 
  function value(p, fit, asOf, ageFallback, haircut) {
   var fam = fit.families[family(p)];
-  var growth = clamp(p.change_7d == null ? 0 : p.change_7d, M.growth_floor, M.growth_cap);
+  var growth = growthOf(p);
   var tvlNext = p.tvl_usd * (1 + growth / 100);
   var sizeMult = pow(tvlNext / M.ref_tvl, fit.slope);
   var fitted = tvlNext * fam.multiple * sizeMult;
@@ -403,7 +406,14 @@
   var live = fit.points.map(q => ({ p: q.p, tvl: q.tvl, members: q.members, family: q.f, fit: q.fit, loo: round(q.loo), actual: q.mcap }))
    .sort((a, b) => b.actual - a.actual || bySlug(a.p, b.p));
   var listedOnly = snap.protocols.filter(p => hasToken(p) && !trades(p)).length;
-  return { model: M, fit, rows, live, products, listed_only: listedOnly, families: FAMILIES };
+  var audit = rows.slice(0, 20).map(r => {
+   var { p, v } = r, band = fit.bands.find(b => p.tvl_usd >= b.lo && p.tvl_usd < b.hi);
+   var exclusion = hasToken(p) ? 'Token recorded' : productOf(p, true);
+   var flag = LIQUID.test(p.category) ? 'Liquid-staking issuer: verify token status and rewards' : r.flag;
+   var review = r.wordMatch ? 'Possible link to ' + r.wordMatch : flag || (!r.watch && !r.below ? 'Above watchlist floor' : '');
+   return { r, exclusion, review, ratio: v.fitted / p.tvl_usd, p95: band?.p95 ?? null };
+  });
+  return { model: M, fit, rows, live, products, listed_only: listedOnly, families: FAMILIES, audit };
  }
 
  function boardRows(radar) {

@@ -5,7 +5,7 @@
  if (!R || !S || !tables) { app.innerHTML = '<p class=empty>Run main.ts to build the dashboard data.</p>'; return; }
 
  R.use(tables);
- const radar = R.build(S), { fit, model: M, rows } = radar, { usd, mins } = R;
+ const radar = R.build(S), { fit, model: M, rows, audit: auditRows } = radar, { usd, mins } = R;
  const { target_cover: cover, hour_usd: rate, drop_share: share } = M;
  const { round, abs, log, sqrt } = Math;
  const dollars = n => '$' + n.toLocaleString('en-US');
@@ -39,7 +39,7 @@
    const i = kv.indexOf('='), k = kv.slice(0, i);
    if (i > 0 && Object.hasOwn(DEF, k)) try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch {}
   }
-  const ok = { view: 'board model aside trading'.split(' '), scope: 'all watch early outside stable'.split(' '),
+  const ok = { view: 'board model audit aside trading'.split(' '), scope: 'all watch early outside stable'.split(' '),
    verdict: PLANS.map(p => p[0]), dir: ['asc', 'desc'], dep: DEPOSITS, hr: RATES, bud: BUDGETS };
   for (const k in ok) if (!ok[k].map(String).includes(st[k])) st[k] = DEF[k];
   if (!Object.hasOwn(KEYS, st.sort)) st.sort = 'rank';
@@ -128,8 +128,8 @@
  }
 
  function head(st) {
-  const n = v => (v === 'board' ? rows.length : v === 'model' ? CHECKS.length : v === 'aside' ? radar.products.length : fit.n);
-  el('tabs').innerHTML = [['board', 'Pre-token board'], ['model', 'Model & checks'], ['aside', 'Set aside'], ['trading', 'Trading tokens']]
+  const n = v => (v === 'board' ? rows.length : v === 'model' ? CHECKS.length : v === 'audit' ? auditRows.length : v === 'aside' ? radar.products.length : fit.n);
+  el('tabs').innerHTML = [['board', 'Pre-token board'], ['model', 'Model & checks'], ['audit', 'Rank audit'], ['aside', 'Set aside'], ['trading', 'Trading tokens']]
    .map(([v, l]) => `<a href="${link({ view: v, p: '' })}" class="${st.view === v && !st.p ? 'on' : ''}">${l} <b>${n(v)}</b></a>`).join('');
   el('meta').innerHTML = `<span>Snapshot <b>${esc(S.as_of)}</b></span><span>model <b>${esc(M.version)}</b></span>`;
  }
@@ -153,6 +153,8 @@ ${tbl('mini tests', ['Score s · held-out Brier', '#Walk-fwd', '#Family out'],
 <p class=note>LOO miss by TVL band: ${fit.bands.map(b => `<b>${bandTvl(b)} ×${b.miss.toFixed(1)}</b> (${b.n} tokens; ${rows.filter(r => r.p.tvl_usd >= b.lo && r.p.tvl_usd < b.hi).length} ranked)`).join(' · ')}.</p></div>`;
  }
 
+ const clipped = ({ p, v }) => p.change_7d != null && p.change_7d !== v.growth;
+ const above95 = a => a.p95 != null && a.ratio > a.p95;
  const bRows = R.boardRows(radar), dig = R.digest(bRows), B = window.BOARD || {};
  const [flatT, spotT, sizeT, famT] = fit.tests.terms, curve = fit.k === Infinity ? sizeT : famT;
  const nTr = S.protocols.filter(p => p.mcap_usd > 0).length, nAll = rows.length + radar.products.length + nTr + radar.listed_only;
@@ -162,7 +164,7 @@ ${tbl('mini tests', ['Score s · held-out Brier', '#Walk-fwd', '#Family out'],
   [watchCov === S.watchlist.length, `watchlist ${watchCov}/${S.watchlist.length} covered`],
   [rows.every((r, i) => r.rank === i + 1 && (!i || r.v.implied <= rows[i - 1].v.implied)), `ranks 1–${rows.length}, value never rising`],
   [rows.every(r => r.p.gecko_id == null && r.p.symbol == null && r.p.mcap_usd == null), `${rows.length}/${rows.length} ranked rows have no token record`],
-  [bRows.every(b => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every(t => t.length <= 600 && / Cost: .+ Time: /.test(t))), `${bRows.length} plans, every step costed and timed`],
+  [bRows.every(b => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every(t => t.length >= 20 && t.length <= 600 && / Cost: .+ Time: /.test(t))), `${bRows.length} plans, every step costed and timed`],
   [B.digest === dig && B.rows === rows.length, `screen = board.json at Auto deposit, digest ${dig}`],
   [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.auc_fam > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base && O.brier.fam < O.brier.fam_base, `score beats base rate in 3 held-out tests: AUC ${O.auc_loo.toFixed(2)}/${O.auc_wf.toFixed(2)}/${O.auc_fam.toFixed(2)}`],
   [rows.slice(0, 10).every(r => r.boot >= 0.8), `ranks 1–${rows.findIndex(r => r.boot < 1)} top 20 in all 40 refits`],
@@ -244,7 +246,8 @@ ${tbl('mini tests', ['Score s · held-out Brier', '#Walk-fwd', '#Family out'],
 <h1>${port ? 'Portfolio snapshot' : `${rows.length} pre-token protocols, by implied value`}${st.sort === 'rank' ? '' : `<small> · shown by ${{ g: '7-day change', age: 'days tracked', odds: 'score', apr: 'drop APR', plan: 'farm plan' }[st.sort] || st.sort} ${st.dir === 'asc' ? '▲' : '▼'}</small>`}</h1>
     ${port ? portfolio(st, shown) : ''}
     ${active ? note(`${passText} · <a href="${link(CLEAR)}">unfiltered board</a>`) : `${eq}
-<p class="checkline ${failed.length ? 'bad' : 'ok'}"><b>${passText}</b>, on load: ${[5, 1, 6, 0].map(i => CHECKS[i][1]).join(' · ')}${failed.map(c => ' · ✗ ' + c[1]).join('')} · <a href="${link({ view: 'model' })}">all checks →</a></p>`}
+<p class="checkline ${failed.length ? 'bad' : 'ok'}"><b>${passText}</b>, on load: ${[5, 1, 6, 0].map(i => CHECKS[i][1]).join(' · ')}${failed.map(c => ' · ✗ ' + c[1]).join('')} · <a href="${link({ view: 'model' })}">all checks →</a></p>
+${note(`<a href="${link({ view: 'audit' })}">Top ${auditRows.length} audit →</a> · ${auditRows.filter(a => a.exclusion).length} token records or product exclusions · ${auditRows.filter(a => !a.exclusion && a.review).length} to review · ${auditRows.filter(a => clipped(a.r)).length} growth clips · ${auditRows.filter(above95).length} above peer P95`)}`}
 ${sensitivity(st, audit)}${ctl}
 </div>
 <div class="card chartcard"><h2>Radar <span>days without a token × airdrop yield</span></h2>${chart(shown, 300)}</div>
@@ -344,6 +347,18 @@ ${sensitivity(st, null, pl)}
  function model() {
   return `<section class="hero slim">${formula()}<div class="card checks"><h2>Self-checks <span>run on load</span></h2><ul>${CHECKS.map(([ok, t]) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${t}</li>`).join('')}</ul></div></section>`;
  }
+ function rankAudit() {
+  return `<section class=intro><h1>Top ${auditRows.length} rank audit</h1>
+<p>Checks use snapshot token fields, product rules and the watchlist. The snapshot omits parent links. Review flags show possible token or product links and off-list rows above the floor.</p>
+<p>7d TVL change is clipped to ${pct(M.growth_floor, 0)} to ${pct(M.growth_cap, 0)} (${rows.filter(clipped).length} board-wide clips); missing change uses 0%. Peer P95 is the 95th percentile of trading market cap ÷ TVL in that TVL band.</p></section>
+<div class=tablewrap>${tbl('board', ['#Rank', 'Protocol', 'Snapshot status', '#TVL', '#7d raw → used', '#Value if launched', '#Record score', '#Implied value', '#Full/TVL · peer P95'], auditRows.map(a => {
+   const { rank, p, v, watch } = a.r;
+   return [rank, `<a href="${link({ view: 'board', p: p.slug })}">${esc(p.name)}</a><small>${esc(p.category || 'Uncategorised')}</small>`,
+    a.exclusion ? `<b class=down>${esc(a.exclusion)}</b>` : (watch ? 'Watchlist' : 'Off watchlist') + (a.review ? `<small class=down>${esc(a.review)}</small>` : ''),
+    usd(p.tvl_usd), `<span class="${clipped(a.r) ? 'down' : ''}">${pct(p.change_7d, 2)} → ${pct(v.growth, 2)}</span>`,
+    usd(v.fitted), pc(v.time_factor), usd(v.implied), `<span class="${above95(a) ? 'down' : ''}">${mult(a.ratio)}</span> · ${a.p95 == null ? 'n/a' : mult(a.p95)}`];
+  }))}</div>`;
+ }
  function aside() {
   return `<section class=intro><h1>${radar.products.length} products set aside</h1>
 <p>Tokenless bridges, exchanges, Restaked BTC, and wrapped or staked products.</p></section>
@@ -357,14 +372,14 @@ ${sensitivity(st, null, pl)}
  }
 
  let planDep = `|${DEF.hr}|`;
- const top20 = rows.slice(0, 20), farmAt = (h, dep) => top20.filter(r => R.farmPlan(r.p, r.v, +dep, h).verdict === 'farm').length;
+ const farmAt = (h, dep) => auditRows.filter(({ r }) => R.farmPlan(r.p, r.v, +dep, h).verdict === 'farm').length;
  function render() {
   const st = readHash();
   head(st);
   app.className = st.p ? 'detail' : st.view;
   const k = [st.dep, st.hr, st.chain].join('|');
   if (k !== planDep) { planDep = k; rows.forEach(r => { r.plan = R.farmPlan(r.p, r.v, +st.dep, +st.hr, st.chain); }); }
-  app.innerHTML = st.p ? (bySlug[st.p] && bySlug[st.vs] ? compare(bySlug[st.p], bySlug[st.vs]) : detail(st)) : st.view === 'model' ? model() : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
+  app.innerHTML = st.p ? (bySlug[st.p] && bySlug[st.vs] ? compare(bySlug[st.p], bySlug[st.vs]) : detail(st)) : st.view === 'model' ? model() : st.view === 'audit' ? rankAudit() : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
   const d = el('drawn'), sh = d && filtered(st), trs = [...app.querySelectorAll('tr[data-slug]')];
   if (d) { const ok = trs.length === sh.length && trs.every((t, i) => t.dataset.slug === sh[i].p.slug && t.querySelector('td.val b').textContent === usd(sh[i].v.implied)); d.className = ok ? 'up' : 'down'; d.textContent = ok ? `✓ table drawn = model (${trs.length} rows)` : '✗ table drawn ≠ model'; }
   el('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied value = value if launched × token-record score × product haircut. DefiLlama may omit a protocol's token.`;
