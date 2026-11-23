@@ -176,7 +176,7 @@
     <td class="num">${usd(r.p.tvl_usd)}</td>
     <td class="num ${r.p.change_7d >= 0.05 ? 'up' : r.p.change_7d <= -0.05 ? 'down' : ''}">${pct(r.p.change_7d)}</td>
     <td class="num${r.v.age == null ? ' est' : ''}" title="${r.v.age == null ? 'No listing date: the median age is used' : 'Listed ' + esc(r.p.listed_at)}">${r.v.age == null ? '~' : ''}${days(r.v.age_used)}</td>
-    <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small><small class="factors">${usd(r.v.fitted)} × s ${pc(r.v.time_factor)}</small></td>
+    <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small><small class="factors">${usd(r.v.fitted)} × s ${pc(r.v.time_factor)}${r.v.haircut === 1 ? '' : ` × ${r.v.haircut}`}</small></td>
     <td class="num">${pc(r.v.time_factor)}</td>
     <td class="num apr">${(r.v.apr * 100).toFixed(1)}%</td>
     <td class="plan">${verdictTag(r.plan.verdict)} <span class="pmult">pays ${mult(r.plan.drop / r.plan.all_in)}${r.plan.verdict === 'farm' ? '' : r.plan.pay_cap ? ` · ×${M.target_cover} at ${usd(r.plan.pay_cap)}` : ` · no deposit pays ×${M.target_cover}`}</span><small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} ${r.plan.verdict === 'skip' ? 'to deposit · $0 research' : `cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}`}</small></td></tr>`;
