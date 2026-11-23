@@ -297,32 +297,33 @@
   function tranches(stake) { return kind === 'vault' ? [[stake, 0], [Math.round(stake / 4), 1]] : [[stake, kind === 'rwa' ? 2 : 0]]; }
   function eligible(stake) { return tranches(stake).reduce((a, t) => a + t[0], 0); }
   function earn(stake) { return tranches(stake).reduce((a, t) => a + t[0] * (M.farm_days - t[1]), 0) * v.apr / 365; }
+  // Break-even certificate: the least passing capital on the grid and the step below it that fails.
+  var cov = (k) => earn(k) / total(steps(k)).all, cap = (k) => k + Math.round(k / 4), cert = null;
   var stake = dep ? Math.round(dep / 1.25) : 20000;
-  for (var k = 400; !dep && k <= 20000; k += 400) {
-   if (earn(k) >= M.target_cover * total(steps(k)).all) { stake = k; break; }
-  }
+  for (var k = 400; !dep && k <= 20000; k += 400) if (cov(k) >= M.target_cover) { stake = k; if (k > 400) cert = [cap(k - 400), cov(k - 400), cap(k), cov(k)]; break; }
   var st = steps(stake), t = total(st), capital = stake + Math.round(stake / 4), drop = earn(stake);
   var verdict = drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip';
   // Every plan opens with its decision.
   var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
   // Least capital (to $1M) whose drop covers its recomputed costs.
-  var payCap = 0;
-  for (var c = 25000; !payCap && c <= 1000000; c = Math.round(c * 1.25)) {
-   var kk = Math.round(c / 1.25); if (earn(kk) >= M.target_cover * total(steps(kk)).all) payCap = Math.ceil(c / 1000) * 1000;
+  var payCap = 0, at = (c) => cov(Math.round(c / 1.25));
+  for (var c = 25000, lo = 0; !payCap && c <= 1000000; lo = c, c = Math.round(c * 1.25)) if (at(c) >= M.target_cover) {
+   for (payCap = Math.floor(lo / 1000) * 1000 + 1000; at(payCap) < M.target_cover;) payCap += 1000;
+   cert = cert || [payCap - 1000, at(payCap - 1000), payCap, at(payCap)];
   }
   st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: ' + Math.round(v.time_factor * 100) + '% of peers like it record a token, so the score-weighted drop is ' + usd(drop * v.time_factor) + ' (×' + (drop * v.time_factor / t.all).toFixed(2) + ' the costs); if it launches, at ' + amt(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
-   ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + (verdict === 'farm' ? '' : '; before your time it nets ' + (drop >= t.cost ? '+' : '−') + usd(Math.abs(drop - t.cost)) + ', and ' + (payCap ? 'it would pay ×' + M.target_cover + ' at about ' + usd(payCap) + ' of capital' : 'no deposit up to $1M pays ×' + M.target_cover + ' because its fees grow with the deposit')) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
+   ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + (verdict === 'farm' ? '' : '; before your time it nets ' + (drop >= t.cost ? '+' : '−') + usd(Math.abs(drop - t.cost)) + ', and ' + (payCap ? 'it would pay ×' + M.target_cover + ' at ' + amt(payCap) + ' of capital (' + amt(payCap - 1000) + ' pays only ×' + at(payCap - 1000).toFixed(3) + ')' : 'no deposit up to $1M pays ×' + M.target_cover + ' because its fees grow with the deposit')) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
    '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%; at 5% it pays ×' + (drop / t.all / 2).toFixed(2) + ', at 20% ×' + (drop / t.all * 2).toFixed(2) + '), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
   if (verdict === 'skip') {
    st = [st[0],
     { when: 'Day 0', usd: 0, min: 15, act: 'Research only, no deposit: check whether ' + ACT[kind][3].replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain) },
     { when: 'Day 0', usd: 0, min: 15, act: 'Read ' + p.name + '\'s docs and announcements for a stated user or depositor allocation; note the share, if any' },
-    { when: 'Day 0', usd: 0, min: 5, act: 'Write down the trigger that flips this plan: an announced allocation of at least ' + (needShare * 100).toFixed(0) + '% to depositors, ' + (payCap ? 'capital of about ' + usd(payCap) + ' to commit, ' : '') + 'or TVL below ' + usd(p.tvl_usd * Math.pow(M.target_cover * t.all / drop, 1 / v.slope)) + ' (a deposit\'s drop grows as TVL^' + v.slope.toFixed(2) + ', other figures fixed)' },
+    { when: 'Day 0', usd: 0, min: 5, act: 'Write down the trigger that flips this plan: an announced allocation of at least ' + (needShare * 100).toFixed(0) + '% to depositors, ' + (payCap ? 'capital of ' + amt(payCap) + ' to commit, ' : '') + 'or TVL below ' + usd(p.tvl_usd * Math.pow(M.target_cover * t.all / drop, 1 / v.slope)) + ' (a deposit\'s drop grows as TVL^' + v.slope.toFixed(2) + ', other figures fixed)' },
     { when: 'Day 30', usd: 0, min: 10, act: 'Look again on a new snapshot; if the plan now pays ×' + M.target_cover + ', follow the full plan (' + usd(capital) + ' capital, about ' + usd(t.cost) + ' in fees, ' + mins(Math.round(t.min)) + ' hands-on)' }];
   }
   var carry = capital * M.carry_rate * M.farm_days / 365, stress = ACT[kind][4];
   return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map((m) => { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, drop >= M.target_cover * a.all ? 'farm' : drop >= a.all ? 'marginal' : 'skip']; }), stake: capital, eligible: eligible(stake), tranches: tranches(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, all_in: t.all,
-   days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, verdict: verdict };
+   days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, cert: cert, verdict: verdict };
  }
  function stepText(s) {
   var t = s.when + ': ' + s.act + '. Cost: about ' + usd(s.usd) + '. Time: ' + mins(s.min) + '.';
