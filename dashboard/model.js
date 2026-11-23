@@ -85,17 +85,14 @@
   var full = fitPoints(pts, k);
   pts.forEach((q, i) => { q.fit = Math.round(predict(full, q)); q.loo = q.mcap / Math.exp(miss[i]); });
   var sorted = miss.slice().sort((u, v) => u - v);
-  var absMiss = miss.map(Math.abs).sort((u, v) => u - v);
-  var inBand = 0, q25 = quantile(sorted, 0.25), q75 = quantile(sorted, 0.75);
-  miss.forEach((m) => { if (m >= q25 && m <= q75) inBand++; });
+  var q25 = quantile(sorted, 0.25), q75 = quantile(sorted, 0.75);
   // Held-out miss by TVL band.
   var cuts = [0, 1e7, 3e7, 1e8, 1e15], bands = cuts.slice(0, 4).map((lo, b) => {
    var m = pts.map((q, i) => q.tvl >= lo && q.tvl < cuts[b + 1] ? Math.abs(miss[i]) : -1).filter((x) => x >= 0).sort((u, v) => u - v);
    return { lo: lo, hi: cuts[b + 1], n: m.length, miss: Math.exp(quantile(m, 0.5)) };
   });
   return { bands: bands, k: k, slope: full.b, elasticity: 1 + full.b, base: Math.exp(full.all), families: full.fams, n: pts.length, points: pts,
-   median_error: Math.exp(quantile(absMiss, 0.5)), band_low: Math.exp(q25), band_high: Math.exp(q75), band_hits: inBand,
-   clipped: pts.filter((q) => { var r = q.mcap / q.tc; return r < M.ratio_floor || r > M.ratio_cap; }).length,
+   band_low: Math.exp(q25), band_high: Math.exp(q75),
    tests: tests, odds: launchOdds(snap) };
  }
 
@@ -150,7 +147,7 @@
   brier.fam_base = bri(pts, (q) => { var o = pts.filter((z) => family(z.p) !== family(q.p)); return o.reduce((t, z) => t + z.y, 0) / o.length; });
   var terms = [['all inputs', []], ['without TVL', [1]], ['without days tracked', [2]], ['without 7-day change', [3]], ['without family', fams.map((f, i) => 4 + i)]]
    .map((t) => { var h = t[1].length ? held(t[1]) : h0; return [t[0], bri(h.wf, ss), bri(h.fam, ss)]; });
-  return { terms: terms, mid: mid, auc_fam: auc(lofo), boot: boot, brier: brier, w: w, cohorts: cohorts, gap: Math.max.apply(null, cohorts.map((c) => Math.abs(c.actual - c.fitted))), n: pts.length, with_token: pts.filter((q) => q.y).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
+  return { terms: terms, mid: mid, auc_fam: auc(lofo), boot: boot, brier: brier, w: w, gap: Math.max.apply(null, cohorts.map((c) => Math.abs(c.actual - c.fitted))), n: pts.length, with_token: pts.filter((q) => q.y).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
    F: F };
  }
  function sig(z) { return 1 / (1 + Math.exp(-z)); }
@@ -324,7 +321,7 @@
     { when: 'Day 30', usd: 0, min: 10, act: 'Look again on a new snapshot; if the plan now pays ×' + M.target_cover + ', follow the full plan (' + usd(capital) + ' capital, about ' + usd(t.cost) + ' in fees, ' + mins(Math.round(t.min)) + ' hands-on)' }];
   }
   var carry = capital * M.carry_rate * M.farm_days / 365, stress = ACT[kind][4];
-  return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map((m) => { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, drop >= M.target_cover * a.all ? 'farm' : drop >= a.all ? 'marginal' : 'skip']; }), stake: capital, eligible: eligible(stake), tranches: tranches(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
+  return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map((m) => { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, drop >= M.target_cover * a.all ? 'farm' : drop >= a.all ? 'marginal' : 'skip']; }), stake: capital, eligible: eligible(stake), tranches: tranches(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, all_in: t.all,
    days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, verdict: verdict };
  }
  function stepText(s) {
@@ -380,7 +377,7 @@
   var live = fit.points.map((q) => ({ p: q.p, tvl: q.tvl, members: q.members, family: q.f, fit: q.fit, loo: Math.round(q.loo), actual: q.mcap }))
    .sort((a, b) => b.actual - a.actual || bySlug(a.p, b.p));
   var listedOnly = snap.protocols.filter((p) => hasToken(p) && !trades(p)).length;
-  return { model: M, fit: fit, rows: rows, live: live, products: products, listed_only: listedOnly, age_fallback: ageFallback, families: FAMILIES };
+  return { model: M, fit: fit, rows: rows, live: live, products: products, listed_only: listedOnly, families: FAMILIES };
  }
 
  /* board.json's rows: the gate's five fields plus the figures behind them. */
