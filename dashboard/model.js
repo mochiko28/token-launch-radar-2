@@ -304,7 +304,8 @@
   var stake = dep ? Math.round(dep / 1.25) : 20000;
   for (var k = 400; !dep && k <= 20000; k += 400) if (cov(k) >= M.target_cover) { stake = k; if (k > 400) cert = [cap(k - 400), cov(k - 400), cap(k), cov(k)]; break; }
   var st = steps(stake), t = total(st), capital = stake + Math.round(stake / 4), drop = earn(stake);
-  var verdict = drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip';
+  var verdictAt = (all) => !v.caution && drop >= M.target_cover * all ? 'farm' : drop >= all ? 'marginal' : 'skip';
+  var verdict = verdictAt(t.all);
   var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
   // Least capital (to $1M) whose drop covers its recomputed costs.
   var payCap = 0, at = (c) => cov(Math.round(c / 1.25));
@@ -312,18 +313,18 @@
    for (payCap = Math.floor(lo / 1000) * 1000 + 1000; at(payCap) < M.target_cover;) payCap += 1000;
    cert = cert || [payCap - 1000, at(payCap - 1000), payCap, at(payCap)];
   }
-  st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: ' + Math.round(v.time_factor * 100) + '% of peers like it record a token, so the score-weighted drop is ' + usd(drop * v.time_factor) + ' (×' + (drop * v.time_factor / t.all).toFixed(2) + ' the costs); if it launches, at ' + amt(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
-   ' of gas, fees and time ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + (verdict === 'farm' ? '' : '; before your time it nets ' + (drop >= t.cost ? '+' : '−') + usd(Math.abs(drop - t.cost)) + ', and ' + (payCap ? 'it would pay ×' + M.target_cover + ' at ' + amt(payCap) + ' of capital' : 'no deposit up to $1M pays ×' + M.target_cover + ' because its fees grow with the deposit')) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
-   '% of the token goes to depositors (assumed ' + M.drop_share * 100 + '%; at 5% it pays ×' + (drop / t.all / 2).toFixed(2) + ', at 20% ×' + (drop / t.all * 2).toFixed(2) + '), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless a larger user allocation is announced' : 'farm it only with funds already on ' + chain) });
+  st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: ' + (v.caution ? verdict + ' — ' + v.caution + '. ' : '') + Math.round(v.time_factor * 100) + '% of peers like it record a token, so the score-weighted drop is ' + usd(drop * v.time_factor) + ' (×' + (drop * v.time_factor / t.all).toFixed(2) + ' the costs); if it launches, at ' + amt(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
+   ' of gas, fees and time ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + (v.caution || verdict === 'farm' ? '' : '; before your time it nets ' + (drop >= t.cost ? '+' : '−') + usd(Math.abs(drop - t.cost)) + ', and ' + (payCap ? 'it would pay ×' + M.target_cover + ' at ' + amt(payCap) + ' of capital' : 'no deposit up to $1M pays ×' + M.target_cover + ' because its fees grow with the deposit')) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
+   '% of the token goes to depositors (assumed ' + M.drop_share * 100 + '%; at 5% it pays ×' + (drop / t.all / 2).toFixed(2) + ', at 20% ×' + (drop / t.all * 2).toFixed(2) + '), so ' + (v.caution ? 'verify depositor eligibility before committing' : verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless a larger user allocation is announced' : 'farm it only with funds already on ' + chain) });
   if (verdict === 'skip') {
    st = [st[0],
     { when: 'Day 0', usd: 0, min: 15, act: 'Research only, no deposit: check whether ' + ACT[kind][3].replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain) },
     { when: 'Day 0', usd: 0, min: 15, act: 'Read ' + p.name + '\'s docs and announcements for a stated user or depositor allocation; note the share, if any' },
     { when: 'Day 0', usd: 0, min: 5, act: 'Write down the trigger that flips this plan: an announced allocation of at least ' + (needShare * 100).toFixed(0) + '% to depositors, ' + (payCap ? 'capital of ' + amt(payCap) + ' to commit, ' : '') + 'or TVL below ' + usd(p.tvl_usd * Math.pow(M.target_cover * t.all / drop, 1 / v.slope)) + ' (a deposit\'s drop grows as TVL^' + v.slope.toFixed(2) + ', other figures fixed)' },
-    { when: 'Day 30', usd: 0, min: 10, act: 'Look again on a new snapshot; if the plan now pays ×' + M.target_cover + ', follow the full plan (' + usd(capital) + ' capital, about ' + usd(t.cost) + ' in fees, ' + mins(Math.round(t.min)) + ' hands-on)' }];
+    { when: 'Day 30', usd: 0, min: 10, act: 'Look again on a new snapshot; if the plan now pays ×' + M.target_cover + (v.caution ? ' and rewards are confirmed' : '') + ', follow the full plan (' + usd(capital) + ' capital, about ' + usd(t.cost) + ' in fees, ' + mins(Math.round(t.min)) + ' hands-on)' }];
   }
   var carry = capital * M.carry_rate * M.farm_days / 365, stress = ACT[kind][4];
-  return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map((m) => { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, drop >= M.target_cover * a.all ? 'farm' : drop >= a.all ? 'marginal' : 'skip']; }), stake: capital, eligible: eligible(stake), tranches: tranches(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, all_in: t.all,
+  return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map((m) => { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, verdictAt(a.all)]; }), stake: capital, eligible: eligible(stake), tranches: tranches(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, all_in: t.all,
    days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, cert: cert, verdict: verdict };
  }
  function stepText(s) {
@@ -345,8 +346,9 @@
   var ages = pre.filter((p) => watch[p.slug] || !productOf(p)).map((p) => ageDays(snap.as_of, p.listed_at)).filter((a) => a != null).sort((a, b) => a - b);
   var ageFallback = ages.length ? ages[ages.length >> 1] : 365;
   var rows = pre.map((p) => {
-   var flag = productFlag(p), v = value(p, fit, snap.as_of, ageFallback, flag ? M.product_haircut : 1);
-   return { p: p, v: v, plan: farmPlan(p, v), watch: !!watch[p.slug], below: p.tvl_usd < snap.floor_usd, wordMatch: words[firstWord(p.name)], flag: flag };
+   var flag = productFlag(p), wordMatch = words[firstWord(p.name)], v = value(p, fit, snap.as_of, ageFallback, flag ? M.product_haircut : 1);
+   if (wordMatch || flag) v.caution = wordMatch ? wordMatch + "'s token may already cover it" : LIQUID.test(p.category) ? 'liquid-staking drop is uncertain' : flag;
+   return { p: p, v: v, plan: farmPlan(p, v), watch: !!watch[p.slug], below: p.tvl_usd < snap.floor_usd, wordMatch: wordMatch, flag: flag };
   });
   rows.sort((a, b) => b.v.implied - a.v.implied || bySlug(a.p, b.p));
   rows.forEach((r, i) => { r.rank = i + 1; });
