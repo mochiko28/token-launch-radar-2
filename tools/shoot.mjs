@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 
 const width = 1440;
 const height = 980;
-const detailHeight = 1080;
+const detailHeight = 1200;
 const minimum = 300 * 1024;
 const maximum = 350_000;
 
@@ -165,14 +165,42 @@ function readPage() {
     const box = document.querySelector(selector)?.getBoundingClientRect();
     return Boolean(box && box.height && box.top >= 0 && box.bottom <= innerHeight && box.right <= innerWidth);
   };
+  const form = document.querySelector("#quote");
+  let quotePass;
+  if (form) {
+    const initial = read("#quote-result");
+    const inputs = [...form.elements];
+    const defaulted = () => inputs.every(input => input.nextElementSibling.textContent === "Default");
+    const fieldsValid = inputs.map(input => input.name).join() === "entryGas,exitGas,slippage,delay,lockup";
+    quotePass = fieldsValid && defaulted() && initial.includes("No token") && initial.includes("Break-even p*");
+    if (fieldsValid) {
+      const resultFields = () => [...document.querySelectorAll("#quote-result dd")].map(node => node.textContent);
+      const before = resultFields();
+      const values = [10000, 7, 1, 12, 45];
+      inputs.forEach((input, i) => { input.value = values[i]; });
+      inputs[0].dispatchEvent(new Event("input", { bubbles: true }));
+      const after = resultFields();
+      quotePass &&= after[0] !== before[0] && after[1] === before[1] && after[2] !== before[2] && after[3] === "SKIP"
+        && read("#quote-result").includes("57d at")
+        && inputs.every(input => input.nextElementSibling.textContent === "Quoted");
+      inputs.forEach(input => { input.value = ""; });
+      inputs[0].dispatchEvent(new Event("input", { bubbles: true }));
+      quotePass &&= read("#quote-result") === initial && defaulted();
+      inputs[0].value = "-1";
+      inputs[0].dispatchEvent(new Event("input", { bubbles: true }));
+      quotePass &&= read("#quote-result") === initial && defaulted();
+      inputs[0].value = "";
+    }
+  }
   return {
     checks: read("#checks"), title: read("h1"), count: read("#row-count"), first: read("tbody tr th a"),
     portfolio: read(".portfolio h2"), verdict: read(".plan-panel .badge"),
     positions: document.querySelectorAll(".positions > div").length,
     steps: [...document.querySelectorAll(".plan-steps p")].map(step => step.textContent),
-    depositVisible: visible(".plan-steps li:nth-child(3) p"),
+    planVisible: visible(".plan-steps"),
+    quoteVisible: visible(".quote"), quotePass,
     attribution: read(".attribution"), attributionVisible: visible(".attribution"),
-    peersVisible: visible(".detail-aside section:last-child"),
+    peersVisible: visible(".detail-grid > :last-child > :last-child"),
     curve: read(".curve"), heldOut: read(".misses"),
     stress: read(".detail-aside .facts"), rowCheck: read("#row-check"),
     rowPass: document.querySelector("#row-check")?.dataset.pass,
@@ -352,13 +380,14 @@ async function shoot(output, destination) {
       if (name === "1-board.jpg" && (info.rows.length !== board.length || !info.chart)) throw new Error("The full board did not render.");
       if (name === "2-detail.jpg" && (info.verdict !== "FARM" || info.steps.length < 3
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
-        || !info.steps[0].includes("deposit caps") || !info.steps.some(step => step.startsWith("Exit if TVL"))
+        || !info.steps[0].includes("deposit caps") || !info.steps.some(step => step.startsWith("If TVL"))
         || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps)
-        || !info.attributionVisible || !info.depositVisible || !info.peersVisible
+        || !info.attributionVisible || !info.planVisible || !info.quoteVisible || !info.quotePass || !info.peersVisible
         || !["TVL size", "7d carry", "Age on odds", "Issuer"].every(label => info.attribution?.includes(label))
-        || !/^Deposit \$[\d,]+ USDC .*Max gas \+ slippage \$[\d.]+ \([\d.]+% of capital\)\. Abort/.test(info.steps[2])
-        || !info.stress?.includes("depositor share"))) {
-        throw new Error("The detail route must show board-matched farm steps, attribution, deposit limits and resized stress.");
+        || !info.steps.some(step => step.includes("p*") && /Gas \+ slip cap \$[\d.]+/.test(step))
+        || !info.steps.some(step => step.includes("deposit $80 USDC and withdraw it"))
+        || !info.stress?.includes("½ share"))) {
+        throw new Error(`Detail checks failed: ${JSON.stringify(info)}`);
       }
       if (name === "3-filtered.jpg" && (!info.portfolio || info.positions < 3 || info.scope !== "watchlist" || info.filter !== "FARM"
         || !info.rows.length || info.rows.some(row => row[6] !== "FARM" || !row[7]))) {
@@ -375,7 +404,7 @@ async function shoot(output, destination) {
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
     }
     console.log("Firefox reported no console errors or uncaught exceptions.");
-    console.log("Calibration route and detail attribution, deposit visibility and board-matched steps pass.");
+    console.log("Calibration, detail attribution, board-matched decision tree, and live quote update and reset pass.");
   } finally {
     spawnSync("find", [work, "-mindepth", "1", "-delete"]);
     rmdirSync(work);
