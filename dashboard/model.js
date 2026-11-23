@@ -46,7 +46,6 @@
   snap.protocols.forEach((p) => { if (hasToken(p) && firstWord(p.name).length >= 3) w[firstWord(p.name)] = p.name; });
   return w;
  }
- // The fits use the original product exclusions.
  function productOf(p, forBoard) {
   if (p.category === 'CEX') return 'exchange';
   if (p.category === 'Restaked BTC' || /bridge/i.test(p.category || '') || (!forBoard && LIQUID.test(p.category))) return p.category.toLowerCase();
@@ -62,7 +61,7 @@
  }
  function bySlug(a, b) { return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0; }
 
- // The value curve, fitted on trading tokens: one point per CoinGecko id.
+ // One fit point per CoinGecko id.
  function calibrate(snap) {
   var tok = {}, order = [];
   snap.protocols.forEach((p) => {
@@ -159,7 +158,7 @@
  function sig(z) { return 1 / (1 + Math.exp(-z)); }
  function dot(w, x) { return x.reduce((s, v, i) => s + v * w[i], 0); }
 
- // Each value term tested on real market caps, leave-one-out and walk-forward.
+ // Hold out real market caps.
  function termTests(pts, asOf) {
   var ages = pts.map((q) => ageDays(asOf, q.p.listed_at));
   var mid = ages.filter((a) => a != null).sort((a, b) => a - b);
@@ -189,7 +188,6 @@
    r.key = t[0]; r.label = t[1];
    return r;
   });
-  // ok = beats its rival term.
   T.forEach((t, i) => { var b = T[i < 3 ? i - 1 : 2]; t.ok = i ? t.loo < b.loo && t.wf < b.wf && t.lofo < b.lofo : null; });
   return { terms: T, wf_n: dated.length - cut, wf_train: cut, wf_from: dated[cut].p.listed_at };
  }
@@ -247,11 +245,10 @@
   var sizeMult = Math.pow(tvlNext / M.ref_tvl, fit.slope);
   var fitted = tvlNext * fam.multiple * sizeMult;
   var age = ageDays(asOf, p.listed_at), ageUsed = age == null ? ageFallback : age;
-  // Token-record score: share of similar peers recording a token today.
   var f0 = fit.odds.F(p, ageUsed), timeF = f0;
   var implied = Math.max(1, Math.round(fitted * timeF * haircut));
 
-  // Drop APR: drop_share of the value over the season's dollar-days.
+  // Gross drop APR over season dollar-days.
   var apr = fitted * M.drop_share / (tvlNext * (Math.min(ageUsed, M.season_days) + M.farm_days)) * 365;
   return { slope: fit.slope, family: fam.key, growth: growth, growth_imputed: p.change_7d == null,tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
    fitted: Math.round(fitted), age: age, age_used: ageUsed, time_factor: timeF, f0: f0, implied: implied, haircut: haircut,
@@ -307,7 +304,6 @@
   var verdictAt = (all) => !v.caution && drop >= M.target_cover * all ? 'farm' : drop >= all ? 'marginal' : 'skip';
   var verdict = verdictAt(t.all);
   var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
-  // Least capital (to $1M) whose drop covers its recomputed costs.
   var payCap = 0, at = (c) => cov(Math.round(c / 1.25));
   for (var c = 25000, lo = 0; !payCap && c <= 1000000; lo = c, c = Math.round(c * 1.25)) if (at(c) >= M.target_cover) {
    for (payCap = Math.floor(lo / 1000) * 1000 + 1000; at(payCap) < M.target_cover;) payCap += 1000;
@@ -323,17 +319,16 @@
     { when: 'Day 0', usd: 0, min: 5, act: 'Write down the trigger that flips this plan: an announced allocation of at least ' + (needShare * 100).toFixed(0) + '% to depositors, ' + (payCap ? 'capital of ' + amt(payCap) + ' to commit, ' : '') + 'or TVL below ' + usd(p.tvl_usd * Math.pow(M.target_cover * t.all / drop, 1 / v.slope)) + ' (a deposit\'s drop grows as TVL^' + v.slope.toFixed(2) + ', other figures fixed)' },
     { when: 'Day 30', usd: 0, min: 10, act: 'Look again on a new snapshot; if the plan now pays ×' + M.target_cover + (v.caution ? ' and rewards are confirmed' : '') + ', follow the full plan (' + usd(capital) + ' capital, about ' + usd(t.cost) + ' in fees, ' + mins(Math.round(t.min)) + ' hands-on)' }];
   }
-  var carry = capital * M.carry_rate * M.farm_days / 365, stress = ACT[kind][4];
+  var carry = capital * M.carry_rate * M.farm_days / 365, stress = ACT[kind][4], net = drop - t.all;
   return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map((m) => { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, verdictAt(a.all)]; }), stake: capital, eligible: eligible(stake), tranches: tranches(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, all_in: t.all,
-   days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, cert: cert, verdict: verdict };
+   days: M.farm_days, drop: drop, net: net, net_apr: net / capital * (365 / M.farm_days), need_share: needShare, pay_cap: payCap, cert: cert, verdict: verdict };
  }
  function stepText(s) {
-  // Over 600 characters the action is shortened, never the cost and time.
+  // Preserve cost and time within 600 characters.
   var tail = '. Cost: about ' + usd(s.usd) + '. Time: ' + mins(s.min) + '.', head = s.when + ': ' + s.act;
   return (head.length + tail.length > 600 ? head.slice(0, 597 - tail.length) + '...' : head) + tail;
  }
 
- // Fit the model and rank the board.
  function build(snap) {
   var fit = calibrate(snap);
   var watch = {};
@@ -361,7 +356,7 @@
    for (k = 0; k < 30; k++) { var m = Math.sqrt(lo * hi); if (at(m) > up) hi = m; else lo = m; }
    r.flip = hi;
   });
-  // Rank crossing: each row's rank under three declared alternatives.
+ // Rank under each alternative.
   var F0 = (r, a) => fit.odds.F(Object.assign({}, r.p, { change_7d: 0 }), a);
   var ALT = { 'without momentum': (r) => r.v.fitted * Math.pow(r.p.tvl_usd / r.v.tvl_next, 1 + fit.slope) * F0(r, r.v.age_used) * r.v.haircut,
    'score without age': (r) => r.v.fitted * fit.odds.F(r.p, fit.odds.mid) * r.v.haircut,
@@ -379,7 +374,7 @@
     .sort((a, b) => b.s - a.s || bySlug(a.r.p, b.r.p)).forEach((o, i) => { o.r.draws.push(i + 1); if (i < 20) o.r.boot += 1 / 40; });
   }
   rows.forEach((r) => { var d = r.draws.sort((a, b) => a - b); r.rlo = d[4]; r.rhi = d[35]; delete r.draws; });
-  // Imputed ages: rank re-taken at the 25th and 75th percentile of observed ages.
+  // Rank at age quartiles when age is missing.
   var q = (t) => ages[Math.floor((ages.length - 1) * t)];
   rows.filter((r) => r.v.age == null).forEach((r) => {
    r.ageRange = [q(0.25), q(0.75)].map((a) => {
@@ -400,7 +395,7 @@
    return { rank: r.rank, slug: r.p.slug, name: r.p.name, implied_value_usd: r.v.implied,
     farm_steps: r.plan.steps.map(stepText),
     token_status: 'pre-token', on_watchlist: r.watch, implied_low_usd: r.v.low, implied_high_usd: r.v.high,
-    farm: { capital_usd: r.plan.stake, cost_usd: +r.plan.cost.toFixed(2), minutes: r.plan.minutes, drop_usd: +r.plan.drop.toFixed(2), stress_usd: +r.plan.stress_usd.toFixed(2), verdict: r.plan.verdict } };
+    farm: { capital_usd: r.plan.stake, cost_usd: +r.plan.cost.toFixed(2), minutes: r.plan.minutes, drop_usd: +r.plan.drop.toFixed(2), net_usd: +r.plan.net.toFixed(2), net_apr_if_launched: r.plan.net_apr, days: r.plan.days, stress_usd: +r.plan.stress_usd.toFixed(2), verdict: r.plan.verdict } };
   });
  }
 
