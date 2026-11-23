@@ -7,7 +7,7 @@
   const DAY = 86_400_000;
   const A = {
     growthClip: [-30, 30], missingGrowth: 0, haircut: 0.65, year: 365,
-    tvlReference: 100_000_000, missingAgeFallback: 365, annualizationFloor: 365,
+    tvlReference: 100_000_000, missingAgeFallback: 365, oddsReferenceYears: 2,
     familyPenalty: 2, oddsPenalty: 1, valueWarmup: 25, oddsWarmup: 60,
     bootstrapDraws: 192, bootstrapSeed: 918273, bandQuantiles: [0.1, 0.9],
     hourlyUsd: 20, depositorShare: 0.05, competingTvlShare: 0.20,
@@ -259,8 +259,7 @@
 
   function launchOdds(fit, p) {
     const observed = sigmoid(dot(oddsFeatures(p, fit.ageFallback), fit.coefficients));
-    const exposure = Math.max(A.annualizationFloor, p.ageDays ?? fit.ageFallback);
-    return { observed, s: -Math.expm1(Math.log1p(-observed) * A.year / exposure) };
+    return { observed, s: -Math.expm1(Math.log1p(-observed) / A.oddsReferenceYears) };
   }
 
   function auc(scored, key) {
@@ -322,15 +321,15 @@
   function evaluateFarm(plan, capital, costMultiplier = 1, shareMultiplier = 1) {
     const share = A.depositorShare * shareMultiplier;
     const ownership = capital / (plan.competingTvl + capital);
-    const exposure = plan.conditionalValue * ownership;
+    const exposure = plan.impliedValue * ownership;
     const cost = capital > 0 ? (plan.fixedCost + capital * plan.feeRate) * costMultiplier : 0;
-    const conditionalGross = exposure * share;
-    const expectedGross = conditionalGross * plan.s;
+    const conditionalGross = plan.conditionalValue * ownership * share;
+    const expectedGross = exposure * share;
     const multiple = cost > 0 ? expectedGross / cost : 0;
     const rating = multiple + 1e-10 >= A.farmMultiple ? "FARM" : multiple >= 1 ? "MARGINAL" : "SKIP";
     const verdict = plan.capped && rating === "FARM" ? "MARGINAL" : rating;
     return { capital, cost, expectedGross, conditionalGross, net: expectedGross - cost, verdict, multiple,
-      breakEvenShare: exposure * plan.s > 0 ? cost / (exposure * plan.s) : null,
+      breakEvenShare: exposure > 0 ? cost / exposure : null,
       expectedYield: capital > 0 ? (expectedGross - cost) / capital : null,
       conditionalApr: capital > 0 ? (conditionalGross - cost) / capital : null };
   }
@@ -357,7 +356,7 @@
     const plan = {
       mechanism: p.family, chain, handsOnMinutes, timeCost, feeBps, feeRate: feeBps / 10_000,
       competingTvl: p.tvl_usd * A.competingTvlShare, conditionalValue: p.valueIfLaunched * p.haircut,
-      fixedCost: chain.total + timeCost, capped: Boolean(p.flags.length), s: p.s
+      fixedCost: chain.total + timeCost, capped: Boolean(p.flags.length), impliedValue: p.implied_value_usd
     };
     // Gross/cost peaks where feeRate * capital² equals competingTvl * fixedCost.
     const peak = limit(Math.round(Math.sqrt(plan.competingTvl * plan.fixedCost / plan.feeRate)), A.minCapital, A.maxCapital);
@@ -371,12 +370,13 @@
     const exitFloor = p.tvl_usd * A.exitTvlShare;
     const depositCost = chain.gas * actions + result.capital * plan.feeRate;
     const routeCheck = chain.estimated ? "Confirm the fallback quote." : "Verify the route.";
-    const decision = baseFarm ? "Require documented eligibility and redemptions."
-      : result.verdict === "MARGINAL" ? "Wait for eligibility terms." : "Keep funds unallocated.";
+    const decision = baseFarm ? "Verify eligibility and redemptions."
+      : result.verdict === "SKIP" ? "Keep funds unallocated."
+      : plan.capped ? "Issuer flag caps verdict." : `Drop falls short of ${A.farmMultiple}× cost.`;
     const steps = [
-      `${result.verdict} · Check ${p.name} eligibility (${dollars(A.eligibilityMinutes * A.hourlyUsd / 60)} labor, ${A.eligibilityMinutes} minutes). ${decision} Break-even depositor share is ${percent(result.breakEvenShare)} of launched value.`,
+      `${result.verdict} · Expected drop ${dollars(result.expectedGross)} vs ${dollars(result.cost)} all-in. Break-even pool ${percent(result.breakEvenShare)} of launched value. ${decision} Check eligibility (${dollars(A.eligibilityMinutes * A.hourlyUsd / 60)}, ${A.eligibilityMinutes} min).`,
       `Fund ${chain.name} after checks. Allow ${dollars(chain.bridge)} round trip, ${chain.bridgeMinutes} minutes elapsed and ${A.routeHandsOnMinutes} minutes hands-on. ${routeCheck}`,
-      `Model ${whole(result.capital)} for ${A.year} days at ${dollars(result.cost)} all-in and ${handsOnMinutes} minutes of work. Expect ${dollars(result.expectedGross)} against a ${dollars(A.farmMultiple * result.cost)} target.`,
+      `Size ${whole(result.capital)} for ${A.year} days with ${handsOnMinutes} minutes of work and a ${dollars(A.farmMultiple * result.cost)} drop target.`,
       `${p.family} · ${depositAction} on ${chain.name} through ${p.name}. Budget ${dollars(depositCost)} in round-trip gas and fees and ${depositMinutes} minutes to enter.`,
       `Log position, eligibility and TVL weekly. Budget ${dollars(A.weeklyMinutes * A.hourlyUsd / 60)} for ${A.weeklyMinutes} minutes per check and $0 gas.`,
       `Exit below ${whole(exitFloor)} TVL or after ${A.year} days. Allow ${A.exitMinutes} minutes to check queues and redeem. Gas is in the ${dollars(depositCost)} round trip.`,
@@ -505,10 +505,10 @@
         "Value uses positive caps, choosing the largest TVL per token ID.",
         "The flat baseline is median cap/carried TVL. Walk-forward trains on strictly earlier listings.",
         "A term must improve both tests when added. Reported misses also guide selection.",
-        "Constant hazard annualizes token prevalence. AUC tests recorded status because launch dates are absent.",
+        `Assume ${A.oddsReferenceYears} years of exposure for token prevalence and a constant hazard for 12-month odds. AUC tests recorded status.`,
         "Bootstrap bands show curve uncertainty. Audit thresholds use traded cap/carried-TVL percentiles.",
         "Route costs are USD estimates. All listed chains qualify.",
-        "Drop prorates a hypothetical pool by capital. Returns exclude base yield, taxes and principal moves.",
+        "Drop uses implied value and prorates over eligible TVL plus the deposit. Returns exclude yield, taxes and price moves.",
         "Sizing seeks twice cost under stress within the cap, then twice base cost.",
         "The portfolio score-weights viable watchlist tickets and prices each separately."
       ] };
