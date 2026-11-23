@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 
 const width = 1440;
 const height = 980;
-const detailHeight = 1200;
+const detailHeight = 1260;
 const minimum = 300 * 1024;
 const maximum = 350_000;
 
@@ -166,9 +166,11 @@ function readPage() {
     return Boolean(box && box.height && box.top >= 0 && box.bottom <= innerHeight && box.right <= innerWidth);
   };
   const form = document.querySelector("#quote");
-  let quotePass;
+  const halfOdds = () => read(".half-odds");
+  let quotePass, defaultHalfOdds;
   if (form) {
     const initial = read("#quote-result");
+    defaultHalfOdds = halfOdds();
     const inputs = [...form.elements];
     const defaulted = () => inputs.every(input => input.nextElementSibling.textContent === "Default");
     const fieldsValid = inputs.map(input => input.name).join() === "entryGas,exitGas,slippage,delay,lockup";
@@ -182,6 +184,7 @@ function readPage() {
       const after = resultFields();
       quotePass &&= after[0] !== before[0] && after[1] === before[1] && after[2] !== before[2] && after[3] === "SKIP"
         && read("#quote-result").includes("57d at")
+        && halfOdds() !== defaultHalfOdds && halfOdds().includes("SKIP")
         && inputs.every(input => input.nextElementSibling.textContent === "Quoted");
       inputs.forEach(input => { input.value = ""; });
       inputs[0].dispatchEvent(new Event("input", { bubbles: true }));
@@ -192,17 +195,30 @@ function readPage() {
       inputs[0].value = "";
     }
   }
+  const stepItems = [...document.querySelectorAll(".plan-steps li")];
+  const labels = stepItems.map(li => li.querySelector("h3").textContent);
+  const steps = [];
+  for (const li of stepItems) {
+    const copy = li.querySelector("p");
+    const parts = [copy.firstChild.textContent.trim(), li.querySelector("small").textContent];
+    const follow = copy.querySelector("span")?.textContent;
+    if (follow) parts.push(follow.replace(" at token odds (snapshot status) ", " at odds "));
+    if (li.querySelector("h3").textContent === "3c Wait") steps[steps.length - 1] += " " + parts.join(" ");
+    else steps.push(parts.join(" "));
+  }
   return {
     checks: read("#checks"), title: read("h1"), count: read("#row-count"), first: read("tbody tr th a"),
-    portfolio: read(".portfolio h2"), verdict: read(".plan-panel .badge"),
+    portfolio: read(".portfolio h2"), verdict: read(".verdict-summary .badge"),
+    summary: read(".verdict-summary"), defaultHalfOdds,
+    oddsNote: read("#quote-result + p"),
     positions: document.querySelectorAll(".positions > div").length,
-    steps: [...document.querySelectorAll(".plan-steps p")].map(step => step.textContent),
+    labels, steps,
     planVisible: visible(".plan-steps"),
     quoteVisible: visible(".quote"), quotePass,
     attribution: read(".attribution"), attributionVisible: visible(".attribution"),
     peersVisible: visible(".detail-grid > :last-child > :last-child"),
     curve: read(".curve"), heldOut: read(".misses"),
-    stress: read(".detail-aside .facts"), rowCheck: read("#row-check"),
+    stress: read(".detail-aside .facts"), stressVisible: visible(".detail-aside .facts"), rowCheck: read("#row-check"),
     rowPass: document.querySelector("#row-check")?.dataset.pass,
     chart: read(".chart-note"), scope: document.querySelector("#filter-scope")?.value,
     filter: document.querySelector("#filter-verdict")?.value,
@@ -221,7 +237,8 @@ function startFirefox(work, args, prefs = "") {
   const child = spawn("/usr/bin/firefox", ["--headless", "--no-remote", "--profile", profile, ...args], {
     env: {
       ...process.env, MOZ_CRASHREPORTER_DISABLE: "1",
-      XDG_CONFIG_HOME: join(work, "config"), XDG_CACHE_HOME: join(work, "cache"), XDG_DATA_HOME: join(work, "data")
+      XDG_CONFIG_HOME: join(work, "config"), XDG_DATA_HOME: join(work, "data"),
+      XDG_CACHE_HOME: process.env.XDG_CACHE_HOME || "/work/.tmp/cache"
     }, stdio: ["ignore", "pipe", "pipe"], detached: true
   });
   const output = { stdout: "", stderr: "" };
@@ -379,6 +396,9 @@ async function shoot(output, destination) {
       }
       if (name === "1-board.jpg" && (info.rows.length !== board.length || !info.chart)) throw new Error("The full board did not render.");
       if (name === "2-detail.jpg" && (info.verdict !== "FARM" || info.steps.length < 3
+        || info.labels.map(label => label.split(" ")[0]).join() !== "1,2a,2b,2c,3a,3b,3c,4,5,6"
+        || !info.summary?.includes("token odds (snapshot status)") || !info.oddsNote?.includes("no launch dates")
+        || !info.defaultHalfOdds?.includes("MARGINAL")
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
         || !info.steps[0].includes("deposit caps") || !info.steps.some(step => step.startsWith("If TVL"))
         || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps)
@@ -386,7 +406,7 @@ async function shoot(output, destination) {
         || !["TVL size", "7d carry", "Age on odds", "Issuer"].every(label => info.attribution?.includes(label))
         || !info.steps.some(step => step.includes("p*") && /Gas \+ slip cap \$[\d.]+/.test(step))
         || !info.steps.some(step => step.includes("deposit $80 USDC and withdraw it"))
-        || !info.stress?.includes("½ share"))) {
+        || !info.stressVisible || !info.stress?.includes("½ share"))) {
         throw new Error(`Detail checks failed: ${JSON.stringify(info)}`);
       }
       if (name === "3-filtered.jpg" && (!info.portfolio || info.positions < 3 || info.scope !== "watchlist" || info.filter !== "FARM"
@@ -400,7 +420,7 @@ async function shoot(output, destination) {
       const dimensions = jpegSize(bytes);
       if (dimensions[0] !== width || dimensions[1] !== info.height) throw new Error("Unexpected screenshot dimensions.");
       writeFileSync(join(destination, name), bytes);
-      const content = [info.title, info.count, info.rowCheck, info.first, info.chart, info.verdict, info.portfolio].filter(Boolean).join(" · ");
+      const content = [info.title, info.count, info.rowCheck, info.first, info.chart, info.summary, info.defaultHalfOdds, info.portfolio].filter(Boolean).join(" · ");
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
     }
     console.log("Firefox reported no console errors or uncaught exceptions.");

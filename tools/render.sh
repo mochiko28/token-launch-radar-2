@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/work/.tmp/cache}
+mkdir -p -- "$XDG_CACHE_HOME"
+
 if [[ $# -lt 1 || $# -gt 2 ]]; then
   printf 'Usage: %s <output dir> [snapshot file or input dir]\n' "$0" >&2
   exit 2

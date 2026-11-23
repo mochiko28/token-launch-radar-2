@@ -62,7 +62,6 @@ const FAMILIES={
 	Network: "Chain|Payments|Decentralized BTC|Anchor BTC|Cross Chain Bridge",
 	Insurance: "Insurance"
 };
-const FAMILY_NAMES=Object.keys(FAMILIES).concat("Other");
 const familyByCategory=new Map(Object.entries(FAMILIES).flatMap(([family,categories]) =>
 	categories.split("|").map(category=>[category,family])));
 const productCategories=new Set(["Bridge","Canonical Bridge","Cross Chain Bridge","Restaked BTC","CEX"]);
@@ -164,27 +163,24 @@ function accumulate(system,x,residual,weight = 1) {
 	}
 }
 
-function valueFeatures(p,terms,fallback) {
-	const features=[1,p.size];
-	if (terms.includes("age")) features.push(ageFeature(p,fallback));
-	if (terms.includes("growth")) features.push(p.growth / 100);
-	if (terms.includes("family")) features.push(...FAMILY_NAMES.map(f=>Number(f === p.family)));
-	return features;
-}
+const valueTerms=[
+	["age","logAge",ageFeature],
+	["growth","clippedGrowth",p=>p.growth / 100],
+	...Object.keys(FAMILIES).concat("Other").map(f=>["family",f,p=>Number(f === p.family)])
+];
+const valueFeatures=(p,features,median) => [1,p.size,...features.map(([, ,read])=>read(p,median))];
 
 function fitValue(points,terms) {
 	const medianDays=medianAge(points);
-	const names=["intercept","logCarriedTvl"];
-	if (terms.includes("age")) names.push("logAge");
-	if (terms.includes("growth")) names.push("clippedGrowth");
-	if (terms.includes("family")) names.push(...FAMILY_NAMES);
-	const system=normalEquations(names.length,names.map(name=>FAMILY_NAMES.includes(name) ? A.familyPenalty : 1e-8));
-	for (const p of points) accumulate(system,valueFeatures(p,terms,medianDays),p.response);
+	const features=valueTerms.filter(([term])=>terms.includes(term));
+	const names=["intercept","logCarriedTvl",...features.map(([,name])=>name)];
+	const system=normalEquations(names.length,[1e-8,1e-8,...features.map(([term])=>term === "family" ? A.familyPenalty : 1e-8)]);
+	for (const p of points) accumulate(system,valueFeatures(p,features,medianDays),p.response);
 	const coefficients=solve(system.matrix,system.target);
-	return {terms,medianDays,coefficients,names};
+	return {terms,features,medianDays,coefficients,names};
 }
 
-const logValue=(fit,p) => dot(valueFeatures(p,fit.terms,fit.medianDays),fit.coefficients);
+const logValue=(fit,p) => dot(valueFeatures(p,fit.features,fit.medianDays),fit.coefficients);
 const medianRatio=points => Math.log(quantile(points.map(p=>p.mcap_usd / p.carriedTvl),0.5));
 
 function folds(points,walk,warmup) {
@@ -288,11 +284,10 @@ function auc(scored) {
 }
 
 function testTokenOdds(points,walk) {
-	const scored=[];
-	for (const {train,test} of folds(points,walk,A.oddsWarmup)) {
+	const scored=folds(points,walk,A.oddsWarmup).flatMap(({train,test})=>{
 		const fit=fitTokenOdds(train);
-		for (const p of test) scored.push({recorded:p.recorded,score:tokenOdds(fit,p)});
-	}
+		return test.map(p=>({recorded:p.recorded,score:tokenOdds(fit,p)}));
+	});
 	return {auc:auc(scored),n:scored.length};
 }
 
@@ -322,7 +317,7 @@ function cheapestChain(chains,actions) {
 	}).sort((a,b) => a.total - b.total || a.bridgeMinutes - b.bridgeMinutes || byText(a.name,b.name))[0];
 }
 
-function evaluateFarm(plan,capital,{quote = plan.quote,cost = 1,share = 1} = {}) {
+function evaluateFarm(plan,capital,{quote = plan.quote,cost = 1,share = 1,odds = plan.odds} = {}) {
 	const {entryGas,exitGas,slippage,delay,lockup}=quote;
 	const holding=Math.max(A.holdDays,lockup) + delay;
 	const gas=(plan.testGas + entryGas + exitGas) * cost;
@@ -334,7 +329,7 @@ function evaluateFarm(plan,capital,{quote = plan.quote,cost = 1,share = 1} = {})
 	const claimSell=(plan.chain.gas * A.claimActions + wage(A.claimMinutes) + drop * slippage / 100) * cost;
 	const payoff=drop - claimSell;
 	const pStar=payoff > 0 ? loss / payoff : null;
-	const expectedPayoff=plan.odds * payoff;
+	const expectedPayoff=odds * payoff;
 	const multiple=expectedPayoff / loss;
 	const rating=multiple < 1 ? "SKIP" : multiple >= A.farmMultiple && !plan.capped ? "FARM" : "MARGINAL";
 	const net=expectedPayoff - loss;
@@ -377,18 +372,22 @@ function farmPlan(p,asOf) {
 	const entryFees=quote.entryGas + capital * quote.slippage / 100;
 	const review=new Date(Date.parse(asOf) + A.reviewDays * DAY).toISOString().slice(0,10);
 	const verified=stepCost(verifyMinutes);
+	const ticket=`${verb.toLowerCase()} ${depositTicket(p,chain.name,capital)}`;
 	const steps=[
-		`If considering ${chain.name}, verify live rewards, asset and KYC, deposit caps for ${whole(capital)}, and withdrawals. ${verified}, reversible.`,
-		`If rules are pending or caps full, wait. ${verified} spent, reversible. Recheck ${review} or when rules publish or caps reopen.`,
-		`If ineligible, a token is recorded, or withdrawals are unsupported, stop. ${verified} spent, reversible.`,
-		`If terms pass and quotes clear FARM, fund ${chain.name}, deposit ${depositTicket(p,chain.name,testUsd)} and withdraw it. ${stepCost(prep,testFees)} hands-on + ${2 * chain.bridgeMinutes} min elapsed. Reversible on receipt.`,
-		`If rehearsal fails or runs late, stop. ${stepCost(verifyMinutes + prep,testFees)} spent. Up to ${whole(testUsd)} locked pending recovery.`,
-		`If checks pass and quotes clear FARM, ${verb.toLowerCase()} ${depositTicket(p,chain.name,capital)}. ${guidance} ${stepCost(depositMinutes,entryFees)}. Gas + slip cap ${costUsd(entryFees)}. Undo gas ${costUsd(quote.exitGas)}. ${verdict} at odds ${percent(p.tokenOdds)} vs p* ${pStar === null ? "unreachable" : percent(pStar)}. Else wait to ${review} for lower costs${plan.capped ? " and cleared flags" : ""} (${stepCost(0)} extra, reversible).`,
-		`If eligible, log receipt and TVL weekly. ${stepCost(weeklyMinutes)} per check, reversible.`,
-		`If TVL < ${whole(p.tvl_usd * A.exitTvlShare)}, 7d change < ${exitGrowth.toFixed(2)}%, token announced, or day ${holdDays}, withdraw. ${stepCost(exitMinutes,quote.exitGas)}. Honor quoted lock and delay.`,
-		`If eligible at launch, claim and sell ${A.firstSaleShare * 100}% at ${whole(p.band.low)} circulating cap, rest near ${whole(p.band.high)}. ${stepCost(claimMinutes,result.claimSell - wage(claimMinutes))}. Undo requires a buyback.`
+		[`If considering ${chain.name}, verify live rewards, asset and KYC, deposit caps for ${whole(capital)}, and withdrawals.`, `${verified}, reversible.`],
+		["If rules are pending or caps full, wait.", `${verified} spent, reversible.`, `Recheck ${review} or when rules publish or caps reopen.`],
+		["If ineligible, a token is recorded, or withdrawals are unsupported, stop.", `${verified} spent, reversible.`],
+		[`If terms pass and quotes clear FARM, fund ${chain.name}, deposit ${depositTicket(p,chain.name,testUsd)} and withdraw it.`, `${stepCost(prep,testFees)} hands-on + ${2 * chain.bridgeMinutes} min elapsed. Reversible on receipt.`],
+		["If rehearsal fails or runs late, stop.", `${stepCost(verifyMinutes + prep,testFees)} spent. Up to ${whole(testUsd)} locked pending recovery.`],
+		[`If checks pass and quotes clear FARM, ${ticket}. ${guidance}`,
+			`${stepCost(depositMinutes,entryFees)}. Gas + slip cap ${costUsd(entryFees)}. Undo gas ${costUsd(quote.exitGas)}.`,
+			`${verdict} at odds ${percent(p.tokenOdds)} vs p* ${pStar === null ? "unreachable" : percent(pStar)}.`,
+			`Else wait to ${review} for lower costs${plan.capped ? " and cleared flags" : ""}`, `(${stepCost(0)} extra, reversible).`],
+		["If eligible, log receipt and TVL weekly.", `${stepCost(weeklyMinutes)} per check, reversible.`],
+		[`If TVL < ${whole(p.tvl_usd * A.exitTvlShare)}, 7d change < ${exitGrowth.toFixed(2)}%, token announced, or day ${holdDays}, withdraw.`, `${stepCost(exitMinutes,quote.exitGas)}. Honor quoted lock and delay.`],
+		[`If eligible at launch, claim and sell ${A.firstSaleShare * 100}% at ${whole(p.band.low)} circulating cap, rest near ${whole(p.band.high)}.`, `${stepCost(claimMinutes,result.claimSell - wage(claimMinutes))}. Undo requires a buyback.`]
 	];
-	return {...plan,...result,steps,stress:{
+	return {...plan,...result,ticket,steps,stress:{
 		doubleCost:sizeFarm(plan,{cost:A.stressCost}),halfShare:sizeFarm(plan,{share:A.stressShare})
 	}};
 }
@@ -396,12 +395,13 @@ function farmPlan(p,asOf) {
 function watchlistPortfolio(rows) {
 	const eligible=rows.filter(p=>p.watchlist && p.plan.verdict === "FARM");
 	const budget=A.portfolioCapital;
+	const summary={budget,eligible:eligible.length};
+	const total=(list,key)=>list.reduce((sum,p)=>sum + p[key],0);
 	for (let n = Math.min(eligible.length,Math.floor(budget / A.capitalLadder[0])); n > 0; n--) {
 		const picks=eligible.map(p=>{
 			const plan={...p.plan,handsOnMinutes:p.plan.handsOnMinutes - upkeep + upkeep / n};
 			return {p,plan,...sizeFarm(plan)};
 		}).filter(p=>p.verdict === "FARM").sort((a,b)=>a.capital - b.capital || a.p.rank - b.p.rank).slice(0,n);
-		const total=(list,key)=>list.reduce((sum,p)=>sum + p[key],0);
 		const minimum=total(picks,"capital");
 		if (picks.length < n || minimum > budget) continue;
 		const score=total(picks.map(({p})=>p),"score"),surplus=(budget - minimum) * 100;
@@ -411,16 +411,16 @@ function watchlistPortfolio(rows) {
 			remaining -= extra;
 			return {slug:p.slug,name:p.name,...evaluateFarm(plan,capital + extra / 100)};
 		});
-		return {budget,capital:budget,unallocated:0,eligible:eligible.length,positions,
+		return {...summary,capital:budget,unallocated:0,positions,
 			cost:total(positions,"cost"),net:total(positions,"net")};
 	}
-	return {budget,capital:0,unallocated:budget,eligible:eligible.length,positions:[],cost:0,net:0};
+	return {...summary,capital:0,unallocated:budget,positions:[],cost:0,net:0};
 }
 
 function boardRows(rows) {
 	return rows.map(p=>({ slug:p.slug,name:p.name,rank:p.rank,
 		implied_value_usd:p.score,launch_value_usd:p.launchValue,token_odds:p.tokenOdds,
-		issuer_factor:p.haircut,farm_steps:p.plan.steps }));
+		issuer_factor:p.haircut,farm_steps:p.plan.steps.map(parts=>parts.join(" ")) }));
 }
 
 function digest(rows) {
