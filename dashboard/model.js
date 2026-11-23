@@ -5,18 +5,19 @@
  var DAY = 86400000;
  var M = {
   version: 'radar-fit-3',
-  ref_tvl: 1e8, // fit reference TVL
+  ref_tvl: 1e8,
   ratio_floor: 0.02, // mcap/TVL clipping
   ratio_cap: 20,
-  growth_floor: -30, // 7-day momentum clipping (%)
+  growth_floor: -30,
   growth_cap: 50,
-  odds_ridge: 1, // L2 penalty of the odds fit: best-calibrated walk-forward of the leave-one-out ties
-  drop_share: 0.10, // assumed share of supply sent to depositors, pro rata to TVL-days
-  farm_days: 90, // the plan's holding window
-  hour_usd: 25, // the reader's hands-on time, priced into every plan
-  carry_rate: 0.04, // a stablecoin savings rate: what the locked capital could earn elsewhere
-  target_cover: 2, // deposit sized so the drop covers gas and time this many times
-  season_days: 365 // TVL-days older than this count as paid by earlier seasons
+  odds_ridge: 1,
+  drop_share: 0.10, // depositor share by TVL-days
+  farm_days: 90,
+  hour_usd: 25,
+  carry_rate: 0.04,
+  target_cover: 2,
+  season_days: 365,
+  product_haircut: 0.65
  };
 
  var FAMILIES = [], FAM_OF = {}, GAS = {}, GAS0 = 0.3, ACT = {};
@@ -35,25 +36,29 @@
   var d = Math.floor((Date.parse(asOf + 'T00:00:00Z') - Date.parse(listed + 'T00:00:00Z')) / DAY);
   return isFinite(d) ? Math.max(0, d) : null;
  }
- // The watchlist's product rule.
- var PRODUCT_CATS = ['Bridge', 'Canonical Bridge', 'Liquid Staking', 'Liquid Restaking', 'Restaked BTC', 'CEX'];
- var VERSIONED = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
+ var LIQUID = /^Liquid (Staking|Restaking)$/;
+ var VERSIONED = /\s([Vv]\d+(\.\d+)?|\d+\.\d+)$/;
  var WRAPPED = /\b(wrapped|staked|staking)\b/i;
  var EXCHANGE = /^(Binance|Coinbase|Bybit|Kraken|Bitget|OKX|Bitfinex|Gemini)\b/;
- // First-word matches flag possible token overlap on ranked rows.
  function firstWord(n) { return n.toLowerCase().split(/[\s.-]+/)[0]; }
  function tokenWords(snap) {
   var w = Object.create(null);
   snap.protocols.forEach((p) => { if (hasToken(p) && firstWord(p.name).length >= 3) w[firstWord(p.name)] = p.name; });
   return w;
  }
- function productOf(p) {
+ // The fits use the original product exclusions.
+ function productOf(p, forBoard) {
   if (p.category === 'CEX') return 'exchange';
-  if (PRODUCT_CATS.indexOf(p.category) >= 0 || /bridge/i.test(p.category || '')) return p.category.toLowerCase();
-  if (VERSIONED.test(p.name)) return 'versioned pool';
+  if (p.category === 'Restaked BTC' || /bridge/i.test(p.category || '') || (!forBoard && LIQUID.test(p.category))) return p.category.toLowerCase();
+  if (!forBoard && VERSIONED.test(p.name)) return 'versioned pool';
   if (WRAPPED.test(p.name)) return 'wrapped or staked';
   if (EXCHANGE.test(p.name)) return 'exchange product';
   return null;
+ }
+ function productFlag(p) {
+  if (LIQUID.test(p.category)) return 'liquid-staking issuer: its receipt token is not a governance token; a drop is less certain';
+  var base = p.name.replace(VERSIONED, '');
+  return base !== p.name ? 'a version of ' + base + ': may share its token' : '';
  }
  function bySlug(a, b) { return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0; }
 
@@ -82,7 +87,7 @@
   var full = fitPoints(pts, k);
   pts.forEach((q, i) => { q.fit = Math.round(predict(full, q)); q.loo = q.mcap / Math.exp(miss[i]); });
   var sorted = miss.slice().sort((u, v) => u - v);
-  // Band check: cut the 50% band on some tokens, count how many of the others it holds.
+  // Held-out coverage of the 50% band.
   var hold = (cal, te) => { cal = cal.slice().sort((u, v) => u - v); var a = quantile(cal, 0.25), b = quantile(cal, 0.75); return [te.filter((m) => m >= a && m <= b).length, te.length]; };
   var di = pts.map((q, i) => i).filter((i) => pts[i].p.listed_at).sort((i, j) => pts[i].p.listed_at < pts[j].p.listed_at ? -1 : pts[i].p.listed_at > pts[j].p.listed_at ? 1 : bySlug(pts[i].p, pts[j].p)), dc = Math.floor(di.length * 0.6);
   var bandWf = hold(di.slice(0, dc).map((i) => miss[i]), di.slice(dc).map((i) => miss[i]));
@@ -235,7 +240,7 @@
   return { b: b, all: all, fams: fams };
  }
 
- function value(p, fit, asOf, ageFallback) {
+ function value(p, fit, asOf, ageFallback, haircut) {
   var fam = fit.families[family(p)];
   var growth = clamp(p.change_7d == null ? 0 : p.change_7d, M.growth_floor, M.growth_cap);
   var tvlNext = p.tvl_usd * (1 + growth / 100);
@@ -244,12 +249,12 @@
   var age = ageDays(asOf, p.listed_at), ageUsed = age == null ? ageFallback : age;
   // Token-record score: share of similar peers recording a token today.
   var f0 = fit.odds.F(p, ageUsed), timeF = f0;
-  var implied = Math.max(1, Math.round(fitted * timeF));
+  var implied = Math.max(1, Math.round(fitted * timeF * haircut));
 
   // Drop APR: drop_share of the value over the season's dollar-days.
   var apr = fitted * M.drop_share / (tvlNext * (Math.min(ageUsed, M.season_days) + M.farm_days)) * 365;
   return { slope: fit.slope, family: fam.key, growth: growth, growth_imputed: p.change_7d == null,tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
-   fitted: Math.round(fitted), age: age, age_used: ageUsed, time_factor: timeF, f0: f0, implied: implied,
+   fitted: Math.round(fitted), age: age, age_used: ageUsed, time_factor: timeF, f0: f0, implied: implied, haircut: haircut,
    low: Math.round(implied * fit.band_low), high: Math.round(implied * fit.band_high), cap_high: Math.round(fitted * fit.band_high), multiple: implied / p.tvl_usd, apr: apr };
  }
 
@@ -266,9 +271,7 @@
 
  var WEEKLY = { dex: [0.0005, 1], deriv: [0.001, 2], predict: [0.01, 2], infra: [0, 2] };
 
- /* A farm plan from the row's own figures: steps with a dollar cost and a time each, on the cheapest of
- * its three main chains. */
- // hour: value of an hour; on: the reader's chain filter.
+ // Use the cheapest of the three main chains unless the reader selects one.
  function farmPlan(p, v, dep, hour, on) {
   var hr = hour == null ? M.hour_usd : hour;
   var main = p.chains.slice(0, 3), chain = main[0] || 'its main chain';
@@ -336,20 +339,20 @@
   snap.watchlist.forEach((s) => { watch[s] = true; });
   var noToken = snap.protocols.filter((p) => !hasToken(p) && p.tvl_usd > 0);
   var words = tokenWords(snap);
-  var pre = noToken.filter((p) => watch[p.slug] || !productOf(p));
-  var products = noToken.map((p) => ({ p: p, kind: productOf(p) })).filter((x) => x.kind && !watch[x.p.slug])
+  var pre = noToken.filter((p) => watch[p.slug] || !productOf(p, true));
+  var products = noToken.map((p) => ({ p: p, kind: productOf(p, true) })).filter((x) => x.kind && !watch[x.p.slug])
    .sort((a, b) => b.p.tvl_usd - a.p.tvl_usd || bySlug(a.p, b.p));
-  var ages = pre.map((p) => ageDays(snap.as_of, p.listed_at)).filter((a) => a != null).sort((a, b) => a - b);
+  var ages = pre.filter((p) => watch[p.slug] || !productOf(p)).map((p) => ageDays(snap.as_of, p.listed_at)).filter((a) => a != null).sort((a, b) => a - b);
   var ageFallback = ages.length ? ages[ages.length >> 1] : 365;
   var rows = pre.map((p) => {
-   var v = value(p, fit, snap.as_of, ageFallback);
-   return { p: p, v: v, plan: farmPlan(p, v), watch: !!watch[p.slug], below: p.tvl_usd < snap.floor_usd, wordMatch: words[firstWord(p.name)] };
+   var flag = productFlag(p), v = value(p, fit, snap.as_of, ageFallback, flag ? M.product_haircut : 1);
+   return { p: p, v: v, plan: farmPlan(p, v), watch: !!watch[p.slug], below: p.tvl_usd < snap.floor_usd, wordMatch: words[firstWord(p.name)], flag: flag };
   });
   rows.sort((a, b) => b.v.implied - a.v.implied || bySlug(a.p, b.p));
   rows.forEach((r, i) => { r.rank = i + 1; });
   // Flip threshold: the TVL multiple, others fixed, at which a row would pass the one above it.
   rows.forEach((r, i) => {
-   var up = i && rows[i - 1].v.implied, at = (f) => value(Object.assign({}, r.p, { tvl_usd: r.p.tvl_usd * f }), fit, snap.as_of, ageFallback).implied, lo = 1, hi = 2, k;
+   var up = i && rows[i - 1].v.implied, at = (f) => value(Object.assign({}, r.p, { tvl_usd: r.p.tvl_usd * f }), fit, snap.as_of, ageFallback, r.v.haircut).implied, lo = 1, hi = 2, k;
    if (!up) return;
    for (k = 0; k < 12 && at(hi) <= up; k++) { lo = hi; hi *= 2; }
    if (at(hi) <= up) return;
@@ -358,8 +361,8 @@
   });
   // Rank crossing: each row's rank under three declared alternatives.
   var F0 = (r, a) => fit.odds.F(Object.assign({}, r.p, { change_7d: 0 }), a);
-  var ALT = { 'without momentum': (r) => { var a = r.v.age_used, f0 = F0(r, a); return r.v.fitted * Math.pow(r.p.tvl_usd / r.v.tvl_next, 1 + fit.slope) * f0; },
-   'score without age': (r) => r.v.fitted * fit.odds.F(r.p, fit.odds.mid),
+  var ALT = { 'without momentum': (r) => r.v.fitted * Math.pow(r.p.tvl_usd / r.v.tvl_next, 1 + fit.slope) * F0(r, r.v.age_used) * r.v.haircut,
+   'score without age': (r) => r.v.fitted * fit.odds.F(r.p, fit.odds.mid) * r.v.haircut,
    'if launched': (r) => r.v.fitted };
   Object.keys(ALT).forEach((k) => { rows.slice().sort((a, b) => ALT[k](b) - ALT[k](a) || bySlug(a.p, b.p)).forEach((r, i) => { (r.alt = r.alt || {})[k] = i + 1; }); });
   // Bootstrap: 40 seeded refits of curve and score.
@@ -369,7 +372,7 @@
    var bs = fit.points.map(() => fit.points[Math.floor(rnd() * fit.points.length)]), bf = fitPoints(bs, fit.k), Fb = fit.odds.boot(rnd);
    rows.map((r) => {
     var qb = Fb(r.p, r.v.age_used);
-    return { r: r, s: r.v.tvl_next * Math.exp(bf.fams[r.v.family].ln + bf.b * Math.log(r.v.tvl_next / M.ref_tvl)) * qb };
+    return { r: r, s: r.v.tvl_next * Math.exp(bf.fams[r.v.family].ln + bf.b * Math.log(r.v.tvl_next / M.ref_tvl)) * qb * r.v.haircut };
    })
     .sort((a, b) => b.s - a.s || bySlug(a.r.p, b.r.p)).forEach((o, i) => { o.r.draws.push(i + 1); if (i < 20) o.r.boot += 1 / 40; });
   }
@@ -378,7 +381,7 @@
   var q = (t) => ages[Math.floor((ages.length - 1) * t)];
   rows.filter((r) => r.v.age == null).forEach((r) => {
    r.ageRange = [q(0.25), q(0.75)].map((a) => {
-    var val = r.v.fitted * fit.odds.F(r.p, a);
+    var val = r.v.fitted * fit.odds.F(r.p, a) * r.v.haircut;
     return { age: a, rank: 1 + rows.filter((o) => o !== r && o.v.implied > val).length };
    });
   });

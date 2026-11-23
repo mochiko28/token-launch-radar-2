@@ -9,7 +9,8 @@
  const FAM = {}; R.FAMILIES.forEach((f) => { FAM[f[0]] = f[1]; });
  const bySlug = Object.create(null); rows.forEach((r) => { bySlug[r.p.slug] = r; });
  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
- const nameFlag = (r) => r.wordMatch ? `<small>Name shares a word with ${esc(r.wordMatch)}, whose token may already cover this protocol.</small>` : '';
+ const nameFlag = (r) => (r.flag ? `<small>${esc(r.flag)}</small>` : '') +
+  (r.wordMatch ? `<small>Name shares a word with ${esc(r.wordMatch)}, whose token may already cover this protocol.</small>` : '');
  const pct = (x, d) => (x == null ? 'n/a' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d == null ? 1 : d) + '%');
  const mult = (x) => '×' + (x >= 10 ? x.toFixed(1) : x >= 1 ? x.toFixed(2) : x.toFixed(3));
  const days = (d) => (d == null ? '?' : d >= 365 ? (d / 365).toFixed(1) + 'y' : d + 'd');
@@ -112,18 +113,19 @@
  }
 
  const O = fit.odds, pc = (x) => (x * 100).toFixed(0) + '%';
+ const eq = `<p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × s × h, where h = ${M.product_haircut} for liquid-staking issuers and versioned pools, 1 otherwise</p>`;
  function formula() {
   const T = fit.tests, x = (v) => '×' + v.toFixed(2);
   const used = { flat: 'baseline', spot: 'replaced', size: 'fitted', family: fit.k === Infinity ? 'dropped' : 'k=' + fit.k, growth: 'not used', age: 'via score' };
   return `<div class="card model">
    <h2>Value model <span>fitted on this snapshot's ${fit.n} trading tokens</span></h2>
-   <p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × s</p>
+   ${eq}
    <table class="mini tests"><thead><tr><th>Term · held-out median miss</th><th class="num">Leave-one-out</th><th class="num">Walk-fwd</th><th class="num">Family out</th><th class="num">Use</th></tr></thead><tbody>
    ${T.terms.map((t) => `<tr class="${t.ok ? 'pick' : ''}"><td>${t.label}</td><td class="num">${x(t.loo)}</td><td class="num">${x(t.wf)}</td><td class="num">${x(t.lofo)}</td><td class="num">${used[t.key]}</td></tr>`).join('')}</tbody></table>
    <table class="mini tests"><thead><tr><th>Score s · held-out Brier</th><th class="num">Walk-fwd</th><th class="num">Family out</th></tr></thead><tbody>
    ${O.terms.map((t, i) => `<tr class="${i ? '' : 'pick'}"><td>${t[0]}</td><td class="num">${t[1].toFixed(3)}</td><td class="num">${t[2].toFixed(3)}</td></tr>`).join('')}</tbody></table>
    <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. s: a logistic fit on ${O.n} peers (${O.with_token} record a token): AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out.</p>
-   <p class="note"><b>Missing ages:</b> ${rows.filter((r) => r.ageRange).length} ranked rows have no listing date and use the median age; re-ranked at the 25th and 75th percentile of observed ages they move: ${rows.filter((r) => r.ageRange).map((r) => `${esc(r.p.name)} #${r.ageRange[0].rank}–#${r.ageRange[1].rank}`).join(', ')}.</p>
+   <p class="note"><b>Missing ages:</b> ${rows.filter((r) => r.ageRange).length} rows use the original board's median age. Ranks at its 25th and 75th age percentiles: ${rows.filter((r) => r.ageRange).map((r) => `${esc(r.p.name)} #${r.ageRange[0].rank}–#${r.ageRange[1].rank}`).join(', ')}.</p>
    <p class="note"><b>Not a launch forecast:</b> s scores whether a peer <i>records</i> a token today; the snapshot has no launch dates.</p>
    <p class="note">Leave-one-out miss by TVL band: ${fit.bands.map((b) => `<b>${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} ×${b.miss.toFixed(1)}</b> (${b.n} tokens; ${rows.filter((r) => r.p.tvl_usd >= b.lo && r.p.tvl_usd < b.hi).length} ranked)`).join(' · ')}.</p></div>`;
  }
@@ -203,8 +205,8 @@
   </section>
   <section class="hero slim">
    <div class="lead">
-    <h1>${rows.length} pre-token protocols, ranked by token value × token-record score${st.sort === 'rank' ? '' : `<small> · shown by ${{ g: '7-day change', age: 'days tracked', odds: 'score', apr: 'drop APR', plan: 'farm plan' }[st.sort] || st.sort} ${st.dir === 'asc' ? '▲' : '▼'}</small>`}</h1>
-    ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link(CLEAR)}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>${ctl}` : `<p class="eq">value = T × ${mult(fit.base)} × (T ÷ $100M)<sup>${fit.slope.toFixed(2)}</sup> × s</p>
+    <h1>${rows.length} pre-token protocols, ranked by implied value${st.sort === 'rank' ? '' : `<small> · shown by ${{ g: '7-day change', age: 'days tracked', odds: 'score', apr: 'drop APR', plan: 'farm plan' }[st.sort] || st.sort} ${st.dir === 'asc' ? '▲' : '▼'}</small>`}</h1>
+    ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link(CLEAR)}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>${ctl}` : `${eq}
     <p class="checkline ${CHECKS.every((c) => c[0]) ? 'ok' : 'bad'}"><b>${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass</b>, run on load: ${[5, 1, 6, 0].map((i) => CHECKS[i][1]).join(' · ')}${CHECKS.filter((c) => !c[0]).map((c) => ' · ✗ ' + c[1]).join('')} · <a href="${link({ view: 'model' })}">all checks →</a></p>${ctl}`}
    </div>
    <div class="card chartcard"><h2>Radar <span>days without a token × airdrop yield</span></h2>${chart(shown, 300)}</div>
@@ -250,6 +252,7 @@
       ${line('Size curve', '(TVL ÷ $100M)<sup>' + fit.slope.toFixed(2) + '</sup>, slope fitted on the ' + fit.n + ' tokens', mult(v.size_mult))}
       ${line('Value if launched', 'what a trading peer of this size is worth', usd(v.fitted), 'sum')}
       ${line('Token-record score s', 'share of peers with this TVL, ' + (v.age == null ? 'median ' + v.age_used : v.age) + ' days tracked, 7-day change and family that record a token', pc(v.time_factor))}
+      ${r.flag ? line('Product haircut', esc(r.flag), '×' + v.haircut.toFixed(2)) : ''}
       ${line('Implied value', 'rank ' + r.rank + ' of ' + rows.length + ' on this number', usd(v.implied), 'total')}
      </table>
      <div class="scale">
@@ -288,7 +291,7 @@
  }
  function aside() {
   return `<section class="intro"><h1>${radar.products.length} products set aside</h1>
-   <p>These protocols record no token and match the watchlist's category or product-name exclusions.</p></section>
+   <p>These protocols record no token and match the board's bridge, exchange, Restaked BTC, or wrapped or staked product exclusions.</p></section>
    <div class="tablewrap">${tbl('board', ['Product', 'Why set aside', '#TVL', '#7d'], radar.products.map((x) => [nm(x.p.name, x.p.chains.slice(0, 3).join(', ')), `<span class="tag">${esc(x.kind)}</span>`, usd(x.p.tvl_usd), pct(x.p.change_7d)]))}</div>`;
  }
 
@@ -309,7 +312,7 @@
   app.innerHTML = st.p ? (bySlug[st.p] && bySlug[st.vs] ? compare(bySlug[st.p], bySlug[st.vs]) : detail(st)) : st.view === 'model' ? model() : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
   const d = document.getElementById('drawn'), sh = d && filtered(st), trs = [...app.querySelectorAll('tr[data-slug]')];
   if (d) { const ok = trs.length === sh.length && trs.every((t, i) => t.dataset.slug === sh[i].p.slug && t.querySelector('td.val b').textContent === usd(sh[i].v.implied)); d.className = ok ? 'up' : 'down'; d.textContent = ok ? `✓ table drawn = model (${trs.length} rows)` : '✗ table drawn ≠ model'; }
-  document.getElementById('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied value = the radar's own value if launched × its token-record score; never make.fun's claim. A protocol may hold a token DefiLlama does not record.`;
+  document.getElementById('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied value = this entry's value if launched × token-record score × any product haircut. A protocol may hold a token DefiLlama does not record.`;
   if (st.p) window.scrollTo(0, 0);
  }
  app.addEventListener('input', (e) => {
