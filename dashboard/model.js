@@ -312,8 +312,8 @@
    cert = cert || [payCap - 1000, at(payCap - 1000), payCap, at(payCap)];
   }
   st.unshift({ when: 'Before you start', usd: 0, min: 5, act: 'Decide: ' + Math.round(v.time_factor * 100) + '% of peers like it record a token, so the score-weighted drop is ' + usd(drop * v.time_factor) + ' (×' + (drop * v.time_factor / t.all).toFixed(2) + ' the costs); if it launches, at ' + amt(capital) + ' the modeled drop of ' + usd(drop) + ' covers the plan\'s ' + usd(t.all) +
-   ' of gas, fees and time (5 min of it this check) ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + (verdict === 'farm' ? '' : '; before your time it nets ' + (drop >= t.cost ? '+' : '−') + usd(Math.abs(drop - t.cost)) + ', and ' + (payCap ? 'it would pay ×' + M.target_cover + ' at ' + amt(payCap) + ' of capital (' + amt(payCap - 1000) + ' pays only ×' + at(payCap - 1000).toFixed(3) + ')' : 'no deposit up to $1M pays ×' + M.target_cover + ' because its fees grow with the deposit')) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
-   '% of the token goes to depositors (the model assumes ' + M.drop_share * 100 + '%; at 5% it pays ×' + (drop / t.all / 2).toFixed(2) + ', at 20% ×' + (drop / t.all * 2).toFixed(2) + '), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless the team announces a larger user allocation' : 'farm it only with funds already on ' + chain) });
+   ' of gas, fees and time ×' + (drop / t.all).toFixed(2) + '; with no reward it loses ' + usd(t.all) + (verdict === 'farm' ? '' : '; before your time it nets ' + (drop >= t.cost ? '+' : '−') + usd(Math.abs(drop - t.cost)) + ', and ' + (payCap ? 'it would pay ×' + M.target_cover + ' at ' + amt(payCap) + ' of capital' : 'no deposit up to $1M pays ×' + M.target_cover + ' because its fees grow with the deposit')) + '; it pays ×' + M.target_cover + ' if at least ' + (needShare * 100).toFixed(1) +
+   '% of the token goes to depositors (assumed ' + M.drop_share * 100 + '%; at 5% it pays ×' + (drop / t.all / 2).toFixed(2) + ', at 20% ×' + (drop / t.all * 2).toFixed(2) + '), so ' + (verdict === 'farm' ? 'farm it, and re-check if the team announces a smaller user allocation' : verdict === 'skip' ? 'skip it unless a larger user allocation is announced' : 'farm it only with funds already on ' + chain) });
   if (verdict === 'skip') {
    st = [st[0],
     { when: 'Day 0', usd: 0, min: 15, act: 'Research only, no deposit: check whether ' + ACT[kind][3].replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain) },
@@ -326,8 +326,9 @@
    days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, cert: cert, verdict: verdict };
  }
  function stepText(s) {
-  var t = s.when + ': ' + s.act + '. Cost: about ' + usd(s.usd) + '. Time: ' + mins(s.min) + '.';
-  return t.length > 600 ? t.slice(0, 597) + '...' : t;
+  // Over 600 characters the action is shortened, never the cost and time.
+  var tail = '. Cost: about ' + usd(s.usd) + '. Time: ' + mins(s.min) + '.', head = s.when + ': ' + s.act;
+  return (head.length + tail.length > 600 ? head.slice(0, 597 - tail.length) + '...' : head) + tail;
  }
 
  /* The whole radar: the fit, the ranked pre-token board, and the trading set kept apart. */
