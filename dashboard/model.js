@@ -232,7 +232,7 @@
  function value(p, fit, asOf, ageFallback, haircut) {
   var fam = fit.families[family(p)];
   var growth = growthOf(p);
-  var tvlNext = p.tvl_usd * (1 + growth / 100);
+  var drift = 1 + growth / 100, tvlNext = p.tvl_usd * drift;
   var sizeMult = pow(tvlNext / M.ref_tvl, fit.slope);
   var fitted = tvlNext * fam.multiple * sizeMult;
   var age = ageDays(asOf, p.listed_at), ageUsed = age == null ? ageFallback : age;
@@ -240,7 +240,7 @@
   var implied = max(1, round(fitted * timeF * haircut));
 
   var apr = fitted * M.drop_share / (tvlNext * (min(ageUsed, M.season_days) + M.farm_days)) * 365;
-  return { slope: fit.slope, family: fam.key, growth, growth_imputed: p.change_7d == null,tvl_next: round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
+  return { slope: fit.slope, family: fam.key, growth, drift, growth_imputed: p.change_7d == null,tvl_next: round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
    fitted: round(fitted), age, age_used: ageUsed, time_factor: timeF, f0: timeF, implied, haircut,
    low: round(implied * fit.band_low), high: round(implied * fit.band_high), cap_high: round(fitted * fit.band_high), multiple: implied / p.tvl_usd, apr };
  }

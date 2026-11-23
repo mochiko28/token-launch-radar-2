@@ -8,7 +8,7 @@
  const radar = R.build(S), { fit, model: M, rows, audit: auditRows } = radar, { usd, mins } = R;
  const { target_cover: cover, hour_usd: rate, drop_share: share } = M;
  const { round, abs, log, sqrt } = Math;
- const dollars = n => '$' + n.toLocaleString('en-US');
+ const dollars = (n, options) => '$' + n.toLocaleString('en-US', options);
  const FAM = Object.fromEntries(R.FAMILIES);
  const bySlug = Object.create(null); rows.forEach(r => { bySlug[r.p.slug] = r; });
  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -266,6 +266,11 @@ ${sensitivity(st, audit)}${ctl}
    `<b>Plan:</b> pays ×${cover} with ≥${pc(r.plan.need_share, 1)} goes to depositors (assumed ${share * 100}%), if a token launches.`
   ];
  }
+ function valueEquation(p, v) {
+  const terms = [[dollars(p.tvl_usd, { maximumFractionDigits: 20 }), 'Snapshot TVL'], [v.drift, '7d drift'],
+   [v.fam_multiple, 'Peer multiple'], [v.size_mult, 'Size curve'], [v.time_factor, 'Token-record score'], [v.haircut, 'Haircut']];
+  return `<p class=value-eq>max($1, round( ${terms.map(([n, l]) => `<span>${n}<small>${l}</small></span>`).join(' × ')} )) = <span><b>${dollars(v.implied)}</b><small>Implied value</small></span></p>`;
+ }
  function detail(st) {
   const r = bySlug[st.p];
   if (!r) return `<p class=empty>No ranked protocol ${esc(st.p)}. <a href="${link({ p: '' })}">Back to the board</a></p>`;
@@ -284,6 +289,7 @@ ${sensitivity(st, audit)}${ctl}
 <p class=sub>${esc(p.chains.join(' · '))}${p.listed_at ? ` — tracked since ${esc(p.listed_at)}` : ' — no listing date'}</p>${nameFlag(r)}</div>
 <div class=dval><small>Implied token value</small><b>${usd(v.implied)}</b><small>50% band ${usd(v.low)} – ${usd(v.high)} · ${mult(v.multiple)} TVL</small><small>Rank ${r.rlo}–${r.rhi} in 80% of 40 refits; top 20 in ${pc(r.boot)}</small><small>Rank #${r.rank}; ${Object.keys(r.alt).map(k => `#${r.alt[k]} ${k}`).join(' · ')}</small></div>
 </section>
+${valueEquation(p, v)}
 <div class=dgrid>
 <div class=col>
 <section class=card><h2>How the value is built <span>model.js value()</span></h2>
