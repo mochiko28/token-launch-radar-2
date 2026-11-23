@@ -1,5 +1,5 @@
 {
- "_note": "Data tables for dashboard/model.js. main.ts passes them to the model and writes them into data.js, so the page runs on the same tables. act[kind] = [main position, second action, how to unwind it, what to check before any spend, [stress event, share of capital it costs]].",
+ "_note": "Shared model tables. act[kind] = [entry, second action, unwind, preflight, [stress event, assumption, exposure (defaults to main stake)]]. Stress assumption is a loss rate, LP price move, or daily hedge funding rate.",
  "families": [
   [
    "vault",
@@ -135,7 +135,8 @@
    "on {C}, {N} lists a USDC vault you can enter without a whitelist, its withdrawal terms (instant or queued) are shown, and its points page names vault deposits as eligible",
    [
     "a 2% haircut if the curator takes a bad-debt loss or the withdrawal queue forces a discounted exit",
-    0.02
+    0.02,
+    "capital"
    ]
   ],
   "lend": [
@@ -145,7 +146,8 @@
    "{N} on {C} accepts USDC as supply and as collateral, the market is not paused or at its supply cap, and its points page names supplying or borrowing as eligible",
    [
     "a liquidation of the borrow at a 5% penalty if the health factor is left to fall below 1.0",
-    0.0125
+    0.05,
+    "side"
    ]
   ],
   "dex": [
@@ -154,8 +156,8 @@
    "remove the liquidity and swap any leftover pair token back to USDC",
    "{N} on {C} has a stablecoin or ETH pool with at least $1M of liquidity, the pool earns points (not only fees), and a $1,000 test swap quotes under 0.3% price impact",
    [
-    "impermanent loss of about 0.6% of the liquidity if the pair's price moves 25% (2√1.25/2.25 − 1)",
-    0.006
+    "about 0.6% impermanent loss on the LP deposit after a 25% rise in the pair's price ratio (full-range constant-product pool)",
+    0.25
    ]
   ],
   "deriv": [
@@ -164,8 +166,9 @@
    "close every open position, then withdraw the margin",
    "{N} on {C} accepts USDC margin from your region without KYC you cannot pass, shows its maker and taker fees, and names trading volume or open interest as eligible for points",
    [
-    "90 days of funding at 0.01% per 8 hours on the hedge leg, about 2.7% of its notional",
-    0.0068
+    "funding at 0.01% every 8 hours on a hedge held for the full plan",
+    0.0003,
+    "side"
    ]
   ],
   "predict": [
@@ -175,7 +178,8 @@
    "{N} is open to your region, accepts USDC on {C}, and states that trading volume or holding positions counts for its rewards",
    [
     "markets resolving against open positions, up to 10% of the weekly share amount",
-    0.025
+    0.10,
+    "side"
    ]
   ],
   "stable": [
@@ -208,13 +212,20 @@
     0.01
    ]
   ],
+  "restake": [
+   "Restake {S} worth of an eligible native asset or staking receipt through {N} on {C}",
+   "Check the operator and services securing the position, and review their slashing rules",
+   "request withdrawal, wait for unbonding and redeem the position",
+   "{N} accepts your asset on {C}, publishes operator slashing and withdrawal terms, and names restaked balances as eligible for rewards",
+   ["a 1% slash of the restaked position after an operator fault", 0.01]
+  ],
   "infra": [
    "Move {S} onto {C} through {N} (bridge, deposit or channel, whichever it offers) and keep it there",
    "Use {s} of it in two other apps on {C} each week, so the wallet looks like a user, not a one-off deposit",
    "move the funds back the same way and send them to an exchange",
-   "{N} has a working deposit or bridge route onto {C} for USDC, publishes its fees and withdrawal time, and runs a points or rewards program for users of that route",
+   "{N} has a working deposit, bridge or payment route on {C} for USDC, publishes fees and withdrawal time, and rewards use of that route",
    [
-    "a 2% loss if the bridge or deposit route is paused or exploited with funds in transit",
+    "a 2% haircut on funds in transit if the route is paused or exploited",
     0.02
    ]
   ]

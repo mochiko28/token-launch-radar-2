@@ -1,4 +1,3 @@
-/* Audit: digest() checks board.json, termTests() tests value, farmPlan() costs and times steps. */
 (function () {
  'use strict';
  const R = window.RadarModel, S = window.SNAPSHOT, app = document.getElementById('app');
@@ -16,6 +15,7 @@
  const days = (d) => (d == null ? '?' : d >= 365 ? (d / 365).toFixed(1) + 'y' : d + 'd');
  const famChip = (f) => `<span class="fam f-${f}"><i></i>${esc(FAM[f])}</span>`;
  const verdictTag = (v) => `<span class="verdict v-${v}">${v}</span>`;
+ const farmBadge = (p) => `<b class="mechanism">${esc(p.mechanism)}</b>`;
  const maxImplied = rows[0].v.implied;
 
  const CLEAR = { q: '', fam: '', chain: '', scope: 'all', verdict: '', dep: '' };
@@ -138,7 +138,7 @@
   [S.watchlist.every((s) => bySlug[s]), `watchlist ${S.watchlist.filter((s) => bySlug[s]).length}/${S.watchlist.length} covered`],
   [rows.every((r, i) => r.rank === i + 1 && (!i || r.v.implied <= rows[i - 1].v.implied)), `ranks 1–${rows.length}, value never rising`],
   [rows.every((r) => r.p.gecko_id == null && r.p.symbol == null && r.p.mcap_usd == null), `${rows.length}/${rows.length} ranked rows record no token`],
-  [bRows.every((b) => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every((t) => / Cost: .+ Time: /.test(t))), `${bRows.length}/${bRows.length} plans, every step costed and timed`],
+  [bRows.every((b) => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every((t) => t.length <= 600 && / Cost: .+ Time: /.test(t))), `${bRows.length} plans, every step costed and timed`],
   [B.digest === dig && B.rows === rows.length, `screen = board.json at Auto deposit, digest ${dig}`],
   [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.auc_fam > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base && O.brier.fam < O.brier.fam_base, `score beats base rate held out 3 ways: AUC ${O.auc_loo.toFixed(2)}/${O.auc_wf.toFixed(2)}/${O.auc_fam.toFixed(2)}`],
   [rows.slice(0, 10).every((r) => r.boot >= 0.8), `ranks 1–${rows.findIndex((r) => r.boot < 1)} top 20 in all 40 refits`],
@@ -162,13 +162,12 @@
    const on = fams.includes(f[0]), next = on ? fams.filter((x) => x !== f[0]) : fams.concat(f[0]);
    return `<a href="${link({ fam: next.join(',') })}" class="chip f-${f[0]}${on ? ' on' : ''}"><i></i>${esc(f[1])} <b>${famCount[f[0]] || 0}</b></a>`;
   }).join('');
- // Basket: positive-net plans, best net per dollar, within budget and HOURS.
   let cap = 0, hrs = 0;
   const pick = shown.filter((r) => r.plan.net > 0).sort((a, b) => b.plan.net / b.plan.stake - a.plan.net / a.plan.stake)
    .filter((r) => cap + r.plan.stake <= +st.bud && hrs + r.plan.minutes / 60 <= HOURS && (cap += r.plan.stake, hrs += r.plan.minutes / 60));
   const active = st.q || st.fam || st.chain || st.scope !== 'all' || st.verdict || st.dep;
   const body = shown.map((r) => {
-   const w = Math.max(1.5, 100 * Math.sqrt(r.v.implied / maxImplied));
+   const w = Math.max(1.5, 100 * Math.sqrt(r.v.implied / maxImplied)), pl = r.plan;
    return `<tr data-slug="${esc(r.p.slug)}" tabindex="0">
     <td class="rank">${r.rank}<small>${r.rlo}–${r.rhi}</small></td>
     <td class="proto"><a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a>${r.watch ? '<span class="wl" title="On the snapshot watchlist">WL</span>' : ''}<small>${esc(r.p.category || 'Uncategorised')} · ${esc(r.p.chains.slice(0, 2).join(', '))}${r.p.chains.length > 2 ? ' +' + (r.p.chains.length - 2) : ''}</small>${nameFlag(r)}</td>
@@ -179,7 +178,7 @@
     <td class="val"><span class="bar"><i style="width:${w.toFixed(1)}%"></i></span><b>${usd(r.v.implied)}</b><small>${usd(r.v.low)}–${usd(r.v.high)}</small><small class="factors">${usd(r.v.fitted)} × s ${pc(r.v.time_factor)}${r.v.haircut === 1 ? '' : ` × ${r.v.haircut}`}</small></td>
     <td class="num">${pc(r.v.time_factor)}</td>
     <td class="num apr">${(r.v.apr * 100).toFixed(1)}%</td>
-    <td class="plan">${verdictTag(r.plan.verdict)} <span class="pmult">pays ${mult(r.plan.drop / r.plan.all_in)}${pays(r.plan) ? '' : r.plan.pay_cap ? ` · ×${M.target_cover} at ${usd(r.plan.pay_cap)}` : ` · no deposit pays ×${M.target_cover}`}</span><small>${usd(r.plan.drop)} drop vs ${usd(r.plan.all_in)} ${r.plan.verdict === 'skip' ? 'to deposit · $0 research' : `cost · ${usd(r.plan.stake)} on ${esc(r.plan.chain)}`}</small></td></tr>`;
+    <td class="plan">${verdictTag(pl.verdict)} <span class="pmult">pays ${mult(pl.drop / pl.all_in)}${pays(pl) ? '' : pl.pay_cap ? ` · ×${M.target_cover} at ${usd(pl.pay_cap)}` : ` · no deposit pays ×${M.target_cover}`}</span><small>${usd(pl.drop)} drop vs ${usd(pl.all_in)} ${pl.verdict === 'skip' ? 'to deposit · $0 research' : `cost · ${usd(pl.stake)} on ${esc(pl.chain)}`}</small><small class="farmcue">${farmBadge(pl)} ${esc(pl.risk)} · ~${usd(pl.round_trip)} round trip</small></td></tr>`;
   }).join('');
   const ctl = `<div class="ctl">    <section class="filters">
    <label class="search"><input id="q" type="search" value="${esc(st.q)}" placeholder="Search name, category or chain" autocomplete="off" aria-label="Search"></label>
@@ -273,11 +272,12 @@
      <div><small>Drop if it launches</small><b>${usd(pl.drop)}</b></div>
      <div><small>If it launches</small>${verdictTag(pl.verdict)}</div>
     </div>
+    <p class="farmcue">${farmBadge(pl)} <b>${esc(pl.risk)}</b> · ${usd(pl.round_trip)} modeled round trip in gas and activity fees before claim.<br>Stress case: ${esc(pl.stress)} → <b>${usd(pl.stress_usd)}</b> loss (×${(pl.stress_usd / Math.max(pl.drop, 1e-9)).toFixed(1)} the modeled drop).</p>
     <div class="steph"><span></span><span>When · what to do</span><span>Cost</span><span>Time</span></div>
     <ol class="steps">${pl.steps.map((s) => `<li><p><em>${esc(s.when)}</em>${esc(s.act)}.</p><span class="cost">${usd(s.usd)}</span><span class="time">${R.mins(s.min)}</span></li>`).join('')}</ol>
     <div class="math">
      <p><b>Drop APR ${(v.apr * 100).toFixed(2)}% if it launches</b> = ${usd(v.fitted)} × ${M.drop_share * 100}% to depositors ÷ (${usd(v.tvl_next)} TVL × (${Math.min(v.age_used, M.season_days)} + ${M.farm_days}) season days) × 365.</p>
-     <p>Dollar-days: (${pl.tranches.map((t) => `$${t[0].toLocaleString('en-US')} × ${pl.days - t[1]} d`).join(' + ')}) × ${(v.apr * 100).toFixed(2)}% ÷ 365 = <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${pl.hour}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${pl.net >= 0 ? '+' : '−'}${usd(Math.abs(pl.net))}</b>.</p><p><b>Stress</b> (${esc(p.category || FAM[v.family])}): ${esc(pl.stress)} would cost about <b>${usd(pl.stress_usd)}</b>, ×${(pl.stress_usd / Math.max(pl.drop, 1e-9)).toFixed(1)} the modeled drop.</p><p><b>Fees</b> at ${pl.fees.map((f) => `${f[0]}× gas ${usd(f[1])}, net ${f[2] < 0 ? '−' : '+'}${usd(Math.abs(f[2]))} (${f[3]})`).join('; ')}.</p><p><b>Carry:</b> $${pl.stake.toLocaleString('en-US')} locked ${pl.days} days forgoes about ${usd(pl.carry)} at ${M.carry_rate * 100}% elsewhere; the deposit's own yield usually covers it, and if it earns nothing the net is ${pl.net - pl.carry >= 0 ? '+' : '−'}${usd(Math.abs(pl.net - pl.carry))}.</p><p><b>Capital:</b> ${st.dep ? 'your deposit' : pays(pl) ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}${pl.cert ? `; break-even certificate: $${pl.cert[2].toLocaleString('en-US')} pays ×${pl.cert[3].toFixed(3)}, $${pl.cert[0].toLocaleString('en-US')} only ×${pl.cert[1].toFixed(3)}` : ''}.</p>
+     <p>Dollar-days: (${pl.tranches.map((t) => `$${t[0].toLocaleString('en-US')} × ${pl.days - t[1]} d`).join(' + ')}) × ${(v.apr * 100).toFixed(2)}% ÷ 365 = <b>${usd(pl.drop)}</b> vs <b>${usd(pl.all_in)}</b> all-in (${usd(pl.cost)} fees + ${R.mins(pl.minutes)} at $${pl.hour}/h), net <b class="${pl.net >= 0 ? 'up' : 'down'}">${sg(pl.net)}</b>.</p><p><b>Fees</b> at ${pl.fees.map(([m, cost, net, verdict]) => `${m}× gas ${usd(cost)}, net ${sg(net)} (${verdict})`).join('; ')}.</p><p><b>Carry:</b> ${usd(pl.carry)} forgone at ${M.carry_rate * 100}% elsewhere; net ${sg(pl.net - pl.carry)} if the deposit earns no yield.</p><p><b>Capital:</b> ${st.dep ? 'your deposit' : pays(pl) ? `least that pays ×${M.target_cover} ($500–$25K)` : `capped at $25K; no deposit up to it pays ×${M.target_cover}`}${pl.cert ? `; break-even certificate: $${pl.cert[2].toLocaleString('en-US')} pays ×${pl.cert[3].toFixed(3)}, $${pl.cert[0].toLocaleString('en-US')} only ×${pl.cert[1].toFixed(3)}` : ''}.</p>
     </div>
    </section>
   </div>`;

@@ -129,6 +129,9 @@ td.apr{color:var(--amber);}
 td.plan{white-space:nowrap;}
 td.plan .pmult{font:11px var(--mono);color:var(--muted);margin-left:4px;}
 td.plan small{display:block;margin-top:2px;font-size:11.5px;}
+.farmcue{color:#87500e;}
+.mechanism{display:inline-block;font:600 10px var(--mono);color:var(--text);background:var(--panel2);border:var(--b1);border-radius:4px;padding:1px 5px;}
+p.farmcue{background:#a8640f0d;border-left:2px solid #a8640f66;padding:7px 10px;margin:0 0 10px;font-size:12px;line-height:1.5;}
 td.proto{min-width:230px;}
 .verdict{display:inline-block;font:600 10px var(--mono);text-transform:uppercase;letter-spacing:.06em;padding:2px 7px;border-radius:4px;}
 .v-farm{background:#1f6f5c22;color:var(--accent);}
