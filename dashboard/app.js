@@ -1,4 +1,3 @@
-/* Audit: digest() checks board.json, termTests() tests value, farmPlan() costs and times steps. */
 (function () {
  'use strict';
  const R = window.RadarModel, S = window.SNAPSHOT, app = document.getElementById('app');
@@ -26,9 +25,9 @@
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   location.hash.slice(1).split('&').forEach((kv) => {
    const i = kv.indexOf('='), k = kv.slice(0, i);
-   if (i > 0 && own(DEF, k)) try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch (e) { /* keep the default */ }
+   if (i > 0 && own(DEF, k)) try { st[k] = decodeURIComponent(kv.slice(i + 1)); } catch {}
   });
-  const ok = { view: 'board model aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000 100000 250000', hr: '0 10 25 50 100', bud: '10000 25000 50000 100000 250000 1000000' };
+  const ok = { view: 'board model audit aside trading', scope: 'all watch early outside stable', verdict: ' farm marginal skip', dir: 'asc desc', dep: ' 1000 5000 10000 25000 100000 250000', hr: '0 10 25 50 100', bud: '10000 25000 50000 100000 250000 1000000' };
   Object.keys(ok).forEach((k) => { if (!ok[k].split(' ').includes(st[k])) st[k] = DEF[k]; });
   if (!own(KEYS, st.sort)) st.sort = 'rank';
   return st;
@@ -120,17 +119,19 @@
   return `<div class="card model">
    <h2>Value model <span>fitted on this snapshot's ${fit.n} trading tokens</span></h2>
    ${eq}
-   <table class="mini tests"><thead><tr><th>Term · held-out median miss</th><th class="num">Leave-one-out</th><th class="num">Walk-fwd</th><th class="num">Family out</th><th class="num">Use</th></tr></thead><tbody>
-   ${T.terms.map((t) => `<tr class="${t.ok ? 'pick' : ''}"><td>${t.label}</td><td class="num">${x(t.loo)}</td><td class="num">${x(t.wf)}</td><td class="num">${x(t.lofo)}</td><td class="num">${used[t.key]}</td></tr>`).join('')}</tbody></table>
-   <table class="mini tests"><thead><tr><th>Score s · held-out Brier</th><th class="num">Walk-fwd</th><th class="num">Family out</th></tr></thead><tbody>
-   ${O.terms.map((t, i) => `<tr class="${i ? '' : 'pick'}"><td>${t[0]}</td><td class="num">${t[1].toFixed(3)}</td><td class="num">${t[2].toFixed(3)}</td></tr>`).join('')}</tbody></table>
-   <p class="note">Walk-forward: fit the ${T.wf_train} listed first, score the ${T.wf_n} since ${T.wf_from}. s: a logistic fit on ${O.n} peers (${O.with_token} record a token): AUC ${O.auc_loo.toFixed(2)} leave-one-out, ${O.auc_wf.toFixed(2)} walk-forward, ${O.auc_fam.toFixed(2)} family-out.</p>
-   <p class="note"><b>Missing ages:</b> ${rows.filter((r) => r.ageRange).length} rows use the original board's median age. Ranks at its 25th and 75th age percentiles: ${rows.filter((r) => r.ageRange).map((r) => `${esc(r.p.name)} #${r.ageRange[0].rank}–#${r.ageRange[1].rank}`).join(', ')}.</p>
+   ${tbl('mini tests', ['Term · held-out median miss', '#Leave-one-out', '#Walk-fwd', '#Family out', '#Use'],
+    T.terms.map((t) => [t.label, x(t.loo), x(t.wf), x(t.lofo), used[t.key]]), T.terms.map((t) => t.ok))}
+   ${tbl('mini tests', ['Score s · held-out Brier', '#Walk-fwd', '#Family out'],
+    O.terms.map(([label, wf, fam]) => [label, wf.toFixed(3), fam.toFixed(3)]), [true])}
+   <p class="note">Walk-forward fits the first ${T.wf_train}, tests ${T.wf_n} since ${T.wf_from}. Logistic s uses ${O.n} peers (${O.with_token} with token records). AUC ${O.auc_loo.toFixed(2)} LOO / ${O.auc_wf.toFixed(2)} walk-forward / ${O.auc_fam.toFixed(2)} family-out.</p>
+   <p class="note"><b>Missing ages:</b> ${rows.filter((r) => r.ageRange).length} rows use median age. Ranks at the 25th and 75th age percentiles: ${rows.filter((r) => r.ageRange).map((r) => `${esc(r.p.name)} #${r.ageRange[0].rank}–#${r.ageRange[1].rank}`).join(', ')}.</p>
    <p class="note"><b>Not a launch forecast:</b> s scores whether a peer <i>records</i> a token today; the snapshot has no launch dates.</p>
    <p class="note">Leave-one-out miss by TVL band: ${fit.bands.map((b) => `<b>${b.lo ? usd(b.lo) : '$0'}–${b.hi < 1e15 ? usd(b.hi) : '∞'} ×${b.miss.toFixed(1)}</b> (${b.n} tokens; ${rows.filter((r) => r.p.tvl_usd >= b.lo && r.p.tvl_usd < b.hi).length} ranked)`).join(' · ')}.</p></div>`;
  }
 
  const bRows = R.boardRows(radar), dig = R.digest(bRows), B = window.BOARD || {};
+ const auditRows = radar.audit, clipped = (r) => r.p.change_7d != null && r.p.change_7d !== r.v.growth;
+ const above95 = (a) => a.p95 != null && a.ratio > a.p95;
  const [flatT, spotT, sizeT, famT] = fit.tests.terms, curve = fit.k === Infinity ? sizeT : famT;
  const nTr = S.protocols.filter((p) => p.mcap_usd > 0).length, nAll = rows.length + radar.products.length + nTr + radar.listed_only;
  const CHECKS = [
@@ -138,7 +139,7 @@
   [S.watchlist.every((s) => bySlug[s]), `watchlist ${S.watchlist.filter((s) => bySlug[s]).length}/${S.watchlist.length} covered`],
   [rows.every((r, i) => r.rank === i + 1 && (!i || r.v.implied <= rows[i - 1].v.implied)), `ranks 1–${rows.length}, value never rising`],
   [rows.every((r) => r.p.gecko_id == null && r.p.symbol == null && r.p.mcap_usd == null), `${rows.length}/${rows.length} ranked rows record no token`],
-  [bRows.every((b) => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every((t) => / Cost: .+ Time: /.test(t))), `${bRows.length}/${bRows.length} plans, every step costed and timed`],
+  [bRows.every((b) => b.farm_steps.length >= 3 && b.farm_steps.length <= 12 && b.farm_steps.every((t) => t.length >= 20 && t.length <= 600 && / Cost: .+ Time: /.test(t))), `${bRows.length}/${bRows.length} plans, every step costed and timed`],
   [B.digest === dig && B.rows === rows.length, `screen = board.json at Auto deposit, digest ${dig}`],
   [O.auc_loo > 0.5 && O.auc_wf > 0.5 && O.auc_fam > 0.5 && O.brier.loo < O.brier.loo_base && O.brier.wf < O.brier.wf_base && O.brier.fam < O.brier.fam_base, `score beats base rate held out 3 ways: AUC ${O.auc_loo.toFixed(2)}/${O.auc_wf.toFixed(2)}/${O.auc_fam.toFixed(2)}`],
   [rows.slice(0, 10).every((r) => r.boot >= 0.8), `ranks 1–${rows.findIndex((r) => r.boot < 1)} top 20 in all 40 refits`],
@@ -146,6 +147,7 @@
   [spotT.ok && sizeT.ok, `value miss ×${flatT.loo.toFixed(2)} flat → ×${sizeT.loo.toFixed(2)} fitted, held out 3 ways`]
  ];
 
+ const checkCount = `${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass`;
  function board(st) {
   const shown = filtered(st), fams = st.fam ? st.fam.split(',') : [];
   const watchCov = S.watchlist.filter((s) => bySlug[s]).length;
@@ -157,12 +159,12 @@
    const on = st.sort === k, dir = on && st.dir === 'asc' ? 'desc' : on ? 'asc' : (k === 'rank' || k === 'name' ? 'asc' : 'desc');
    return `<th class="${cls || ''}${on ? ' sorted' : ''}"><a href="${link({ sort: k, dir: dir })}">${l}${on ? (st.dir === 'asc' ? ' ▲' : ' ▼') : ''}</a></th>`;
   };
+  const select = (id, label, values, fmt) => `<label class="field"><span>${label}</span><select id="${id}">${values.map((x) => `<option value="${x}"${String(x) === st[id] ? ' selected' : ''}>${fmt(x)}</option>`).join('')}</select></label>`;
   const seg = (key, opts) => `<div class="seg">${opts.map(([v, l]) => `<a href="${link({ [key]: v })}" class="${st[key] === v ? 'on' : ''}">${l}</a>`).join('')}</div>`;
   const famLinks = R.FAMILIES.map((f) => {
    const on = fams.includes(f[0]), next = on ? fams.filter((x) => x !== f[0]) : fams.concat(f[0]);
    return `<a href="${link({ fam: next.join(',') })}" class="chip f-${f[0]}${on ? ' on' : ''}"><i></i>${esc(f[1])} <b>${famCount[f[0]] || 0}</b></a>`;
   }).join('');
- // Basket: positive-net plans, best net per dollar, within budget and HOURS.
   let cap = 0, hrs = 0;
   const pick = shown.filter((r) => r.plan.net > 0).sort((a, b) => b.plan.net / b.plan.stake - a.plan.net / a.plan.stake)
    .filter((r) => cap + r.plan.stake <= +st.bud && hrs + r.plan.minutes / 60 <= HOURS && (cap += r.plan.stake, hrs += r.plan.minutes / 60));
@@ -185,12 +187,12 @@
    <label class="search"><input id="q" type="search" value="${esc(st.q)}" placeholder="Search name, category or chain" autocomplete="off" aria-label="Search"></label>
    <div class="field"><span>Scope</span>${seg('scope', [['all', 'All'], ['watch', 'Watchlist'], ['outside', 'Outside it'], ['early', 'Below $50M'], ['stable', 'Top 20, all variants']])}</div>
    <div class="field"><span>Plan</span>${seg('verdict', [['', 'Any'], ['farm', 'Farm'], ['marginal', 'Marginal'], ['skip', 'Skip']])}</div>
-   <label class="field"><span>Deposit</span><select id="dep">${['', 1000, 5000, 10000, 25000, 100000, 250000].map((d) => `<option value="${d}"${String(d) === st.dep ? ' selected' : ''}>${d ? usd(d) : 'Auto: least that pays'}</option>`).join('')}</select></label>
-   <label class="field"><span>Your hour</span><select id="hr">${[0, 10, 25, 50, 100].map((h) => `<option value="${h}"${String(h) === st.hr ? ' selected' : ''}>$${h}/h</option>`).join('')}</select></label>
+   ${select('dep', 'Deposit', ['', 1000, 5000, 10000, 25000, 100000, 250000], (d) => d ? usd(d) : 'Auto: least that pays')}
+   ${select('hr', 'Your hour', [0, 10, 25, 50, 100], (h) => '$' + h + '/h')}
    <label class="field"><span>Chain</span><select id="chain"><option value="">All chains</option>${Object.keys(chains).sort((a, b) => chains[b] - chains[a] || (a < b ? -1 : 1)).map((c) => `<option${c === st.chain ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
    <div class="count">Top 20 at $${st.hr}/h: <b>${farmAt(+st.hr, st.dep)}</b> farm (${farmAt(0, st.dep)} at $0/h, ${farmAt(25, st.dep)} at $25/h) · farm verdicts holding at 3× gas: <b>${shown.filter((r) => r.plan.fees[1][3] === 'farm').length}</b>/${shown.filter((r) => r.plan.verdict === 'farm').length} · <b>${shown.length}</b> of ${rows.length} shown · <span id="drawn"></span> · <a download="launch-radar.csv" href="${csv(shown)}">CSV</a>${active ? ` · <a href="${link(CLEAR)}">clear filters</a>` : ''}</div>
   </section>
-  <section class="filters basket"><label class="field"><span>Budget</span><select id="bud">${[10000, 25000, 50000, 100000, 250000, 1000000].map((d) => `<option value="${d}"${String(d) === st.bud ? ' selected' : ''}>${usd(d)}</option>`).join('')}</select></label>
+  <section class="filters basket">${select('bud', 'Budget', [10000, 25000, 50000, 100000, 250000, 1000000], usd)}
    <span>Basket, best net per dollar of the ${shown.length} shown, within ${usd(+st.bud)} and ${HOURS} h: ${pick.map((r) => `<a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a> ${usd(r.plan.stake)}`).join(' · ') || 'none pays'} → <b>${usd(cap)}</b>, ${hrs.toFixed(1)} h, net if rewarded <b class="up">+${usd(pick.reduce((s, r) => s + r.plan.net, 0))}</b></span></section>
   <section class="filters"><div class="chips" role="group" aria-label="Family">${famLinks}</div></section></div>`;
   return `<section class="strip">
@@ -205,8 +207,9 @@
   <section class="hero slim">
    <div class="lead">
     <h1>${rows.length} pre-token protocols, ranked by implied value${st.sort === 'rank' ? '' : `<small> · shown by ${{ g: '7-day change', age: 'days tracked', odds: 'score', apr: 'drop APR', plan: 'farm plan' }[st.sort] || st.sort} ${st.dir === 'asc' ? '▲' : '▼'}</small>`}</h1>
-    ${active ? `<p class="note">${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass; the value model and its held-out tests are on the <a href="${link(CLEAR)}">unfiltered board</a>. With filters on, the board leads with the shortlist.</p>${ctl}` : `${eq}
-    <p class="checkline ${CHECKS.every((c) => c[0]) ? 'ok' : 'bad'}"><b>${CHECKS.filter((c) => c[0]).length}/${CHECKS.length} self-checks pass</b>, run on load: ${[5, 1, 6, 0].map((i) => CHECKS[i][1]).join(' · ')}${CHECKS.filter((c) => !c[0]).map((c) => ' · ✗ ' + c[1]).join('')} · <a href="${link({ view: 'model' })}">all checks →</a></p>${ctl}`}
+    ${active ? `<p class="note">${checkCount} · <a href="${link(CLEAR)}">unfiltered board with model tests</a></p>` : `${eq}
+    <p class="checkline ${CHECKS.every((c) => c[0]) ? 'ok' : 'bad'}"><b>${checkCount}</b>, run on load: ${[5, 1, 6, 0].map((i) => CHECKS[i][1]).join(' · ')}${CHECKS.filter((c) => !c[0]).map((c) => ' · ✗ ' + c[1]).join('')} · <a href="${link({ view: 'model' })}">all checks →</a></p>`}
+    <p class="note count"><a href="${link({ view: 'audit' })}">Top ${auditRows.length} audit →</a> · ${auditRows.filter((a) => a.exclusion).length} token records or product exclusions · ${auditRows.filter((a) => !a.exclusion && a.review).length} to review · ${auditRows.filter((a) => clipped(a.r)).length} growth clips · ${auditRows.filter(above95).length} above peer P95</p>${ctl}
    </div>
    <div class="card chartcard"><h2>Radar <span>days without a token × airdrop yield</span></h2>${chart(shown, 300)}</div>
   </section>
@@ -283,10 +286,22 @@
   </div>`;
  }
 
- const tbl = (cls, heads, rows) => `<table class="${cls}"><thead><tr>${heads.map((h) => `<th${h[0] === '#' ? ' class="num"' : ''}>${h.replace('#', '')}</th>`).join('')}</tr></thead><tbody>${rows.map((c) => `<tr>${c.map((v, i) => `<td${heads[i][0] === '#' ? ' class="num"' : ''}>${v}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+ const tbl = (cls, heads, rows, pick = []) => `<table class="${cls}"><thead><tr>${heads.map((h) => `<th${h[0] === '#' ? ' class="num"' : ''}>${h.replace('#', '')}</th>`).join('')}</tr></thead><tbody>${rows.map((c, i) => `<tr${pick[i] ? ' class="pick"' : ''}>${c.map((v, i) => `<td${heads[i][0] === '#' ? ' class="num"' : ''}>${v}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
  const nm = (n, sub) => `<b>${esc(n)}</b><small>${esc(sub)}</small>`;
  function model() {
   return `<section class="hero slim">${formula()}<div class="card checks"><h2>Self-checks <span>run in this page on load</span></h2><ul>${CHECKS.map(([ok, t]) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'} ${t}</li>`).join('')}</ul></div></section>`;
+ }
+ function audit() {
+  return `<section class="intro"><h1>Top ${auditRows.length} rank audit</h1>
+   <p>Checks use snapshot token fields, product rules and the watchlist. The snapshot omits parent links. Review flags show possible token or product links and off-list rows above the floor.</p>
+   <p>7d TVL change is clipped to ${pct(M.growth_floor, 0)} to ${pct(M.growth_cap, 0)} (${rows.filter(clipped).length} board-wide clips); missing change uses 0%. Peer P95 is the 95th percentile of trading market cap ÷ TVL in that TVL band.</p></section>
+   <div class="tablewrap">${tbl('board', ['#Rank', 'Protocol', 'Snapshot status', '#TVL', '#7d raw → used', '#Value if launched', '#Record score', '#Implied value', '#Full/TVL · peer P95'], auditRows.map((a) => {
+    const { r } = a, { p, v } = r;
+    return [r.rank, `<a href="${link({ view: 'board', p: p.slug })}">${esc(p.name)}</a><small>${esc(p.category || 'Uncategorised')}</small>`,
+     a.exclusion ? `<b class="down">${esc(a.exclusion)}</b>` : (r.watch ? 'Watchlist' : 'Off watchlist') + (a.review ? `<small class="down">${esc(a.review)}</small>` : ''),
+     usd(p.tvl_usd), `<span class="${clipped(r) ? 'down' : ''}">${pct(p.change_7d, 2)} → ${pct(v.growth, 2)}</span>`,
+     usd(v.fitted), pc(v.time_factor), usd(v.implied), `<span class="${above95(a) ? 'down' : ''}">${mult(a.ratio)}</span> · ${a.p95 == null ? 'n/a' : mult(a.p95)}`];
+   }))}</div>`;
  }
  function aside() {
   return `<section class="intro"><h1>${radar.products.length} products set aside</h1>
@@ -301,14 +316,14 @@
  }
 
  let planDep = '|25|';
- const top20 = rows.slice(0, 20), farmAt = (h, dep) => top20.filter((r) => R.farmPlan(r.p, r.v, +dep, h).verdict === 'farm').length;
+ const farmAt = (h, dep) => auditRows.filter(({ r }) => R.farmPlan(r.p, r.v, +dep, h).verdict === 'farm').length;
  function render() {
   const st = readHash();
   head(st);
   app.className = st.p ? 'detail' : st.view;
   const k = [st.dep, st.hr, st.chain].join('|');
   if (k !== planDep) { planDep = k; rows.forEach((r) => { r.plan = R.farmPlan(r.p, r.v, +st.dep, +st.hr, st.chain); }); }
-  app.innerHTML = st.p ? (bySlug[st.p] && bySlug[st.vs] ? compare(bySlug[st.p], bySlug[st.vs]) : detail(st)) : st.view === 'model' ? model() : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
+  app.innerHTML = st.p ? (bySlug[st.p] && bySlug[st.vs] ? compare(bySlug[st.p], bySlug[st.vs]) : detail(st)) : st.view === 'model' ? model() : st.view === 'audit' ? audit() : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
   const d = document.getElementById('drawn'), sh = d && filtered(st), trs = [...app.querySelectorAll('tr[data-slug]')];
   if (d) { const ok = trs.length === sh.length && trs.every((t, i) => t.dataset.slug === sh[i].p.slug && t.querySelector('td.val b').textContent === usd(sh[i].v.implied)); d.className = ok ? 'up' : 'down'; d.textContent = ok ? `✓ table drawn = model (${trs.length} rows)` : '✗ table drawn ≠ model'; }
   document.getElementById('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied value = this entry's value if launched × token-record score × any product haircut. A protocol may hold a token DefiLlama does not record.`;
