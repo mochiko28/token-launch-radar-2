@@ -20,7 +20,7 @@
   season_days: 365 // TVL-days older than this count as paid by earlier seasons
  };
 
- // Data tables (families, gas, step wording) come from lib/tables.json via use().
+ // Data tables come from lib/tables.json via use().
  var FAMILIES = [], FAM_OF = {}, GAS = {}, GAS0 = 0.3, ACT = {};
  function use(t) {
   FAMILIES = api.FAMILIES = t.families; GAS = t.gas; GAS0 = t.gas_default; ACT = t.act; FAM_OF = {};
@@ -109,7 +109,7 @@
     .concat(fams.map(function (f) { return family(p) === f[0] ? 1 : 0; }));
   };
   var pts = peers.map(function (p) { var a = ageDays(snap.as_of, p.listed_at); return { p: p, a: a, x: X(p, a == null ? mid : a), y: hasToken(p) ? 1 : 0 }; });
-  // Newton steps from w0 (zeros, or the full fit's weights for a leave-one-out refit).
+  // Newton steps from w0 (zeros, or the full fit's weights).
   function logit(T, w0, steps) {
    var n = T[0].x.length, w = [], it, i, j, k, t, g, H;
    for (i = 0; i < n; i++) w.push(w0 ? w0[i] : 0);
@@ -142,9 +142,9 @@
   var bri = function (T, f) { return T.reduce(function (t, q) { return t + Math.pow(f(q) - q.y, 2); }, 0) / T.length; };
   var brier = { loo: bri(loo, function (q) { return sig(q.s); }), loo_base: bri(pts, function (q) { return (S - q.y) / (n - 1); }),
    wf: bri(wf, function (q) { return sig(q.s); }), wf_base: bri(wf, function () { return rate; }) };
-  // A bootstrap refit: the odds curve fitted again on a resample of the peers.
+  // A bootstrap refit on resampled peers.
   var boot = function (rnd) { var wb = logit(pts.map(function () { return pts[Math.floor(rnd() * n)]; }), w, 4); return function (p, a) { return sig(dot(wb, X(p, a))); }; };
-  // Family out: every category family's peers scored by a fit that never saw that family.
+  // Family out: each family scored by a fit that never saw it.
   var lofo = pts.map(function (q) { var f = family(q.p); return { y: q.y, s: dot(logit(pts.filter(function (o) { return family(o.p) !== f; }), w, 4), q.x) }; });
   brier.fam = bri(lofo, function (q) { return sig(q.s); });
   brier.fam_base = bri(pts, function (q) { var o = pts.filter(function (z) { return family(z.p) !== family(q.p); }); return o.reduce(function (t, z) { return t + z.y; }, 0) / o.length; });
@@ -164,7 +164,7 @@
   });
   var dated = pts.filter(function (q) { return q.p.listed_at; }).sort(function (a, b) { return a.p.listed_at < b.p.listed_at ? -1 : a.p.listed_at > b.p.listed_at ? 1 : bySlug(a.p, b.p); });
   var cut = Math.floor(dated.length * 0.6);
-  // Each term predicts ln(market cap); scored leave-one-out, walk-forward and family-out.
+  // Each term predicts ln(market cap), scored three ways.
   function score(make, spot) {
    var err = function (m, q) { return Math.abs(Math.log(q.mcap / (spot ? q.tvl : q.tc)) - m(q)); };
    var med = function (a) { return Math.exp(quantile(a.sort(function (u, v) { return u - v; }), 0.5)); };
@@ -189,7 +189,7 @@
   T.forEach(function (t, i) { var b = T[i < 3 ? i - 1 : 2]; t.ok = i ? t.loo < b.loo && t.wf < b.wf && t.lofo < b.lofo : null; });
   return { terms: T, wf_n: dated.length - cut, wf_train: cut, wf_from: dated[cut].p.listed_at };
  }
- // Least squares by the normal equations; returns the predictor, its weights on .w.
+ // Least squares by the normal equations; weights on .w.
  function ols(pts, feats, yk) {
   var n = feats(pts[0]).length, A = [], v = [], i, j, r, t;
   for (i = 0; i < n; i++) { A.push([]); v.push(0); for (j = 0; j < n; j++) A[i].push(0); }
@@ -244,11 +244,11 @@
   var sizeMult = Math.pow(tvlNext / M.ref_tvl, fit.slope);
   var fitted = tvlNext * fam.multiple * sizeMult;
   var age = ageDays(asOf, p.listed_at), ageUsed = age == null ? ageFallback : age;
-  // Token-record score: share of similar peers that record a token today (no timing claim).
+  // Token-record score: share of similar peers recording a token today.
   var f0 = fit.odds.F(p, ageUsed), timeF = f0;
   var implied = Math.max(1, Math.round(fitted * timeF));
 
-  // Drop APR if it launches: drop_share of the value spread over the season's dollar-days.
+  // Drop APR: drop_share of the value over the season's dollar-days.
   var apr = fitted * M.drop_share / (tvlNext * (Math.min(ageUsed, M.season_days) + M.farm_days)) * 365;
   return { family: fam.key, growth: growth, growth_imputed: p.change_7d == null,tvl_next: Math.round(tvlNext), fam_multiple: fam.multiple, size_mult: sizeMult,
    fitted: Math.round(fitted), age: age, age_used: ageUsed, time_factor: timeF, f0: f0, implied: implied,
@@ -266,12 +266,12 @@
  function mins(m) { return m < 60 ? m + ' min' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' h'; }
 
 
- // Second action's cost: weekly kinds pay a fee share and transactions every week.
+ // Weekly kinds: [fee share, transactions] each week.
  var WEEKLY = { dex: [0.0005, 1], deriv: [0.001, 2], predict: [0.01, 2], infra: [0, 2] };
 
  /* A farm plan from the row's own figures: steps with a dollar cost and a time each, on the cheapest of
  * its three main chains. */
- // hour: value of an hour (default M.hour_usd); on: the reader's chain filter, used when it runs there.
+ // hour: value of an hour; on: the reader's chain filter.
  function farmPlan(p, v, dep, hour, on) {
   var hr = hour == null ? M.hour_usd : hour;
   var main = p.chains.slice(0, 3), chain = main[0] || 'its main chain';
@@ -295,7 +295,7 @@
    ];
   }
   function total(st) { var c = 0, t = 5; st.forEach(function (s) { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * hr }; }
-  // Tranches [amount, day in]: principal earns from the day it lands; swaps, trades, borrows earn nothing.
+  // Tranches [amount, day in]: principal earns from the day it lands.
   function tranches(stake) { return kind === 'vault' ? [[stake, 0], [Math.round(stake / 4), 1]] : [[stake, kind === 'rwa' ? 2 : 0]]; }
   function eligible(stake) { return tranches(stake).reduce(function (a, t) { return a + t[0]; }, 0); }
   function earn(stake) { return tranches(stake).reduce(function (a, t) { return a + t[0] * (M.farm_days - t[1]); }, 0) * v.apr / 365; }
@@ -308,7 +308,7 @@
   var verdict = drop >= M.target_cover * t.all ? 'farm' : drop >= t.all ? 'marginal' : 'skip';
   // Every plan opens with its decision and the drop share at which it pays.
   var needShare = M.drop_share * M.target_cover * t.all / Math.max(drop, 1e-9);
-  // Least capital (to $1M) whose drop covers its own recomputed costs target_cover times.
+  // Least capital (to $1M) whose drop covers its recomputed costs.
   var payCap = 0;
   for (var c = 25000; !payCap && c <= 1000000; c = Math.round(c * 1.25)) {
    var kk = Math.round(c / 1.25); if (earn(kk) >= M.target_cover * total(steps(kk)).all) payCap = Math.ceil(c / 1000) * 1000;
@@ -324,7 +324,7 @@
     { when: 'Day 0', usd: 0, min: 5, act: 'Write down the trigger that flips this plan: an announced allocation of at least ' + (needShare * 100).toFixed(0) + '% to depositors, ' + (payCap ? 'capital of about ' + usd(payCap) + ' to commit, ' : '') + 'or TVL falling below ' + usd(p.tvl_usd * 0.5) + ' with no change in odds (a smaller pool to share)' },
     { when: 'Day 30', usd: 0, min: 10, act: 'Look again on a new snapshot; if the plan now pays ×' + M.target_cover + ', follow the full plan (' + usd(capital) + ' capital, about ' + usd(t.cost) + ' in fees, ' + mins(Math.round(t.min)) + ' hands-on)' }];
   }
-  // Capital carry at carry_rate: shown, not charged (the deposit usually earns a yield).
+  // Capital carry at carry_rate: shown, not charged.
   var carry = capital * M.carry_rate * M.farm_days / 365, stress = ACT[kind][4];
   return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map(function (m) { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, drop >= M.target_cover * a.all ? 'farm' : drop >= a.all ? 'marginal' : 'skip']; }), stake: capital, eligible: eligible(stake), tranches: tranches(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
    days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, verdict: verdict };
@@ -358,7 +358,7 @@
    'score without age': function (r) { return r.v.fitted * fit.odds.F(r.p, fit.odds.mid); },
    'if launched': function (r) { return r.v.fitted; } };
   Object.keys(ALT).forEach(function (k) { rows.slice().sort(function (a, b) { return ALT[k](b) - ALT[k](a) || bySlug(a.p, b.p); }).forEach(function (r, i) { (r.alt = r.alt || {})[k] = i + 1; }); });
-  // Bootstrap: 40 seeded refits of curve and score; top-20 frequency and 80% rank range.
+  // Bootstrap: 40 seeded refits of curve and score.
   var seed = 7, rnd = function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
   rows.forEach(function (r) { r.boot = 0; r.draws = []; });
   for (var d = 0; d < 40; d++) {
@@ -369,7 +369,7 @@
    })
     .sort(function (a, b) { return b.s - a.s || bySlug(a.r.p, b.r.p); }).forEach(function (o, i) { o.r.draws.push(i + 1); if (i < 20) o.r.boot += 1 / 40; });
   }
-  // Each row's 80% rank range over the 40 refits (5th lowest to 5th highest rank).
+  // 80% rank range: 5th lowest to 5th highest rank.
   rows.forEach(function (r) { var d = r.draws.sort(function (a, b) { return a - b; }); r.rlo = d[4]; r.rhi = d[35]; delete r.draws; });
   // Imputed ages: rank re-taken at the 25th and 75th percentile of observed ages.
   var q = function (t) { return ages[Math.floor((ages.length - 1) * t)]; };
@@ -396,6 +396,6 @@
   });
  }
 
- var api = { use: use, digest: digest, MODEL: M, productOf: productOf, FAMILIES: FAMILIES, family: family, calibrate: calibrate, value: value, farmPlan: farmPlan, stepText: stepText, build: build, boardRows: boardRows, usd: usd, mins: mins, gas: gas };
+ var api = { use: use, digest: digest, FAMILIES: FAMILIES, farmPlan: farmPlan, build: build, boardRows: boardRows, usd: usd, mins: mins };
  if (typeof module === 'object' && module.exports) module.exports = api; else root.RadarModel = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

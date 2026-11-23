@@ -186,7 +186,7 @@
    <label class="field"><span>Deposit</span><select id="dep">${['', 1000, 5000, 10000, 25000, 100000, 250000].map((d) => `<option value="${d}"${String(d) === st.dep ? ' selected' : ''}>${d ? usd(d) : 'Auto: least that pays'}</option>`).join('')}</select></label>
    <label class="field"><span>Your hour</span><select id="hr">${[0, 10, 25, 50, 100].map((h) => `<option value="${h}"${String(h) === st.hr ? ' selected' : ''}>$${h}/h</option>`).join('')}</select></label>
    <label class="field"><span>Chain</span><select id="chain"><option value="">All chains</option>${Object.keys(chains).sort((a, b) => chains[b] - chains[a] || (a < b ? -1 : 1)).map((c) => `<option${c === st.chain ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
-   <div class="count">Top 20 at $${st.hr}/h: <b>${farmAt(+st.hr, st.dep)}</b> farm (${farmAt(0, st.dep)} at $0/h, ${farmAt(25, st.dep)} at $25/h) · farm verdicts holding at 3× gas: <b>${shown.filter((r) => r.plan.fees[1][3] === 'farm').length}</b>/${shown.filter((r) => r.plan.verdict === 'farm').length} · <b>${shown.length}</b> of ${rows.length} shown · <a download="launch-radar.csv" href="${csv(shown)}">CSV</a>${active ? ` · <a href="${link(CLEAR)}">clear filters</a>` : ''}</div>
+   <div class="count">Top 20 at $${st.hr}/h: <b>${farmAt(+st.hr, st.dep)}</b> farm (${farmAt(0, st.dep)} at $0/h, ${farmAt(25, st.dep)} at $25/h) · farm verdicts holding at 3× gas: <b>${shown.filter((r) => r.plan.fees[1][3] === 'farm').length}</b>/${shown.filter((r) => r.plan.verdict === 'farm').length} · <b>${shown.length}</b> of ${rows.length} shown · <span id="drawn"></span> · <a download="launch-radar.csv" href="${csv(shown)}">CSV</a>${active ? ` · <a href="${link(CLEAR)}">clear filters</a>` : ''}</div>
   </section>
   <section class="filters basket"><label class="field"><span>Budget</span><select id="bud">${[10000, 25000, 50000, 100000, 250000, 1000000].map((d) => `<option value="${d}"${String(d) === st.bud ? ' selected' : ''}>${usd(d)}</option>`).join('')}</select></label>
    <span>Basket, best net per dollar of the ${shown.length} shown, within ${usd(+st.bud)} and ${HOURS} h: ${pick.map((r) => `<a href="${link({ p: r.p.slug })}">${esc(r.p.name)}</a> ${usd(r.plan.stake)}`).join(' · ') || 'none pays'} → <b>${usd(cap)}</b>, ${hrs.toFixed(1)} h, net if they launch <b class="up">+${usd(pick.reduce((s, r) => s + r.plan.net, 0))}</b></span></section>
@@ -306,6 +306,8 @@
   const k = [st.dep, st.hr, st.chain].join('|');
   if (k !== planDep) { planDep = k; rows.forEach((r) => { r.plan = R.farmPlan(r.p, r.v, +st.dep, +st.hr, st.chain); }); }
   app.innerHTML = st.p ? (bySlug[st.p] && bySlug[st.vs] ? compare(bySlug[st.p], bySlug[st.vs]) : detail(st)) : st.view === 'model' ? model() : st.view === 'aside' ? aside() : st.view === 'trading' ? trading() : board(st);
+  const d = document.getElementById('drawn'), sh = d && filtered(st), trs = [...app.querySelectorAll('tr[data-slug]')];
+  if (d) { const ok = trs.length === sh.length && trs.every((t, i) => t.dataset.slug === sh[i].p.slug && t.querySelector('td.val b').textContent === usd(sh[i].v.implied)); d.className = ok ? 'up' : 'down'; d.textContent = ok ? `✓ table drawn = model (${trs.length} rows)` : '✗ table drawn ≠ model'; }
   document.getElementById('foot').innerHTML = `Source: ${esc(S.source)}. Floor $${(S.floor_usd / 1e6).toFixed(0)}M. Implied value = the radar's own value if launched × its token-record score; never make.fun's claim. A protocol may hold a token DefiLlama does not record.`;
   if (st.p) window.scrollTo(0, 0);
  }
