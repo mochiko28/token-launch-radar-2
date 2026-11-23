@@ -166,7 +166,7 @@ function readPage() {
     return Boolean(box && box.height && box.top >= 0 && box.bottom <= innerHeight && box.right <= innerWidth);
   };
   const form = document.querySelector("#quote");
-  const halfOdds = () => read(".half-odds");
+  const halfOdds = () => read(".half-q");
   let quotePass, defaultHalfOdds;
   if (form) {
     const initial = read("#quote-result");
@@ -214,7 +214,7 @@ function readPage() {
       inputs[0].value = "";
     }
   }
-  const stepItems = [...document.querySelectorAll(".plan-steps li")];
+  const stepItems = [...document.querySelectorAll(".steps li")];
   const labels = stepItems.map(li => li.querySelector("h3").textContent);
   const steps = [];
   for (const li of stepItems) {
@@ -225,27 +225,45 @@ function readPage() {
     if (li.querySelector("h3").textContent === "3c Wait") steps[steps.length - 1] += " " + parts.join(" ");
     else steps.push(parts.join(" "));
   }
+  const chips = [...document.querySelectorAll(".integrity button")];
+  const help = document.querySelector("#checks-info");
+  const integrity = chips.map(chip => chip.textContent);
+  const integrityPass = chips.length === 10 && visible(".integrity")
+    && new Set(chips.map(chip => chip.offsetTop)).size <= 2
+    && chips.every(chip => chip.dataset.pass === "true" && chip.textContent.startsWith("✓ "));
+  const helpPass = chips.every(chip => {
+    chip.click();
+    const opened = help.open && document.activeElement === help.querySelector("summary");
+    help.open = false;
+    return opened;
+  });
+  if (chips.length) {
+    document.activeElement.blur();
+    window.scrollTo(0, 0);
+  }
   return {
-    checks: read("#checks"), title: read("h1"), count: read("#row-count"), first: read("tbody tr th a"),
+    checks: read("#checks"), checksPass: document.querySelector("#checks")?.dataset.pass,
+    integrity, integrityPass, helpPass, title: read("h1"), count: read("#shown"), first: read("tbody tr th a"),
     portfolio: read(".portfolio"),
-    summary: read(".verdict-summary"), defaultHalfOdds,
+    summary: read(".verdict"), defaultHalfOdds,
     oddsNote: read(".pay + p"), pay: read(".pay"), payVisible: visible(".pay"),
-    farms: read(".best-farms"), farmsVisible: visible(".best-farms"),
-    farmLinks: [...document.querySelectorAll(".best-farms a")].map(a => a.getAttribute("href")),
+    farms: read(".best-plans"), farmsVisible: visible(".best-plans"),
+    farmLinks: [...document.querySelectorAll(".best-plans a")].map(a => a.getAttribute("href")),
+    farmBadges: [...document.querySelectorAll(".best-plans .badge")].map(chip => chip.textContent),
     positions: document.querySelectorAll(".positions > div").length,
     labels, steps,
-    planVisible: visible(".plan-steps"),
+    planVisible: visible(".steps"),
     quoteVisible: visible(".quote"), quotePass,
     attribution: read(".attribution"), attributionVisible: visible(".attribution"),
-    peersVisible: visible(".detail-grid > :last-child > :last-child"),
-    curve: read(".curve"), heldOut: read(".misses"), timing: read(".research-grid") && read("#view .inset p"),
-    stress: read(".detail-aside .facts"), stressVisible: visible(".detail-aside .facts"), rowCheck: read("#row-check"),
-    rowPass: document.querySelector("#row-check")?.dataset.pass,
-    chart: read(".chart-note"), scope: document.querySelector("#filter-scope")?.value,
+    peersVisible: visible(".detail > :last-child > :last-child"),
+    curve: read(".curve"), heldOut: read(".misses"), timing: read(".research") && read("#view .inset p"),
+    stress: read(".stack .facts"), stressVisible: visible(".stack .facts"), rowCheck: chips[0]?.textContent,
+    rowPass: chips[0]?.dataset.pass,
+    chart: read(".plot-note"), scope: document.querySelector("#filter-scope")?.value,
     filter: document.querySelector("#filter-verdict")?.value,
     rows: rows.map(row => {
-      const { slug, value, launch, odds, issuer } = row.dataset;
-      return [slug, Number(row.cells[0].textContent), +value, +launch, +odds, +issuer, row.querySelector(".badge").textContent, watchlist.has(slug)];
+      const { slug, factors } = row.dataset;
+      return [slug, Number(row.cells[0].textContent), ...factors.split(",").map(Number), row.querySelector(".badge").textContent, watchlist.has(slug)];
     }),
     width: innerWidth, height: innerHeight, dpr: devicePixelRatio,
     scrollbar: innerWidth - document.documentElement.clientWidth
@@ -394,8 +412,14 @@ async function shoot(output, destination) {
       console.log("Loopback TCP unavailable. Using Firefox headless PNG capture with page diagnostics.");
     }
     const verify = (name, info) => {
-      const check = /^(\d+)\/(\d+) self-checks pass$/.exec(info.checks);
-      if (!check || check[1] !== check[2] || Number(check[1]) === 0) throw new Error(`${name}: ${info.checks}`);
+      const check = /^(\d+)\/(\d+) self-checks pass(?: · 1\/1 rows match)?$/.exec(info.checks);
+      if (!check || check[1] !== check[2] || Number(check[1]) === 0 || info.checksPass !== "true") {
+        throw new Error(`${name}: ${info.checks}`);
+      }
+      if (name === "2-detail.jpg" && !info.checks.endsWith(" · 1/1 rows match")) throw new Error(`${name}: missing row check`);
+      if (["1-board.jpg", "3-filtered.jpg"].includes(name) && (!info.integrityPass || !info.helpPass)) {
+        throw new Error(`${name}: integrity strip or explanation failed: ${info.integrity.join(" · ")}`);
+      }
       if (info.width !== width || info.height !== (name === "2-detail.jpg" ? detailHeight : height) || info.dpr !== 1) {
         throw new Error(`Unexpected Firefox viewport ${info.width}×${info.height} at DPR ${info.dpr}.`);
       }
@@ -408,7 +432,7 @@ async function shoot(output, destination) {
       })) {
         throw new Error(`${name}: page order or values differ from board.json`);
       }
-      if (info.rows.length && (info.rowPass !== "true" || !info.rowCheck.startsWith(`${info.rows.length}/${info.rows.length} rows match board.json`))) {
+      if (info.rows.length && (info.rowPass !== "true" || info.rowCheck !== `✓ Rows match board.json ${info.rows.length}/${info.rows.length}`)) {
         throw new Error(`${name}: ${info.rowCheck}`);
       }
       if (["1-board.jpg", "calibration"].includes(name) && (!/carried TVL.*n=\d+/.test(info.curve)
@@ -416,10 +440,11 @@ async function shoot(output, destination) {
         throw new Error(`${name}: calibration summary is incomplete.`);
       }
       if (name === "1-board.jpg" && (info.rows.length !== board.length || !info.chart)) throw new Error("The full board did not render.");
-      if (name === "1-board.jpg" && (!info.farmsVisible || !info.farms?.includes("Best available farms")
+      if (name === "1-board.jpg" && (!info.farmsVisible || !info.farms?.includes("Best plans that clear break-even")
         || info.farmLinks.length !== 5 || new Set(info.farmLinks).size !== 5
+        || info.farmBadges.length !== 5 || info.farmBadges.some(badge => badge !== "MARGINAL")
         || info.farmLinks.some(href => !href.startsWith("#detail/") || !boardBySlug.has(decodeURIComponent(href.slice(8)))))) {
-        throw new Error("The best available farms panel did not render five linked plans.");
+        throw new Error("The break-even panel did not render five linked MARGINAL plans.");
       }
       if (name === "calibration" && !info.timing?.includes("F walk-forward AUC")) throw new Error("Missing launch calibration.");
       if (name === "2-detail.jpg" && (info.steps.length < 3
@@ -451,6 +476,7 @@ async function shoot(output, destination) {
       writeFileSync(join(destination, name), bytes);
       const content = [info.title, info.count, info.rowCheck, info.first, info.chart, info.summary, info.defaultHalfOdds, info.portfolio].filter(Boolean).join(" · ");
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
+      if (info.integrity.length) console.log(`  ${info.integrity.join(" · ")}`);
     }
     console.log("Firefox reported no console errors or uncaught exceptions.");
     console.log("Calibration, detail attribution, board-matched decision tree, and live quote horizon selection, update and reset pass.");
