@@ -228,8 +228,10 @@ function readPage() {
   const chips = [...document.querySelectorAll(".integrity button")];
   const help = document.querySelector("#checks-info");
   const integrity = chips.map(chip => chip.textContent);
+  const integrityLines = new Set(chips.map(chip => chip.offsetTop)).size;
+  const integrityWidth = chips.length ? [chips[0].parentElement.clientWidth, chips.reduce((sum, chip) => sum + chip.offsetWidth, 0)] : [];
   const integrityPass = chips.length === 10 && visible(".integrity")
-    && new Set(chips.map(chip => chip.offsetTop)).size <= 2
+    && integrityLines === 1
     && chips.every(chip => chip.dataset.pass === "true" && chip.textContent.startsWith("✓ "));
   const helpPass = chips.every(chip => {
     chip.click();
@@ -243,7 +245,7 @@ function readPage() {
   }
   return {
     checks: read("#checks"), checksPass: document.querySelector("#checks")?.dataset.pass,
-    integrity, integrityPass, helpPass, title: read("h1"), count: read("#shown"), first: read("tbody tr th a"),
+    integrity, integrityPass, integrityLines, integrityWidth, helpPass, title: read("h1"), count: read("#shown"), first: read("tbody tr th a"),
     portfolio: read(".portfolio"),
     summary: read(".verdict"), defaultHalfOdds,
     oddsNote: read(".pay + p"), pay: read(".pay"), payVisible: visible(".pay"),
@@ -257,9 +259,12 @@ function readPage() {
     attribution: read(".attribution"), attributionVisible: visible(".attribution"),
     peersVisible: visible(".detail > :last-child > :last-child"),
     curve: read(".curve"), heldOut: read(".misses"), timing: read(".research") && read("#view .inset p"),
-    stress: read(".stack .facts"), stressVisible: visible(".stack .facts"), rowCheck: chips[0]?.textContent,
+    capMisses: [...document.querySelectorAll(".misses strong")].map(node => node.textContent),
+    oddsMisses: read(".odds-misses")?.match(/[\d.]+×/g),
+    termRows: [...document.querySelectorAll("#term-tests tbody tr")].map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
+    stress: read(".detail .facts"), stressVisible: visible(".detail .facts"), rowCheck: chips[0]?.textContent,
     rowPass: chips[0]?.dataset.pass,
-    chart: read(".plot-note"), scope: document.querySelector("#filter-scope")?.value,
+    chart: read("#yield-chart p"), scope: document.querySelector("#filter-scope")?.value,
     filter: document.querySelector("#filter-verdict")?.value,
     rows: rows.map(row => {
       const { slug, factors } = row.dataset;
@@ -418,7 +423,7 @@ async function shoot(output, destination) {
       }
       if (name === "2-detail.jpg" && !info.checks.endsWith(" · 1/1 rows match")) throw new Error(`${name}: missing row check`);
       if (["1-board.jpg", "3-filtered.jpg"].includes(name) && (!info.integrityPass || !info.helpPass)) {
-        throw new Error(`${name}: integrity strip or explanation failed: ${info.integrity.join(" · ")}`);
+        throw new Error(`${name}: integrity strip or explanation failed (${info.integrityLines} lines, widths ${info.integrityWidth}, help ${info.helpPass}): ${info.integrity.join(" · ")}`);
       }
       if (info.width !== width || info.height !== (name === "2-detail.jpg" ? detailHeight : height) || info.dpr !== 1) {
         throw new Error(`Unexpected Firefox viewport ${info.width}×${info.height} at DPR ${info.dpr}.`);
@@ -446,7 +451,18 @@ async function shoot(output, destination) {
         || info.farmLinks.some(href => !href.startsWith("#detail/") || !boardBySlug.has(decodeURIComponent(href.slice(8)))))) {
         throw new Error("The break-even panel did not render five linked MARGINAL plans.");
       }
-      if (name === "calibration" && !info.timing?.includes("F walk-forward AUC")) throw new Error("Missing launch calibration.");
+      if (name === "calibration") {
+        if (!info.timing?.includes("F walk-forward AUC")) throw new Error("Missing launch calibration.");
+        const terms = new Set(info.termRows.map(row => row[0]));
+        if (!["TVL scale exponent", "7d-growth carry", "Listing age in token odds", "TVL in token odds", "Flat cap / TVL ratio"]
+          .every(term => terms.has(term)) || info.termRows.some(([term, looWith, looWithout, walkWith, walkWithout]) => {
+          const headline = term.includes("odds") ? info.oddsMisses : info.capMisses;
+          return ![looWith, looWithout, walkWith, walkWithout].every(cell => /^\d+\.\d{2}× \/ \d+%$/.test(cell))
+            || looWith.split(" ")[0] !== headline?.[0] || walkWith.split(" ")[0] !== headline?.[1];
+        })) throw new Error("Missing term evidence or a with-column mismatch.");
+        console.log("Calibration terms (median miss / within 3×):");
+        for (const row of info.termRows) console.log(`  ${row.join(" | ")}`);
+      }
       if (name === "2-detail.jpg" && (info.steps.length < 3
         || info.labels.map(label => label.split(" ")[0]).join() !== "1,2a,2b,2c,3a,3b,3c,4,5,6,7"
         || !/Launch within (30|90|180|365) d: [\d.]+% \(q\) vs p\*/.test(info.summary)
@@ -476,7 +492,7 @@ async function shoot(output, destination) {
       writeFileSync(join(destination, name), bytes);
       const content = [info.title, info.count, info.rowCheck, info.first, info.chart, info.summary, info.defaultHalfOdds, info.portfolio].filter(Boolean).join(" · ");
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
-      if (info.integrity.length) console.log(`  ${info.integrity.join(" · ")}`);
+      if (info.integrity.length) console.log(`  ${info.integrityLines} integrity line · ${info.integrity.join(" · ")}`);
     }
     console.log("Firefox reported no console errors or uncaught exceptions.");
     console.log("Calibration, detail attribution, board-matched decision tree, and live quote horizon selection, update and reset pass.");
