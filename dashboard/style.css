@@ -1,8 +1,8 @@
 :root{
---ink:#142835;--dim:#4f5e66;--paper:#f2eade;--sheet:#fffaf0;--wash:#efe1c9;--rule:#ded0bc;--line:1px solid var(--rule);
---signal:#f4ad49;--rust:#873a10;--gain:#12634d;--loss:#993829;
+--ink:#142835;--dim:#4f5e66;--sheet:#fffaf0;--wash:#efe1c9;--rule:#ded0bc;--line:1px solid var(--rule);
+--signal:#f4ad49;--gain:#12634d;--loss:#993829;
 font:15px/1.5 Adwaita Sans,FreeSans,sans-serif;
-font-variant-numeric:tabular-nums;color:var(--ink);background:var(--paper)
+font-variant-numeric:tabular-nums;color:var(--ink);background:#f2eade
 }
 *{box-sizing:border-box}
 body,h1,h2,h3,p,dl,dd{margin:0}
@@ -15,16 +15,15 @@ h1{font:700 clamp(2.4rem,4vw,3.9rem)/1 FreeSerif,serif;letter-spacing:-.035em}
 h2{font-size:1.14rem;line-height:1.25}
 .frame{width:min(1328px,95%);margin:auto}
 body>header{background:var(--ink);color:var(--sheet);border-bottom:2px solid var(--signal)}
-.dialog-top,.chip,.panel,dialog{background:var(--sheet)}
+.chip,.panel,dialog,.dialog-top{background:var(--sheet)}
 .brand,.mast,.bar,.dialog-top,.portfolio,.equation{display:flex;align-items:center}
 .intro,.readings,.legend,.positions,.flows,.integrity,dl,nav{display:flex}
 .mast{min-height:56px;gap:32px}
 .brand{gap:8px;font-weight:700}
-.brand span{font-size:1.35em}
 .brand span,[aria-current]{color:var(--signal)}
 nav{gap:24px;margin-right:auto}
-[aria-sort] a,.watch,.back,.kicker,.steps h3{color:var(--rust)}
-.panel,.portfolio{border:var(--line)}
+[aria-sort] a,.watch,.back,.kicker,.steps h3{color:#873a10}
+.panel{border:var(--line);min-width:0}
 .btn,.chip{border:0}
 .btn{padding:4px 12px;background:var(--signal);color:var(--ink)}
 #checks,.rank,.kicker,footer{font:.76rem monospace}
@@ -32,18 +31,16 @@ small,dt,.curve,footer{color:var(--dim)}
 .intro,.bar,.dialog-top,.metrics{justify-content:space-between}
 .integrity,.readings,.portfolio,.positions,.drivers dl{flex-wrap:wrap}
 .intro{align-items:end;margin:12px 0 24px}
-.intro p{margin-top:8px}
 .integrity{gap:2px;margin:-17px 0 8px}
 .chip{padding:2px 1px;white-space:nowrap;font-size:.68rem}
-#check-help,.back{margin-top:16px}
+.back{margin-top:16px}
 .kpis,.groups,.board,.detail,.research,.rail,.detail>div,.filters,.steps li,.quotes{display:grid}
 .kpis{grid:auto/1.25fr 1.55fr 1fr .68fr;gap:12px;margin-bottom:8px}
-.panel,.portfolio{min-width:0}
-.kpi{padding:4px 12px;line-height:1.25;border-top:2px solid var(--ink)}
+.kpi{padding:4px 12px;line-height:1.25}
 .kpi h2,.filters label,.kicker{text-transform:uppercase}
 .kpi strong{font-size:1.94rem}
 .groups{grid:auto/1fr 1fr}
-.readings,.band,.totals,.board,.detail,.research{gap:1rem}
+.readings,.band,.totals,.board,.detail,.research,.drivers dl{gap:1rem}
 :not(strong)>small,.readings span,svg,.back{display:block}
 .misses strong{font-size:1.4rem}
 small,dt,.curve,.drivers,.rail,.portfolio p,.hint,.back,.kpi{font-size:.8rem}
@@ -59,12 +56,11 @@ small,dt,.curve,.drivers,.rail,.portfolio p,.hint,.back,.kpi{font-size:.8rem}
 }
 .scroll{overflow:auto}
 #results .scroll{max-height:511px;.portfolio+div &{max-height:318px}}
-#results thead{position:sticky;top:0;z-index:1}
 table{width:100%;border-collapse:collapse}
 th{text-align:left}
 thead{font-size:.75rem}
 .ranks{min-width:880px;font-size:.88rem;line-height:1.15}
-.ranks :is(td,th){padding:2px 6px}
+.ranks :is(td,th){padding:2px 5px}
 .ranks :is(td,small){white-space:nowrap}
 .rank,.ranks th:first-child{text-align:center}
 .hint,.compare{margin:0 16px 8px}
@@ -76,7 +72,7 @@ tbody tr{border-bottom:var(--line)}
 .farm{--mark:var(--gain);--tint:#d9ebe1}
 .marginal{--mark:#854608;--tint:#ffe3b1}
 .skip{--mark:#435783;--tint:#e3e8f0}
-.inset,.valuation,.empty,.portfolio{padding:12px}
+.inset,.empty{padding:12px}
 svg{width:100%;height:146px}
 svg text{fill:var(--dim);font-size:11px}
 svg path{stroke:var(--rule)}
@@ -101,14 +97,11 @@ svg circle{fill:var(--mark)}
 .quotes{grid:auto/repeat(auto-fit,minmax(80px,1fr));gap:6px}
 .amount{font-size:2.8rem}
 .drivers,.band,.steps li{padding:4px 0}
-.drivers dl{gap:1em}
-.inset h2{margin-bottom:.4em}
 .facts :is(td,th){padding:7px}
 .research{grid:auto/7fr 5fr}
-footer{padding:20px 0}
 dialog{margin:0 0 0 auto;height:100%;max-height:none;width:min(640px,100%);border:0}
-.dialog-top,.drawer{padding:16px}
-.dialog-top{position:sticky;top:0}
+.dialog-top,.drawer{padding:12px}
+.dialog-top,#results thead{position:sticky;top:0;z-index:1}
 @media(max-width:1130px){.board{grid:auto/1fr}.rail{grid:auto/1fr 1fr}}
 @media(max-width:780px){
 	.mast{flex-wrap:wrap;gap:5px 12px}

@@ -209,7 +209,7 @@ function readPage() {
         && after["Launch within 30 d (q)"] === before["Launch within 30 d (q)"]
         && after["Expected net"] !== before["Expected net"] && after["Quote verdict"] === "SKIP"
         && read("#quote-result").includes("57d at")
-        && read(".gas").startsWith("Quoted gas = $")
+        && /^Quoted gas on .+ = \$/.test(read(".gas"))
         && halfOdds() !== defaultHalfOdds && halfOdds().includes("SKIP")
         && inputs.every(input => input.nextElementSibling.textContent === "Quoted");
       inputs.forEach(input => { input.value = ""; });
@@ -275,13 +275,14 @@ function readPage() {
     curve: read(".curve"), heldOut: read(".misses"), timing: read(".research") && read("#view .inset p"),
     capMisses: [...document.querySelectorAll(".misses strong")].map(node => node.textContent),
     oddsMisses: read(".odds-misses")?.match(/[\d.]+×/g),
-    termRows: [...document.querySelectorAll("#term-tests tbody tr")].map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
+    termRows: [...(document.querySelector(".research") ? document.querySelector(".facts").tBodies[0].rows : [])]
+      .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     assumptions: read("#assumptions .drawer ul"),
     assumptionTables: [...document.querySelectorAll("#assumptions table")].map(table => table.textContent),
     stress: read(".detail .facts"), stressVisible: visible(".detail .facts"), rowCheck: chips[0]?.textContent,
     rowPass: chips[0]?.dataset.pass,
-    chart: read("#yield p"), scope: document.querySelector("#filter-scope")?.value,
-    filter: document.querySelector("#filter-verdict")?.value,
+    chart: read("#yield p"), scope: document.querySelector("select[name=scope]")?.value,
+    filter: document.querySelector("select[name=verdict]")?.value,
     rows: rows.map(row => {
       const { slug, factors } = row.dataset;
       return [slug, Number(row.cells[0].textContent), ...factors.split(",").map(Number), row.querySelector(".badge").textContent, watchlist.has(slug)];
@@ -423,12 +424,25 @@ async function shoot(output, destination) {
   const board = JSON.parse(readFileSync(join(output, "board.json"), "utf8")).rows;
   const boardBySlug = new Map(board.map(row => [row.slug, row]));
   const url = pathToFileURL(join(output, "dashboard", "index.html")).href;
-  const [data] = readFileSync(join(output, "data.js"), "utf8").split("\n", 1);
-  const { snapshot } = JSON.parse(data.slice("const LaunchRadarData = ".length, -1));
+  const data = readFileSync(join(output, "data.js"), "utf8").trim();
+  const { snapshot } = JSON.parse(data.slice("globalThis.LaunchRadarData = ".length, -1));
   const { value, odds, rows } = api.buildModel(snapshot);
   const upshift = rows.find(row => row.slug === "upshift");
-  const { exits, gas, chain, cost, transactions, farmChain } = upshift.plan;
+  const { exits, gas, chain, cost, transactions } = upshift.plan;
   const modelBySlug = new Map(rows.map(row => [row.slug, row]));
+  for (const { slug, chains, plan } of rows) {
+    const { name } = plan.chain;
+    const steps = boardBySlug.get(slug).farm_steps;
+    const chainCount = new Set(chains).size;
+    const route = chainCount > 1 ? `${name}: cheapest priced route among ${chainCount} chains` : `on ${name}`;
+    if (!chains.includes(name) || !steps[0].includes(`${route}.`)
+      || steps.join(" ").split("cheapest priced route").length !== (chainCount > 1 ? 2 : 1)
+      || !steps[3].includes(`fund ${name},`) || !steps[5].includes(`rehearsal on ${name},`)
+      || !steps[7].includes(`on ${name}.`)
+      || (plan.verdict === "SKIP" && !steps.at(-1).includes(`${name} needs`))) {
+      throw new Error(`${slug}: checklist differs from priced chain ${name}.`);
+    }
+  }
   const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format;
   const gasLine = `${transactions} tx x ${money(chain.gas)} on ${chain.name} = ${money(gas)} · ${(100 * (gas / cost)).toFixed(1)}% of all-in cost`;
   const { selected, baseline, evidence, search } = value.validation;
@@ -506,14 +520,14 @@ async function shoot(output, destination) {
       }
       if (name === "2-detail.jpg" && (info.steps.length < 3
         || !/^80% \$.*–\$.* · 50% \$.*–\$/u.test(info.valueRange)
-        || !/Expected net.*(robust across 80% range|flips to .+ at the (low|high) end)/iu.test(info.rangeFarm)
+        || !/Expected net.*(robust across 80% range|flips to .+ at (low|high) end)/iu.test(info.rangeFarm)
         || info.labels.map(label => label.split(" ")[0]).join() !== "1,2a,2b,2c,3a,3b,3c,4,5,6,7"
         || !/Launch within (30|90|180|365) d: [\d.]+% \(q\) vs p\*/.test(info.summary)
-        || !info.oddsNote?.includes("no launch dates") || !info.oddsNote.includes("F walk-forward AUC")
+        || !info.oddsNote?.includes("No launch dates") || !info.oddsNote.includes("F walk-forward AUC")
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
-        || ![upshift.name, farmChain, "Lowest gas", "deposit caps"].every(text => info.steps[0].includes(text))
+        || ![upshift.name, chain.name, "deposit caps", "cheapest priced route"].every(text => info.steps[0].includes(text))
         || !info.steps.some(step => step.startsWith("If TVL") && step.includes(`${upshift.category} p10`))
-        || !info.steps.some(step => step.includes("allocator vault and hold shares"))
+        || !info.steps.some(step => step.includes("allocator vault. Hold shares"))
         || !info.gasVisible || info.gas !== gasLine || !info.exitsVisible
         || JSON.stringify(info.exits) !== JSON.stringify(exits) || !info.steps.some(step => step.startsWith("If " + exits[0]))
         || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps)
@@ -521,8 +535,8 @@ async function shoot(output, destination) {
         || !["TVL size", "7d carry", "Age on odds", "Issuer"].every(label => info.attribution?.includes(label))
         || !info.steps.some(step => step.includes("p*") && /Gas \+ slip cap \$[\d.]+/.test(step))
         || !info.steps.some(step => step.includes("deposit $80 USDC and withdraw it"))
-        || !info.payVisible || !info.pay?.includes("What would make it pay")
-        || !info.steps.at(-1).startsWith("Revisit if a points program or snapshot is announced:")
+        || !info.payVisible || !info.pay?.includes(`What would make it pay · ${chain.name} ·`)
+        || !info.steps.at(-1).startsWith("Revisit if points or snapshot announced.")
         || !info.stressVisible || !info.stress?.includes("½ share"))) {
         throw new Error(`Detail checks failed: ${JSON.stringify(info)}`);
       }
