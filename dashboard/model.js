@@ -24,7 +24,7 @@
  var FAMILIES = [], FAM_OF = {}, GAS = {}, GAS0 = 0.3, ACT = {};
  function use(t) {
   FAMILIES = api.FAMILIES = t.families; GAS = t.gas; GAS0 = t.gas_default; ACT = t.act; FAM_OF = {};
-  FAMILIES.forEach(function (f) { f[2].forEach(function (c) { FAM_OF[c] = f[0]; }); });
+  FAMILIES.forEach((f) => { f[2].forEach((c) => { FAM_OF[c] = f[0]; }); });
  }
  function family(p) { return FAM_OF[p.category] || 'infra'; }
  function gas(chain) { return GAS[chain] != null ? GAS[chain] : GAS0; }
@@ -46,7 +46,7 @@
  function firstWord(n) { return n.toLowerCase().split(/[\s.-]+/)[0]; }
  function tokenWords(snap) {
   var w = {};
-  snap.protocols.forEach(function (p) { if (hasToken(p) && firstWord(p.name).length >= 3) w[firstWord(p.name)] = p.name; });
+  snap.protocols.forEach((p) => { if (hasToken(p) && firstWord(p.name).length >= 3) w[firstWord(p.name)] = p.name; });
   return w;
  }
  function productOf(p, words) {
@@ -63,7 +63,7 @@
  // The value curve, fitted on trading tokens: one point per CoinGecko id.
  function calibrate(snap) {
   var tok = {}, order = [];
-  snap.protocols.forEach(function (p) {
+  snap.protocols.forEach((p) => {
    if (!trades(p) || p.tvl_usd <= 0 || productOf(p)) return;
    var k = p.gecko_id || p.symbol || p.slug;
    if (!tok[k]) { tok[k] = { p: p, tvl: 0, mcap: 0, members: 0 }; order.push(k); }
@@ -72,7 +72,7 @@
    t.mcap = Math.max(t.mcap, p.mcap_usd);
    if (p.tvl_usd > t.p.tvl_usd) t.p = p;
   });
-  var pts = order.map(function (k) {
+  var pts = order.map((k) => {
    var t = tok[k];
    // tc = TVL carried a week at its 7-day change.
    var tc = t.tvl * (1 + clamp(t.p.change_7d || 0, M.growth_floor, M.growth_cap) / 100);
@@ -81,131 +81,131 @@
   });
   // Families enter only if they lower both held-out misses.
   var tests = termTests(pts, snap.as_of), k = tests.terms[3].ok ? 0 : Infinity;
-  var miss = pts.map(function (q, i) { return Math.log(q.mcap / predict(fitPoints(pts.filter(function (o, j) { return j !== i; }), k), q)); });
+  var miss = pts.map((q, i) => Math.log(q.mcap / predict(fitPoints(pts.filter((o, j) => j !== i), k), q)));
   var full = fitPoints(pts, k);
-  pts.forEach(function (q, i) { q.fit = Math.round(predict(full, q)); q.loo = q.mcap / Math.exp(miss[i]); });
-  var sorted = miss.slice().sort(function (u, v) { return u - v; });
-  var absMiss = miss.map(Math.abs).sort(function (u, v) { return u - v; });
+  pts.forEach((q, i) => { q.fit = Math.round(predict(full, q)); q.loo = q.mcap / Math.exp(miss[i]); });
+  var sorted = miss.slice().sort((u, v) => u - v);
+  var absMiss = miss.map(Math.abs).sort((u, v) => u - v);
   var inBand = 0, q25 = quantile(sorted, 0.25), q75 = quantile(sorted, 0.75);
-  miss.forEach(function (m) { if (m >= q25 && m <= q75) inBand++; });
+  miss.forEach((m) => { if (m >= q25 && m <= q75) inBand++; });
   // Held-out miss by TVL band.
-  var cuts = [0, 1e7, 3e7, 1e8, 1e15], bands = cuts.slice(0, 4).map(function (lo, b) {
-   var m = pts.map(function (q, i) { return q.tvl >= lo && q.tvl < cuts[b + 1] ? Math.abs(miss[i]) : -1; }).filter(function (x) { return x >= 0; }).sort(function (u, v) { return u - v; });
+  var cuts = [0, 1e7, 3e7, 1e8, 1e15], bands = cuts.slice(0, 4).map((lo, b) => {
+   var m = pts.map((q, i) => q.tvl >= lo && q.tvl < cuts[b + 1] ? Math.abs(miss[i]) : -1).filter((x) => x >= 0).sort((u, v) => u - v);
    return { lo: lo, hi: cuts[b + 1], n: m.length, miss: Math.exp(quantile(m, 0.5)) };
   });
   return { bands: bands, k: k, slope: full.b, elasticity: 1 + full.b, base: Math.exp(full.all), families: full.fams, n: pts.length, points: pts,
    median_error: Math.exp(quantile(absMiss, 0.5)), band_low: Math.exp(q25), band_high: Math.exp(q75), band_hits: inBand,
-   clipped: pts.filter(function (q) { var r = q.mcap / q.tc; return r < M.ratio_floor || r > M.ratio_cap; }).length,
+   clipped: pts.filter((q) => { var r = q.mcap / q.tc; return r < M.ratio_floor || r > M.ratio_cap; }).length,
    tests: tests, odds: launchOdds(snap) };
  }
 
  // Token-record score F(p, a): logistic fit on ln TVL, ln age, 7d change, family.
  function launchOdds(snap) {
-  var peers = snap.protocols.filter(function (p) { return p.tvl_usd > 0 && !productOf(p); });
-  var known = peers.map(function (p) { return ageDays(snap.as_of, p.listed_at); }).filter(function (a) { return a != null; }).sort(function (a, b) { return a - b; });
+  var peers = snap.protocols.filter((p) => p.tvl_usd > 0 && !productOf(p));
+  var known = peers.map((p) => ageDays(snap.as_of, p.listed_at)).filter((a) => a != null).sort((a, b) => a - b);
   var mid = known[known.length >> 1], fams = FAMILIES.slice(0, -1);
-  var X = function (p, a) {
+  var X = (p, a) => {
    return [1, Math.log(p.tvl_usd / M.ref_tvl), Math.log(1 + a / 365), Math.log(1 + clamp(p.change_7d || 0, M.growth_floor, M.growth_cap) / 100)]
-    .concat(fams.map(function (f) { return family(p) === f[0] ? 1 : 0; }));
+    .concat(fams.map((f) => family(p) === f[0] ? 1 : 0));
   };
-  var pts = peers.map(function (p) { var a = ageDays(snap.as_of, p.listed_at); return { p: p, a: a, x: X(p, a == null ? mid : a), y: hasToken(p) ? 1 : 0 }; });
+  var pts = peers.map((p) => { var a = ageDays(snap.as_of, p.listed_at); return { p: p, a: a, x: X(p, a == null ? mid : a), y: hasToken(p) ? 1 : 0 }; });
   function logit(T, w0, steps) {
    var n = T[0].x.length, w = [], it, i, j, k, t, g, H;
    for (i = 0; i < n; i++) w.push(w0 ? w0[i] : 0);
    for (it = 0; it < (steps || 25); it++) {
-    g = w.map(function (v, i) { return i ? -M.odds_ridge * v : 0; });
-    H = w.map(function (v, i) { return w.map(function (u, j) { return i === j ? (i ? M.odds_ridge : 1e-6) : 0; }); });
-    T.forEach(function (q) { var pr = sig(dot(w, q.x)); for (i = 0; i < n; i++) { g[i] += (q.y - pr) * q.x[i]; for (j = 0; j < n; j++) H[i][j] += pr * (1 - pr) * q.x[i] * q.x[j]; } });
+    g = w.map((v, i) => i ? -M.odds_ridge * v : 0);
+    H = w.map((v, i) => w.map((u, j) => i === j ? (i ? M.odds_ridge : 1e-6) : 0));
+    T.forEach((q) => { var pr = sig(dot(w, q.x)); for (i = 0; i < n; i++) { g[i] += (q.y - pr) * q.x[i]; for (j = 0; j < n; j++) H[i][j] += pr * (1 - pr) * q.x[i] * q.x[j]; } });
     for (i = 0; i < n; i++) for (k = 0; k < n; k++) if (k !== i) { t = H[k][i] / H[i][i]; for (j = 0; j < n; j++) H[k][j] -= t * H[i][j]; g[k] -= t * g[i]; }
     for (i = 0; i < n; i++) w[i] += g[i] / H[i][i];
    }
    return w;
   }
   function auc(T) {
-   var pos = T.filter(function (q) { return q.y; }), neg = T.filter(function (q) { return !q.y; }), c = 0;
-   pos.forEach(function (a) { neg.forEach(function (b) { c += a.s > b.s ? 1 : a.s === b.s ? 0.5 : 0; }); });
+   var pos = T.filter((q) => q.y), neg = T.filter((q) => !q.y), c = 0;
+   pos.forEach((a) => { neg.forEach((b) => { c += a.s > b.s ? 1 : a.s === b.s ? 0.5 : 0; }); });
    return c / (pos.length * neg.length);
   }
-  var w = logit(pts), F = function (p, a) { return sig(dot(w, X(p, a))); };
-  var loo = pts.map(function (q, i) { return { y: q.y, s: dot(logit(pts.filter(function (o, j) { return j !== i; }), w, 3), q.x) }; });
-  var dated = pts.filter(function (q) { return q.a != null; }).sort(function (u, v) { return v.a - u.a || bySlug(u.p, v.p); });
+  var w = logit(pts), F = (p, a) => sig(dot(w, X(p, a)));
+  var loo = pts.map((q, i) => ({ y: q.y, s: dot(logit(pts.filter((o, j) => j !== i), w, 3), q.x) }));
+  var dated = pts.filter((q) => q.a != null).sort((u, v) => v.a - u.a || bySlug(u.p, v.p));
   var cut = Math.floor(dated.length * 0.6);
   // Held out with some inputs zeroed: walk-forward (newest 40%) and family-out (one fit per family).
   function held(cols) {
-   var z = function (q) { return { y: q.y, x: q.x.map(function (v, i) { return cols.indexOf(i) < 0 ? v : 0; }) }; }, wd = logit(dated.slice(0, cut).map(z)), fw = {};
-   return { wf: dated.slice(cut).map(function (q) { return { y: q.y, s: dot(wd, z(q).x) }; }),
-    fam: pts.map(function (q) { var f = family(q.p); fw[f] = fw[f] || logit(pts.filter(function (o) { return family(o.p) !== f; }).map(z), w, 4); return { y: q.y, s: dot(fw[f], z(q).x) }; }) };
+   var z = (q) => ({ y: q.y, x: q.x.map((v, i) => cols.indexOf(i) < 0 ? v : 0) }), wd = logit(dated.slice(0, cut).map(z)), fw = {};
+   return { wf: dated.slice(cut).map((q) => ({ y: q.y, s: dot(wd, z(q).x) })),
+    fam: pts.map((q) => { var f = family(q.p); fw[f] = fw[f] || logit(pts.filter((o) => family(o.p) !== f).map(z), w, 4); return { y: q.y, s: dot(fw[f], z(q).x) }; }) };
   }
-  var h0 = held([]), wf = h0.wf, lofo = h0.fam, ss = function (q) { return sig(q.s); };
-  var edges = [0, 180, 365, 730, 1095, 1e9], cohorts = edges.slice(0, 5).map(function (lo, c) {
-   var m = pts.filter(function (q) { return q.a != null && q.a >= lo && q.a < edges[c + 1]; }), n = m.length || 1;
-   return { from: lo, n: m.length, actual: m.reduce(function (t, q) { return t + q.y; }, 0) / n, fitted: m.reduce(function (t, q) { return t + F(q.p, q.a); }, 0) / n };
+  var h0 = held([]), wf = h0.wf, lofo = h0.fam, ss = (q) => sig(q.s);
+  var edges = [0, 180, 365, 730, 1095, 1e9], cohorts = edges.slice(0, 5).map((lo, c) => {
+   var m = pts.filter((q) => q.a != null && q.a >= lo && q.a < edges[c + 1]), n = m.length || 1;
+   return { from: lo, n: m.length, actual: m.reduce((t, q) => t + q.y, 0) / n, fitted: m.reduce((t, q) => t + F(q.p, q.a), 0) / n };
   });
-  var S = pts.reduce(function (t, q) { return t + q.y; }, 0), n = pts.length, rate = dated.slice(0, cut).reduce(function (t, q) { return t + q.y; }, 0) / cut;
-  var bri = function (T, f) { return T.reduce(function (t, q) { return t + Math.pow(f(q) - q.y, 2); }, 0) / T.length; };
-  var brier = { loo: bri(loo, ss), loo_base: bri(pts, function (q) { return (S - q.y) / (n - 1); }),
-   wf: bri(wf, ss), wf_base: bri(wf, function () { return rate; }) };
-  var boot = function (rnd) { var wb = logit(pts.map(function () { return pts[Math.floor(rnd() * n)]; }), w, 4); return function (p, a) { return sig(dot(wb, X(p, a))); }; };
+  var S = pts.reduce((t, q) => t + q.y, 0), n = pts.length, rate = dated.slice(0, cut).reduce((t, q) => t + q.y, 0) / cut;
+  var bri = (T, f) => T.reduce((t, q) => t + Math.pow(f(q) - q.y, 2), 0) / T.length;
+  var brier = { loo: bri(loo, ss), loo_base: bri(pts, (q) => (S - q.y) / (n - 1)),
+   wf: bri(wf, ss), wf_base: bri(wf, () => rate) };
+  var boot = (rnd) => { var wb = logit(pts.map(() => pts[Math.floor(rnd() * n)]), w, 4); return (p, a) => sig(dot(wb, X(p, a))); };
   brier.fam = bri(lofo, ss);
-  brier.fam_base = bri(pts, function (q) { var o = pts.filter(function (z) { return family(z.p) !== family(q.p); }); return o.reduce(function (t, z) { return t + z.y; }, 0) / o.length; });
-  var terms = [['all inputs', []], ['without TVL', [1]], ['without days tracked', [2]], ['without 7-day change', [3]], ['without family', fams.map(function (f, i) { return 4 + i; })]]
-   .map(function (t) { var h = t[1].length ? held(t[1]) : h0; return [t[0], bri(h.wf, ss), bri(h.fam, ss)]; });
-  return { terms: terms, mid: mid, auc_fam: auc(lofo), boot: boot, brier: brier, w: w, cohorts: cohorts, gap: Math.max.apply(null, cohorts.map(function (c) { return Math.abs(c.actual - c.fitted); })), n: pts.length, with_token: pts.filter(function (q) { return q.y; }).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
+  brier.fam_base = bri(pts, (q) => { var o = pts.filter((z) => family(z.p) !== family(q.p)); return o.reduce((t, z) => t + z.y, 0) / o.length; });
+  var terms = [['all inputs', []], ['without TVL', [1]], ['without days tracked', [2]], ['without 7-day change', [3]], ['without family', fams.map((f, i) => 4 + i)]]
+   .map((t) => { var h = t[1].length ? held(t[1]) : h0; return [t[0], bri(h.wf, ss), bri(h.fam, ss)]; });
+  return { terms: terms, mid: mid, auc_fam: auc(lofo), boot: boot, brier: brier, w: w, cohorts: cohorts, gap: Math.max.apply(null, cohorts.map((c) => Math.abs(c.actual - c.fitted))), n: pts.length, with_token: pts.filter((q) => q.y).length, auc_loo: auc(loo), auc_wf: auc(wf), wf_n: wf.length,
    F: F };
  }
  function sig(z) { return 1 / (1 + Math.exp(-z)); }
- function dot(w, x) { return x.reduce(function (s, v, i) { return s + v * w[i]; }, 0); }
+ function dot(w, x) { return x.reduce((s, v, i) => s + v * w[i], 0); }
 
  // Each value term tested on real market caps, leave-one-out and walk-forward.
  function termTests(pts, asOf) {
-  var ages = pts.map(function (q) { return ageDays(asOf, q.p.listed_at); });
-  var mid = ages.filter(function (a) { return a != null; }).sort(function (a, b) { return a - b; });
-  pts.forEach(function (q, i) {
+  var ages = pts.map((q) => ageDays(asOf, q.p.listed_at));
+  var mid = ages.filter((a) => a != null).sort((a, b) => a - b);
+  pts.forEach((q, i) => {
    q.g = clamp(q.p.change_7d || 0, M.growth_floor, M.growth_cap) / 100;
    q.age = ages[i] == null ? mid[mid.length >> 1] : ages[i];
   });
-  var dated = pts.filter(function (q) { return q.p.listed_at; }).sort(function (a, b) { return a.p.listed_at < b.p.listed_at ? -1 : a.p.listed_at > b.p.listed_at ? 1 : bySlug(a.p, b.p); });
+  var dated = pts.filter((q) => q.p.listed_at).sort((a, b) => a.p.listed_at < b.p.listed_at ? -1 : a.p.listed_at > b.p.listed_at ? 1 : bySlug(a.p, b.p));
   var cut = Math.floor(dated.length * 0.6);
   // Each term predicts ln(market cap), scored three ways.
   function score(make, spot) {
-   var err = function (m, q) { return Math.abs(Math.log(q.mcap / (spot ? q.tvl : q.tc)) - m(q)); };
-   var med = function (a) { return Math.exp(quantile(a.sort(function (u, v) { return u - v; }), 0.5)); };
-   var loo = pts.map(function (q, i) { return err(make(pts.filter(function (o, j) { return j !== i; })), q); });
-   var m = make(dated.slice(0, cut)), wf = dated.slice(cut).map(function (q) { return err(m, q); });
-   var lofo = pts.map(function (q) { return err(make(pts.filter(function (o) { return o.f !== q.f; })), q); });
+   var err = (m, q) => Math.abs(Math.log(q.mcap / (spot ? q.tvl : q.tc)) - m(q));
+   var med = (a) => Math.exp(quantile(a.sort((u, v) => u - v), 0.5));
+   var loo = pts.map((q, i) => err(make(pts.filter((o, j) => j !== i)), q));
+   var m = make(dated.slice(0, cut)), wf = dated.slice(cut).map((q) => err(m, q));
+   var lofo = pts.map((q) => err(make(pts.filter((o) => o.f !== q.f)), q));
    return { loo: med(loo), wf: med(wf), lofo: med(lofo) };
   }
   var T = [
-   ['flat', 'one multiple, spot TVL', function (q) { return [1]; }, 1],
-   ['spot', 'size curve, spot TVL', function (q) { return [1, q.sx]; }, 1],
-   ['size', 'size curve, TVL carried a week', function (q) { return [1, q.x]; }],
+   ['flat', 'one multiple, spot TVL', (q) => [1], 1],
+   ['spot', 'size curve, spot TVL', (q) => [1, q.sx], 1],
+   ['size', 'size curve, TVL carried a week', (q) => [1, q.x]],
    ['family', '+ category family', null],
-   ['growth', '+ 7-day change, own weight', function (q) { return [1, q.x, Math.log(1 + q.g)]; }],
-   ['age', '+ days since listing', function (q) { return [1, q.x, Math.log(1 + q.age / 365)]; }]
-  ].map(function (t) {
-   var r = score(t[2] ? function (tr) { return ols(tr, t[2], t[3] ? 'sy' : 'y'); } : function (tr) { var f = fitPoints(tr, 0); return function (q) { return (f.fams[q.f].peers ? f.fams[q.f].ln : f.all) + f.b * q.x; }; }, t[3]);
+   ['growth', '+ 7-day change, own weight', (q) => [1, q.x, Math.log(1 + q.g)]],
+   ['age', '+ days since listing', (q) => [1, q.x, Math.log(1 + q.age / 365)]]
+  ].map((t) => {
+   var r = score(t[2] ? (tr) => ols(tr, t[2], t[3] ? 'sy' : 'y') : (tr) => { var f = fitPoints(tr, 0); return (q) => (f.fams[q.f].peers ? f.fams[q.f].ln : f.all) + f.b * q.x; }, t[3]);
    r.key = t[0]; r.label = t[1];
    return r;
   });
   // ok = beats its rival term.
-  T.forEach(function (t, i) { var b = T[i < 3 ? i - 1 : 2]; t.ok = i ? t.loo < b.loo && t.wf < b.wf && t.lofo < b.lofo : null; });
+  T.forEach((t, i) => { var b = T[i < 3 ? i - 1 : 2]; t.ok = i ? t.loo < b.loo && t.wf < b.wf && t.lofo < b.lofo : null; });
   return { terms: T, wf_n: dated.length - cut, wf_train: cut, wf_from: dated[cut].p.listed_at };
  }
  // Least squares by the normal equations; weights on .w.
  function ols(pts, feats, yk) {
   var n = feats(pts[0]).length, A = [], v = [], i, j, r, t;
   for (i = 0; i < n; i++) { A.push([]); v.push(0); for (j = 0; j < n; j++) A[i].push(0); }
-  pts.forEach(function (q) { var f = feats(q); for (i = 0; i < n; i++) { v[i] += f[i] * q[yk || 'y']; for (j = 0; j < n; j++) A[i][j] += f[i] * f[j]; } });
+  pts.forEach((q) => { var f = feats(q); for (i = 0; i < n; i++) { v[i] += f[i] * q[yk || 'y']; for (j = 0; j < n; j++) A[i][j] += f[i] * f[j]; } });
   for (i = 0; i < n; i++) for (r = 0; r < n; r++) if (r !== i) { t = A[r][i] / A[i][i]; for (j = 0; j < n; j++) A[r][j] -= t * A[i][j]; v[r] -= t * v[i]; }
-  var w = v.map(function (x, k) { return x / A[k][k]; });
-  var m = function (q) { return feats(q).reduce(function (s, x, k) { return s + x * w[k]; }, 0); };
+  var w = v.map((x, k) => x / A[k][k]);
+  var m = (q) => feats(q).reduce((s, x, k) => s + x * w[k], 0);
   m.w = w;
   return m;
  }
  // FNV-1a of each row: main.ts writes it, the cover recomputes and compares.
  function digest(rows) {
   var h = 2166136261;
-  rows.forEach(function (r) { var s = [r.rank, r.slug, r.name, r.implied_value_usd].concat(r.farm_steps).join('|'); for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } });
+  rows.forEach((r) => { var s = [r.rank, r.slug, r.name, r.implied_value_usd].concat(r.farm_steps).join('|'); for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } });
   return ('0000000' + h.toString(16)).slice(-8);
  }
  function quantile(a, t) { var i = (a.length - 1) * t, lo = Math.floor(i); return a[lo] + (a[Math.min(lo + 1, a.length - 1)] - a[lo]) * (i - lo); }
@@ -215,22 +215,22 @@
  * (k = Infinity: one curve for all). */
  function fitPoints(pts, k) {
   var g = {}, one = k === Infinity;
-  pts.forEach(function (q) { var f = one ? 'all' : q.f; (g[f] = g[f] || []).push(q); });
+  pts.forEach((q) => { var f = one ? 'all' : q.f; (g[f] = g[f] || []).push(q); });
   var sxy = 0, sxx = 0;
-  Object.keys(g).forEach(function (f) {
+  Object.keys(g).forEach((f) => {
    var a = g[f], mx = 0, my = 0;
-   a.forEach(function (q) { mx += q.x; my += q.y; });
+   a.forEach((q) => { mx += q.x; my += q.y; });
    mx /= a.length; my /= a.length;
-   a.forEach(function (q) { sxy += (q.x - mx) * (q.y - my); sxx += (q.x - mx) * (q.x - mx); });
+   a.forEach((q) => { sxy += (q.x - mx) * (q.y - my); sxx += (q.x - mx) * (q.x - mx); });
   });
   var b = clamp(sxx > 0 ? sxy / sxx : 0, -0.9, 0.2);
   var all = 0;
-  pts.forEach(function (q) { all += q.y - b * q.x; });
+  pts.forEach((q) => { all += q.y - b * q.x; });
   all /= pts.length;
   var fams = {};
-  FAMILIES.forEach(function (fd) {
-   var a = pts.filter(function (q) { return q.f === fd[0]; }), s = 0;
-   a.forEach(function (q) { s += q.y - b * q.x; });
+  FAMILIES.forEach((fd) => {
+   var a = pts.filter((q) => q.f === fd[0]), s = 0;
+   a.forEach((q) => { s += q.y - b * q.x; });
    var raw = a.length ? s / a.length : all;
    var shrunk = one ? all : (a.length * raw + k * all) / (a.length + k);
    fams[fd[0]] = { key: fd[0], label: fd[1], peers: a.length, raw: Math.exp(raw), multiple: Math.exp(shrunk), ln: shrunk };
@@ -276,14 +276,14 @@
  function farmPlan(p, v, dep, hour, on) {
   var hr = hour == null ? M.hour_usd : hour;
   var main = p.chains.slice(0, 3), chain = main[0] || 'its main chain';
-  main.forEach(function (c) { if (gas(c) < gas(chain)) chain = c; });
+  main.forEach((c) => { if (gas(c) < gas(chain)) chain = c; });
   if (on && p.chains.indexOf(on) >= 0) chain = on;
   var kind = p.category === 'Prediction Market' ? 'predict' : v.family;
   var asset = /^(Bitcoin|Lightning)/.test(chain) ? 'BTC' : 'USDC';
-  var amt = function (x) { return '$' + x.toLocaleString('en-US'); }, tx0 = gas(chain), weeks = Math.round(M.farm_days / 7);
+  var amt = (x) => '$' + x.toLocaleString('en-US'), tx0 = gas(chain), weeks = Math.round(M.farm_days / 7);
   function steps(stake, gm) {
    var tx = tx0 * (gm || 1), side = Math.round(stake / 4), act = ACT[kind];
-   var fill = function (t) { return t.replace(/USDC/g, asset).replace(/\{S\}/g, amt(stake)).replace(/\{s\}/g, amt(side)).replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain); };
+   var fill = (t) => t.replace(/USDC/g, asset).replace(/\{S\}/g, amt(stake)).replace(/\{s\}/g, amt(side)).replace(/\{N\}/g, p.name).replace(/\{C\}/g, chain);
    return [
     { act: 'Kill test, go on only if all hold: ' + fill(act[3]) + '; and a deposit-and-withdraw quote totals under ' + usd(0.1 * earn(stake)) + ' (10% of the modeled drop). If any fails, stop with $0 spent', usd: 0, min: 15, when: 'Day 0' },
     { act: 'Withdraw ' + amt(stake + side) + ' of ' + asset + ' from an exchange straight to a fresh wallet on ' + chain + (gas(chain) < gas(main[0]) ? ' (cheaper than ' + main[0] + ', where it also runs)' : '') + '; keep only farm funds in it',
@@ -295,11 +295,11 @@
     { act: 'At launch claim only through the protocol\'s own app; the model prices it near ' + usd(v.fitted) + ' if launched, so sell the claim if its market cap opens above ' + usd(v.cap_high) + ' (top of its 50% band; the model fits market cap, not FDV)', usd: 2 * tx, min: 15, when: 'At launch' }
    ];
   }
-  function total(st) { var c = 0, t = 5; st.forEach(function (s) { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * hr }; }
+  function total(st) { var c = 0, t = 5; st.forEach((s) => { c += s.usd; t += s.min; }); return { cost: c, min: t, all: c + t / 60 * hr }; }
   // Tranches [amount, day in]: principal earns from the day it lands.
   function tranches(stake) { return kind === 'vault' ? [[stake, 0], [Math.round(stake / 4), 1]] : [[stake, kind === 'rwa' ? 2 : 0]]; }
-  function eligible(stake) { return tranches(stake).reduce(function (a, t) { return a + t[0]; }, 0); }
-  function earn(stake) { return tranches(stake).reduce(function (a, t) { return a + t[0] * (M.farm_days - t[1]); }, 0) * v.apr / 365; }
+  function eligible(stake) { return tranches(stake).reduce((a, t) => a + t[0], 0); }
+  function earn(stake) { return tranches(stake).reduce((a, t) => a + t[0] * (M.farm_days - t[1]), 0) * v.apr / 365; }
   var stake = dep ? Math.round(dep / 1.25) : 20000;
   for (var k = 400; !dep && k <= 20000; k += 400) {
    if (earn(k) >= M.target_cover * total(steps(k)).all) { stake = k; break; }
@@ -324,7 +324,7 @@
     { when: 'Day 30', usd: 0, min: 10, act: 'Look again on a new snapshot; if the plan now pays ×' + M.target_cover + ', follow the full plan (' + usd(capital) + ' capital, about ' + usd(t.cost) + ' in fees, ' + mins(Math.round(t.min)) + ' hands-on)' }];
   }
   var carry = capital * M.carry_rate * M.farm_days / 365, stress = ACT[kind][4];
-  return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map(function (m) { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, drop >= M.target_cover * a.all ? 'farm' : drop >= a.all ? 'marginal' : 'skip']; }), stake: capital, eligible: eligible(stake), tranches: tranches(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
+  return { stress: stress[0], stress_usd: capital * stress[1], carry: carry, hour: hr, chain: chain, gas: tx0, fees: [0.5, 3].map((m) => { var a = total(steps(stake, m)); return [m, a.cost, drop - a.all, drop >= M.target_cover * a.all ? 'farm' : drop >= a.all ? 'marginal' : 'skip']; }), stake: capital, eligible: eligible(stake), tranches: tranches(stake), asset: asset, steps: st, cost: t.cost, minutes: t.min, time_usd: t.min / 60 * hr, all_in: t.all,
    days: M.farm_days, drop: drop, net: drop - t.all, need_share: needShare, pay_cap: payCap, verdict: verdict };
  }
  function stepText(s) {
@@ -336,56 +336,56 @@
  function build(snap) {
   var fit = calibrate(snap);
   var watch = {};
-  snap.watchlist.forEach(function (s) { watch[s] = true; });
-  var noToken = snap.protocols.filter(function (p) { return !hasToken(p) && p.tvl_usd > 0; });
+  snap.watchlist.forEach((s) => { watch[s] = true; });
+  var noToken = snap.protocols.filter((p) => !hasToken(p) && p.tvl_usd > 0);
   var words = tokenWords(snap);
-  var pre = noToken.filter(function (p) { return watch[p.slug] || !productOf(p, words); });
-  var products = noToken.filter(function (p) { return !watch[p.slug] && productOf(p, words); }).map(function (p) { return { p: p, kind: productOf(p, words) }; })
-   .sort(function (a, b) { return b.p.tvl_usd - a.p.tvl_usd || bySlug(a.p, b.p); });
-  var ages = pre.map(function (p) { return ageDays(snap.as_of, p.listed_at); }).filter(function (a) { return a != null; }).sort(function (a, b) { return a - b; });
+  var pre = noToken.filter((p) => watch[p.slug] || !productOf(p, words));
+  var products = noToken.filter((p) => !watch[p.slug] && productOf(p, words)).map((p) => ({ p: p, kind: productOf(p, words) }))
+   .sort((a, b) => b.p.tvl_usd - a.p.tvl_usd || bySlug(a.p, b.p));
+  var ages = pre.map((p) => ageDays(snap.as_of, p.listed_at)).filter((a) => a != null).sort((a, b) => a - b);
   var ageFallback = ages.length ? ages[ages.length >> 1] : 365;
-  var rows = pre.map(function (p) {
+  var rows = pre.map((p) => {
    var v = value(p, fit, snap.as_of, ageFallback);
    return { p: p, v: v, plan: farmPlan(p, v), watch: !!watch[p.slug], below: p.tvl_usd < snap.floor_usd };
   });
-  rows.sort(function (a, b) { return b.v.implied - a.v.implied || bySlug(a.p, b.p); });
-  rows.forEach(function (r, i) { r.rank = i + 1; });
+  rows.sort((a, b) => b.v.implied - a.v.implied || bySlug(a.p, b.p));
+  rows.forEach((r, i) => { r.rank = i + 1; });
   // Rank crossing: each row's rank under three declared alternatives.
-  var F0 = function (r, a) { return fit.odds.F(Object.assign({}, r.p, { change_7d: 0 }), a); };
-  var ALT = { 'without momentum': function (r) { var a = r.v.age_used, f0 = F0(r, a); return r.v.fitted * Math.pow(r.p.tvl_usd / r.v.tvl_next, 1 + fit.slope) * f0; },
-   'score without age': function (r) { return r.v.fitted * fit.odds.F(r.p, fit.odds.mid); },
-   'if launched': function (r) { return r.v.fitted; } };
-  Object.keys(ALT).forEach(function (k) { rows.slice().sort(function (a, b) { return ALT[k](b) - ALT[k](a) || bySlug(a.p, b.p); }).forEach(function (r, i) { (r.alt = r.alt || {})[k] = i + 1; }); });
+  var F0 = (r, a) => fit.odds.F(Object.assign({}, r.p, { change_7d: 0 }), a);
+  var ALT = { 'without momentum': (r) => { var a = r.v.age_used, f0 = F0(r, a); return r.v.fitted * Math.pow(r.p.tvl_usd / r.v.tvl_next, 1 + fit.slope) * f0; },
+   'score without age': (r) => r.v.fitted * fit.odds.F(r.p, fit.odds.mid),
+   'if launched': (r) => r.v.fitted };
+  Object.keys(ALT).forEach((k) => { rows.slice().sort((a, b) => ALT[k](b) - ALT[k](a) || bySlug(a.p, b.p)).forEach((r, i) => { (r.alt = r.alt || {})[k] = i + 1; }); });
   // Bootstrap: 40 seeded refits of curve and score.
-  var seed = 7, rnd = function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  rows.forEach(function (r) { r.boot = 0; r.draws = []; });
+  var seed = 7, rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  rows.forEach((r) => { r.boot = 0; r.draws = []; });
   for (var d = 0; d < 40; d++) {
-   var bs = fit.points.map(function () { return fit.points[Math.floor(rnd() * fit.points.length)]; }), bf = fitPoints(bs, fit.k), Fb = fit.odds.boot(rnd);
-   rows.map(function (r) {
+   var bs = fit.points.map(() => fit.points[Math.floor(rnd() * fit.points.length)]), bf = fitPoints(bs, fit.k), Fb = fit.odds.boot(rnd);
+   rows.map((r) => {
     var qb = Fb(r.p, r.v.age_used);
     return { r: r, s: r.v.tvl_next * Math.exp(bf.fams[r.v.family].ln + bf.b * Math.log(r.v.tvl_next / M.ref_tvl)) * qb };
    })
-    .sort(function (a, b) { return b.s - a.s || bySlug(a.r.p, b.r.p); }).forEach(function (o, i) { o.r.draws.push(i + 1); if (i < 20) o.r.boot += 1 / 40; });
+    .sort((a, b) => b.s - a.s || bySlug(a.r.p, b.r.p)).forEach((o, i) => { o.r.draws.push(i + 1); if (i < 20) o.r.boot += 1 / 40; });
   }
-  rows.forEach(function (r) { var d = r.draws.sort(function (a, b) { return a - b; }); r.rlo = d[4]; r.rhi = d[35]; delete r.draws; });
+  rows.forEach((r) => { var d = r.draws.sort((a, b) => a - b); r.rlo = d[4]; r.rhi = d[35]; delete r.draws; });
   // Imputed ages: rank re-taken at the 25th and 75th percentile of observed ages.
-  var q = function (t) { return ages[Math.floor((ages.length - 1) * t)]; };
-  rows.filter(function (r) { return r.v.age == null; }).forEach(function (r) {
-   r.ageRange = [q(0.25), q(0.75)].map(function (a) {
+  var q = (t) => ages[Math.floor((ages.length - 1) * t)];
+  rows.filter((r) => r.v.age == null).forEach((r) => {
+   r.ageRange = [q(0.25), q(0.75)].map((a) => {
     var val = r.v.fitted * fit.odds.F(r.p, a);
-    return { age: a, rank: 1 + rows.filter(function (o) { return o !== r && o.v.implied > val; }).length };
+    return { age: a, rank: 1 + rows.filter((o) => o !== r && o.v.implied > val).length };
    });
   });
-  rows.forEach(function (r) { r.stable = r.rank <= 20 && Object.keys(r.alt).every(function (k) { return r.alt[k] <= 20; }); });
-  var live = fit.points.map(function (q) { return { p: q.p, tvl: q.tvl, members: q.members, family: q.f, fit: q.fit, loo: Math.round(q.loo), actual: q.mcap }; })
-   .sort(function (a, b) { return b.actual - a.actual || bySlug(a.p, b.p); });
-  var listedOnly = snap.protocols.filter(function (p) { return hasToken(p) && !trades(p); }).length;
+  rows.forEach((r) => { r.stable = r.rank <= 20 && Object.keys(r.alt).every((k) => r.alt[k] <= 20); });
+  var live = fit.points.map((q) => ({ p: q.p, tvl: q.tvl, members: q.members, family: q.f, fit: q.fit, loo: Math.round(q.loo), actual: q.mcap }))
+   .sort((a, b) => b.actual - a.actual || bySlug(a.p, b.p));
+  var listedOnly = snap.protocols.filter((p) => hasToken(p) && !trades(p)).length;
   return { model: M, fit: fit, rows: rows, live: live, products: products, listed_only: listedOnly, age_fallback: ageFallback, families: FAMILIES };
  }
 
  /* board.json's rows: the gate's five fields plus the figures behind them. */
  function boardRows(radar) {
-  return radar.rows.map(function (r) {
+  return radar.rows.map((r) => {
    return { rank: r.rank, slug: r.p.slug, name: r.p.name, implied_value_usd: r.v.implied,
     farm_steps: r.plan.steps.map(stepText),
     token_status: 'pre-token', on_watchlist: r.watch, implied_low_usd: r.v.low, implied_high_usd: r.v.high,
