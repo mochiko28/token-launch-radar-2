@@ -8,8 +8,8 @@ const api=globalThis.LaunchRadar,
 const html=(items,draw)=>items.map(draw).join(""),
 	view=$("#view"),check=$("#checks"),
 	checks=fromEntries(api.selfChecks(model,snapshot,boardDigest).map(({name,pass})=>[name,pass])),
-	passed=values(checks).filter(Boolean).length,totalChecks=keys(checks).length,
-	allPass=passed===totalChecks,selfCount=`${passed}/${totalChecks}`,
+	passed=count(values(checks),Boolean),total=keys(checks).length,
+	allPass=passed===total,selfCount=`${passed}/${total}`,
 	number=options=>new Intl.NumberFormat("en-US",options).format;
 const currency={style:"currency",currency:"USD"},
 	money=number(currency),
@@ -18,7 +18,7 @@ const currency={style:"currency",currency:"USD"},
 const pct=percent,
 	hit=n=>n==null?"—":pct(n,0),
 	hits=({hits:[two,three]})=>`3× ${hit(three)} · 2× ${hit(two)}`,
-	multiple=n=>n==null?"—":n.toFixed(2)+"×",
+	multiple=(n,places=2)=>n==null?"—":n.toFixed(places)+"×",
 	sign=n=>n>0?"+":"",
 	change=n=>n==null?"—":sign(n)+n.toFixed(2)+"%",
 	net=n=>sign(n)+money(n);
@@ -28,16 +28,15 @@ const esc=value=>String(value??"").replace(/[&<>"']/g,c=>({
 })[c]);
 const {rows,counts,verdicts,stress,portfolio,value,odds,assumptions,board:{rows:board}}=model,
 	hash=api.digest(board),sameDigest=hash===boardDigest,
-	{parameters}=assumptions,{horizons}=parameters,auc=odds.validation,
+	{parameters:{horizons,tvlReference,riskFreeRate,hourlyUsd}}=assumptions,auc=odds.validation,
 	{loo,walk}=auc,
 	showAuc=sample=>sample.auc?.toFixed(3)??"—";
 const timingNote=`${assumptions.timing} F walk-forward AUC ${showAuc(walk)} (n=${walk.n}).`,
 	valueTests=[["loo","Leave-one-out"],["walk","Walk-forward"],["family","Family hold-out"]],
 	oddsTests=valueTests.slice(0,2),
-	{baseline,selected,trials,evidence}=value.validation,
+	{baseline,selected,trials,evidence,search}=value.validation,
 	groups=[["traded"],["recorded","token without cap"],["setAside","set aside"],["ranked"]],
-	unique=items=>[...new Set(items)].sort(),
-	families=unique(rows.map(p=>p.family)),chains=unique(rows.flatMap(p=>p.chains));
+	families=unique(rows.map(p=>p.family)).sort(),chains=unique(rows.flatMap(p=>p.chains)).sort();
 const ratings=keys(verdicts),
 	scenarios=[["doubleCost","2× cost"],["halfShare","½ share"]],
 	oddsLabel="Token status odds";
@@ -47,7 +46,7 @@ const columns={
 	growth:["7d TVL","change_7d"],days:["Days listed","ageDays"],
 	verdict:["Verdict",p=>ratings.indexOf(p.plan.verdict),"asc"],net:["Expected net",p=>p.plan.net]
 };
-const direction=key=>columns[key][2]||"desc";
+const direction=key=>columns[key][2]||"desc",flip=dir=>dir==="asc"?"desc":"asc";
 const filters=[
 	["Scope","scope",["all","watchlist"],"All ranked","Watchlist"],
 	["Family","family",["",...families],"All families"],
@@ -61,14 +60,12 @@ const defaults={q:"",sort:"rank",...fromEntries(filters.map(([,k,[first]])=>[k,f
 	bySlug=new Map(rows.map(p=>[p.slug,p]));
 
 function readRoute(){
-	const [path,query]=location.hash.slice(1).split("?"),
-		[route,slug]=path.split("/"),
-		params=new URLSearchParams(query),
-		sort=params.get("sort"),dir=params.get("dir");
-	const state={route:hasOwn(titles,route)?route:"board",slug,q:params.get("q")||"",sort:hasOwn(columns,sort)?sort:"rank",
-		compare:[...new Set(params.getAll("compare"))].filter(s=>bySlug.has(s)).slice(0,3)};
+	const [path,query]=location.hash.slice(1).split("?"),[route,slug]=path.split("/"),
+		params=new URLSearchParams(query),sort=params.get("sort"),dir=params.get("dir"),
+		state={route:hasOwn(titles,route)?route:"board",slug,q:params.get("q")||"",sort:hasOwn(columns,sort)?sort:"rank",
+		compare:unique(params.getAll("compare")).filter(s=>bySlug.has(s)).slice(0,3)};
 	state.dir=["asc","desc"].includes(dir)?dir:direction(state.sort);
-	for(const [,k,options] of filters) state[k]=options.includes(params.get(k))?params.get(k):options[0];
+	for(const [,key,options] of filters) state[key]=options.find(x=>x===params.get(key))??options[0];
 	return state;
 }
 
@@ -92,12 +89,11 @@ const intro=(title,description="",lead="",label="")=>`<header class=intro><div>$
 function valueSummary(){
 	const [intercept,slope]=value.fit.coefficients;
 	return`<div class="readings misses">${html(valueTests,([key,label]) =>
-		`<div><span>${label}</span><strong>${multiple(selected[key].miss)}</strong> / ${multiple(baseline[key].miss)}<small>${hits(selected[key])}</small></div>`)}</div>
-<p class=curve>${shortUsd(exp(intercept))} × (carried TVL / ${shortUsd(parameters.tvlReference)})<sup>${slope.toFixed(3)}</sup> · n=${counts.valueFit}`;
+		`<div><span>${label}</span><strong>${multiple(selected[key].miss,3)}</strong> / ${multiple(baseline[key].miss)}<small>${hits(selected[key])}</small></div>`)}</div>
+<p class=curve>${shortUsd(exp(intercept))} × (carried TVL / ${shortUsd(tvlReference)})<sup>${slope.toFixed(3)}</sup> · n=${counts.valueFit}`;
 }
 
-function kpis(){
-	return`<section class=kpis aria-label=Validation>
+const kpis=()=>`<section class=kpis aria-label=Validation>
 ${card("Snapshot coverage",`<strong>${counts.total}</strong>
 <div class=groups>${html(groups,([k,label=k])=>`<span><b>${counts[k]}</b> ${label}</span>`)}</div>`)}
 ${card(missTitle,valueSummary())}
@@ -105,13 +101,10 @@ ${card(`${oddsLabel} · held-out AUC`,`<div class=readings>${html(oddsTests,([k,
 	`<div><strong>${showAuc(auc[k])}</strong><span>${label}</span></div>`)}</div><p>TVL + age`)}
 ${card("Watchlist coverage",`<strong>${counts.watchlistCovered}<small> / ${counts.watchlistTotal}</small></strong>
 <p>TVL floor ${shortUsd(snapshot.floor_usd)}`)}</section>`;
-}
 
-function filter([label,key,options,...titles],state){
-	return`<label>${label}<select id=filter-${key} name=${key}>${html(options,(option,i) =>
-		`<option value="${esc(option)}"${option===state[key]?" selected":""}>${esc(titles[i]??(key==="tvl"?shortUsd(option)+"+":option))}`
-	)}</select></label>`;
-}
+const filter=([label,key,options,...titles],state)=>`<label>${label}<select id=filter-${key} name=${key}>${html(options,(option,i)=>
+	`<option value="${esc(option)}"${option===state[key]?" selected":""}>${esc(titles[i]??(key==="tvl"?shortUsd(option)+"+":option))}`
+)}</select></label>`;
 
 function portfolioStrip(state){
 	const {positions,capital,cost,net:gain,unallocated,eligible,budget}=portfolio;
@@ -130,14 +123,13 @@ const bestFarms=rows.filter(({plan:p})=>p.pStar!==null&&p.q>=p.pStar)
 function farmPanel(state){
 	return`<section class="panel inset best-plans"><p>${ratings.map(v=>`${verdicts[v]} ${v}`).join(" · ")} · FARM at q ≥ 2p* with clear flags. MARGINAL from p*.
 <h2>Best plans that clear break-even</h2>${html(bestFarms,p=>{
-		const {chain,capital,horizon,q,pStar,net:gain,cost,handsOnMinutes}=p.plan;
-		return`<div><b class=positive>${net(gain)} net</b>${taggedLink(p,state)} ${badge(p.plan.verdict)}
+		const {chain,capital,horizon,q,pStar,net:gain,cost,handsOnMinutes,verdict}=p.plan;
+		return`<div><b class=positive>${net(gain)} net</b>${taggedLink(p,state)} ${badge(verdict)}
 <small>${esc(chain.name)} · ${usd(capital)} · ${horizon} d · ${money(cost)} cost<br>q ${pct(q)} vs p* ${pct(pStar)} · ${handsOnMinutes} min hands-on</small></div>`;
 	})||"No plans clear break-even."}</section>`;
 }
 
-function boardShell(state){
-	return`${intro("Pre-token rankings","Farm horizons · 30–365 days")}
+const boardShell=state=>`${intro("Pre-token rankings","Farm horizons · 30–365 days")}
 <div class=integrity role=group aria-label=Integrity></div>
 	${kpis()}${state.scope==="watchlist"?portfolioStrip(state):""}
 <div class=board><section class=panel>
@@ -151,11 +143,10 @@ ${inset("Expected yield by age",`<div id=yield-chart></div>
 <div class=legend>${html(ratings,v=>`<span class=${v.toLowerCase()}-dot>${v}</span>`)}</div>`)}
 </aside></div>
 <details class="panel inset" id=checks-info><summary>Integrity</summary><ul>
-<li>Export: rows and digest.
-<li>Groups, watchlist, order, plan costs and times.
-<li>Value vs flat. AUC vs 0.500.
+<li>Export rows and digest
+<li>Groups, watchlist, order, plan cost and time
+<li>Value vs flat and AUC vs 0.500
 </ul></details>`;
-}
 
 function matchingRows(state){
 	const {scope,family,chain,verdict,flag,tvl}=state,
@@ -199,11 +190,9 @@ function comparison(state){
 	if(!picks.length) return '<p class=hint>Compare up to 3 protocols.';
 	const update=(compare,label,title=label)=>`<a class=button href="${href("board",{...state,compare})}" title="${esc(title)}">${label}</a>`,
 		headers=picks.map(p=>taggedLink(p,state)+" "+update(state.compare.filter(s=>s!==p.slug),"×",`Remove ${p.name}`));
-	const metrics=[
-		["Value",p=>shortUsd(p.score)],[oddsLabel,p=>pct(p.tokenOdds)],["TVL",p=>shortUsd(p.tvl_usd)],
+	const metrics=[["Value",p=>shortUsd(p.score)],[oddsLabel,p=>pct(p.tokenOdds)],["TVL",p=>shortUsd(p.tvl_usd)],
 		["7d TVL",p=>change(p.change_7d)],["Days listed",days],["Verdict",p=>badge(p.plan.verdict)],
-		["Capital",p=>usd(p.plan.capital)],["Expected net",p=>net(p.plan.net)]
-	];
+		["Capital",p=>usd(p.plan.capital)],["Expected net",p=>net(p.plan.net)]];
 	return`<section class=compare><div class=toolbar><h2>Compare</h2>${update([],"Clear")}</div>
 		${facts(["Metric",...headers],metrics.map(([label,read])=>[label,...picks.map(read)]))}</section>`;
 }
@@ -213,12 +202,12 @@ function verifyRows(rows,state){
 		sorted=rendered.length===rows.length&&(!rows.length||$(`[aria-sort=${ariaSort(state)}] #sort-${state.sort}`))
 			&&rendered.every((tr,i)=>tr.dataset.slug===rows[i].slug);
 	const matched=count(rendered,tr=>{
-		const [rank,,value,odds]=tr.cells,p=board[+rank?.textContent-1];
+		const [rank,,value,odds]=tr.cells,p=board[rank?.textContent-1];
 		if(!p||p.slug!==tr.dataset.slug) return false;
 		const {implied_value_usd:score,launch_value_usd:base,token_odds:s,issuer_factor:factor}=p;
 		return tr.dataset.factors===[score,base,s,factor].join()&&value?.title===usd(score)
-			&&value.querySelector("b")?.textContent===shortUsd(score)&&odds?.textContent===showOdds(s)
-			&&value.querySelector("small")?.textContent===factorText(base,s,factor);
+			&&value.firstElementChild?.textContent===shortUsd(score)&&odds?.textContent===showOdds(s)
+			&&value.lastElementChild?.textContent===factorText(base,s,factor);
 	});
 	renderIntegrity(matched,rows.length,sorted&&matched===rows.length);
 }
@@ -248,15 +237,14 @@ const ariaSort=state=>state.dir==="asc"?"ascending":"descending";
 function renderBoard(state){
 	const rows=matchingRows(state);
 	$("#shown").textContent=`${rows.length} of ${state.scope==="watchlist"?counts.watchlistCovered:counts.ranked} shown`;
-	$("#results").innerHTML=rows.length?`
-<div class=scroll tabindex=0 role=region aria-label=Rankings><table class=ranks>
-<thead><tr>${html(entries(columns),([key,[label]])=>{
+	const headers=html(entries(columns),([key,[label]])=>{
 		const active=key===state.sort,
-				dir=active?state.dir==="asc"?"desc":"asc":direction(key);
+			dir=active?flip(state.dir):direction(key);
 			return`<th scope=col${active?` aria-sort=${ariaSort(state)}`:""}>
 <a id=sort-${key} href="${href("board",{...state,sort:key,dir})}">${label}${active?` <span aria-hidden=true>${dir==="desc"?"↑":"↓"}</span>`:""}</a>`;
-		})}<th scope=col>Compare<tbody>${html(rows,row=>tableRow(row,state))}</table></div>`
-		:'<p class=empty>No matching protocols.';
+	})+"<th scope=col>Compare";
+	$("#results").innerHTML=rows.length?table("ranks",headers,html(rows,row=>tableRow(row,state))," role=region aria-label=Rankings")
+		:"<p class=empty>No matching protocols.";
 	verifyRows(rows,state);
 	$("#yield-chart").innerHTML=yieldChart(rows);
 	$("#comparison").innerHTML=comparison(state);
@@ -283,14 +271,10 @@ function yieldChart(rows){
 }
 
 const metrics=(items,kind="")=>`<dl class="${kind}">${html(items,([label,reading,style=""])=>
-	`<div><dt>${label}<dd class="${style}">${reading}</div>`)}</dl>`;
-
-function facts(headers,rows){
-	return`<div class=scroll tabindex=0><table class=facts>
-<thead><tr>${html(headers,title=>`<th scope=col>${title}`)}
-<tbody>${html(rows,([first,...cells])=>`<tr><th scope=row>${first}${html(cells,cell=>`<td>${cell}`)}`)}
-</table></div>`;
-}
+	`<div><dt>${label}<dd class="${style}">${reading}</div>`)}</dl>`,
+	table=(kind,headers,body,attrs="")=>`<div class=scroll tabindex=0${attrs}><table class=${kind}><thead><tr>${headers}<tbody>${body}</table></div>`,
+	facts=(headers,rows)=>table("facts",html(headers,title=>`<th scope=col>${title}`),
+		html(rows,([first,...cells])=>`<tr><th scope=row>${first}${html(cells,cell=>`<td>${cell}`)}`));
 
 function valueAttribution(row){
 	const {rank,name,score}=model.reference,
@@ -314,8 +298,7 @@ function payLine({pay,horizon,capped}){
 
 function quoteResult(plan,quote=plan.quote,result=plan){
 	const {horizon,q,capital,noToken,withToken,pStar,gas,fees,timeCost,holding,capitalCharge,drop,claimSell,verdict,net:gain}=result,
-		half=api.evaluateFarm(plan,capital,{quote,horizon,q:q/2}),
-		{riskFreeRate,hourlyUsd}=parameters;
+		half=api.evaluateFarm(plan,capital,{quote,horizon,q:q/2});
 	return`<div class=outcomes>
 <div><h3>No token <b>${money(noToken)}</b></h3><p>Gas ${money(gas)} · fees ${money(fees)}
 <p>Time ${money(timeCost)} at ${usd(hourlyUsd)}/h
@@ -329,8 +312,7 @@ function quoteResult(plan,quote=plan.quote,result=plan){
 <p class=half-q>Half q (${pct(q/2)}) gives ${net(half.net)} and ${badge(half.verdict)}.`;
 }
 
-function quotePanel({plan,slug}){
-	return inset("Cash flows &amp; quotes",`<div class=quote>
+const quotePanel=({plan,slug})=>inset("Cash flows &amp; quotes",`<div class=quote>
 <div id=quote-result aria-live=polite>${quoteResult(plan)}</div>
 	${payLine(plan)}
 <p>${timingNote}
@@ -341,7 +323,6 @@ ${html(quoteFields,([key,label,max])=>`<label>${label}
 <small>Default</small></label>`)}
 </form>
 </div>`);
-}
 
 function decisionTree(steps){
 	const labels=["1 Verify","2a Wait","2b Stop","2c Withdrawal rehearsal","3a Stop","3b Decide on entry","4 Monitor","5 Withdraw","6 Claim &amp; sell","7 Revisit"],
@@ -387,28 +368,28 @@ function detail(row,state){
 }
 
 function calibration(){
-	const reading=({miss,hits})=>`${multiple(miss)} / ${hit(hits[1])}`,
-		terms=[...evidence,...odds.evidence,{term:"Flat cap / TVL ratio",withTerm:selected,without:baseline,verdict:"Baseline"}],
-		ablation=facts(["Term","LOO with","LOO without","Walk-forward with","Walk-forward without","Verdict"],
+	const reading=(sample,places)=>sample?.n?`${multiple(sample.miss,places)} / ${hit(sample.hits[1])}`:"—",
+		terms=[...evidence,...odds.evidence,{term:"Flat cap / TVL ratio",withTerm:selected,without:baseline,verdict:"Baseline"},...search],
+		ablation=facts(["Term",...["LOO","Walk-forward","Family"].flatMap(s=>[s+" with",s+" without"]),"Verdict"],
 			terms.map(({term,withTerm,without,verdict})=>[term,
-				...oddsTests.flatMap(([k])=>[reading(withTerm[k]),reading(without[k])]),verdict]));
+				...valueTests.flatMap(([k])=>[withTerm,without].map(t=>reading(t[k],withTerm.family?3:2))),verdict]));
 	return`${intro("Trading-token calibration")}
 ${inset("Launch probability q",`<p>${timingNote}<p class=odds-misses>Odds median miss · LOO / walk · ${multiple(loo.miss)} / ${multiple(walk.miss)}`)}
-${inset("Term keep/drop · median miss / within 3×",`<p>Refit per fold. Odds miss = 1 / P(observed status). Haircut applies pre-token.<div id=term-tests>${ablation}</div>`)}
+${inset("Term keep/drop · median miss / within 3×",`<p>Fit per fold. Odds miss = 1 / P(observed status). Keep if LOO and walk improve with family miss up ≤ 0.10×.<div id=term-tests>${ablation}</div>`)}
 <div class=research>
 ${inset(`${counts.valueFit} screened trading tokens`,facts(["Protocol","Family","Carried TVL","Market cap","Fit"],
 	model.calibration.toSorted((a,b)=>b.mcap_usd-a.mcap_usd)
 		.map(p=>[esc(p.name),p.family,shortUsd(p.carriedTvl),shortUsd(p.mcap_usd),shortUsd(p.launchValue)])))}
 ${inset(missTitle,`${valueSummary()}<p>Flat uses median cap / carried TVL per fold.`+
-	facts(["Terms after TVL",...valueTests.map(([k,label])=>`${label} (n=${selected[k].n})`)],[baseline,...trials].map(t=>[
-		(t.terms?.join(" + ")||(t===baseline?"Flat ratio":"None"))+(t===selected?" · selected":""),
-		...valueTests.map(([k])=>multiple(t[k].miss))
+	facts(["Terms after TVL",...valueTests.map(([k,label])=>`${label} (n=${selected[k].n})`)],[baseline,...trials,...(selected.candidate?[selected]:[])].map(t=>[
+		(t.candidate||t.terms?.join(" + ")||(t===baseline?"Flat ratio":"None"))+(t===selected?" · selected":""),
+		...valueTests.map(([k])=>multiple(t[k].miss,3))
 	])))}
 </div>`;
 }
 
 function audit(state){
-	const peerRange=model.peerRatios.map(multiple).join("–");
+	const peerRange=model.peerRatios.map(n=>multiple(n)).join("–");
 	return`${intro("Top-20 audit","By implied value")}${inset("",
 facts(["Rank","Protocol","Raw 7d","Carried 7d","Growth treatment","Value / TVL","Peer range","Issuer flags"],
 	model.audit.map(row=>[row.rank,taggedLink(row,state),change(row.change_7d),change(row.growth),
@@ -419,7 +400,7 @@ facts(["Rank","Protocol","Raw 7d","Carried 7d","Growth treatment","Value / TVL",
 function assumptionsDrawer(){
 	const label=k=>k.replace(/^[a-z]|[A-Z]/g,(c,i)=>i?" "+c.toLowerCase():c.toUpperCase()),
 		display=v=>[v].flat().map(n=>Number.isInteger(n)?integer(n):esc(n)).join(" · "),
-		{chainQuotes,fallbackChain,mechanisms,families,notes}=assumptions;
+		{parameters,chainQuotes,fallbackChain,mechanisms,families,notes}=assumptions;
 	const blocks=[
 		["Parameters",["Parameter","Value"],entries(parameters).map(([k,v])=>[label(k),display(v)])],
 		["Chain quotes",["Chain","Gas/action","Funding","Time"],
@@ -438,18 +419,18 @@ let activeRoute;
 function render(){
 	const state=readRoute(),
 		focus=document.activeElement?.id,
-		{route,slug}=state,
-		row=route==="detail"&&rows.find(p=>encodeURIComponent(p.slug)===slug);
+		{route,slug}=state,detailPage=route==="detail",
+		row=detailPage&&rows.find(p=>encodeURIComponent(p.slug)===slug);
 	renderNavigation(state);
 	document.title=`${row?.name??titles[route]} · Launch Radar`;
-	view.innerHTML=route==="detail"?detail(row,state):{board:boardShell,audit,calibration}[route](state);
+	view.innerHTML=detailPage?detail(row,state):{board:boardShell,audit,calibration}[route](state);
 	if(route==="board") renderBoard(state);
 	const saved=board[row?.rank-1],match=sameDigest&&saved&&saved.slug===row.slug
 		&&$(".amount").textContent===usd(saved.implied_value_usd);
 	check.hidden=route==="board";
 	check.textContent=`${selfCount} self-checks pass${allPass?"":"ed"}`;
-	if(route==="detail") check.append(` · ${+!!match}/1 rows match`);
-	check.dataset.pass=allPass&&(route!=="detail"||!!match);
+	if(detailPage) check.append(` · ${+!!match}/1 rows match`);
+	check.dataset.pass=allPass&&(!detailPage||!!match);
 	document.getElementById(focus)?.focus();
 	if(activeRoute!==route) window.scrollTo(0,0);
 	activeRoute=route;
@@ -465,12 +446,6 @@ view.onclick=({target})=>{
 	help.open=true;
 	help.firstElementChild.focus();
 };
-
-function updateBoard(state){
-	history.replaceState(null,"",link("board",state));
-	renderNavigation(state);
-	renderBoard(state);
-}
 
 view.oninput=({target})=>{
 	if(target.id==="search") updateBoard({...readRoute(),q:target.value});
@@ -493,6 +468,12 @@ function renderNavigation(state){
 		a.href=link(route,state);
 		a.ariaCurrent=route===(state.route==="detail"?"board":state.route)?"page":"false";
 	}
+}
+
+function updateBoard(state){
+	history.replaceState(null,"",link("board",state));
+	renderNavigation(state);
+	renderBoard(state);
 }
 
 view.onchange=({target})=>{

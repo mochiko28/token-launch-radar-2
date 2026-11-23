@@ -1,75 +1,25 @@
 "use strict";
-const {abs,ceil,exp,floor,log,max,min,round}=Math;
+const {abs,ceil,exp,floor,log,max,min,round,sqrt}=Math;
 const {entries,fromEntries,hasOwn,keys,values}=Object;
-const record=(keys,read)=>fromEntries(keys.map(key=>[key,read(key)]));
+const record=(keys,read)=>fromEntries(keys.map(key=>[key,read(key)])),unique=items=>[...new Set(items)];
+const {farm,chainQuotes,fallbackChain,mechanisms,ethChains,assets,families}=
+	globalThis.LaunchRadarData?.tables??require("../lib/tables.json");
 const A={
 	growthClip:[-30,30],missingGrowth:0,haircut:.65,year:365,
 	tvlReference:1e8,missingAgeFallback:365,
 	familyPenalty:2,oddsPenalty:1,valueWarmup:25,oddsWarmup:60,
 	bootstrapDraws:192,bootstrapSeed:918273,bandQuantiles:[.1,.9],
-	hourlyUsd:20,depositorShare:.05,competingTvlShare:.2,
-	capitalLadder:[1_000,2_500,5_000,10_000,25_000,50_000],portfolioCapital:10_000,
-	farmMultiple:2,stressCost:2,stressShare:.5,weeklyMinutes:2,
-	routeHandsOnMinutes:6,verifyMinutes:8,exitTvlShare:.75,exitMinutes:10,
-	weeklyLossBuffer:10,reviewDays:14,horizons:[30,90,180,365],riskFreeRate:.04,
-	testUsd:80,testMinutes:6,claimMinutes:8,claimActions:2,
-	firstSaleShare:.5,peerCount:3,
-	peerCategoryPenalty:1,peerFamilyPenalty:.45
+	...farm,peerCount:3,peerCategoryPenalty:1,peerFamilyPenalty:.45
 };
 const DAY=86_400_000;
-const CHAINS={
-	Ethereum:[4.5,9,25],Bitcoin:[3,9,60],Solana:[.08,1.8,8],
-	Base:[.16,.8,8],Arbitrum:[.23,1.2,10],Optimism:[.19,1,10],
-	Binance:[.18,1.2,9],Polygon:[.12,.9,9],Avalanche:[.3,1.5,12],
-	Monad:[.15,1.2,12],Ink:[.17,1.1,10],Plasma:[.14,1.3,14],
-	"Hyperliquid L1":[.23,1.6,15],Sui:[.12,1.6,12],Aptos:[.12,1.5,12],
-	Stellar:[.08,1.8,12],Flare:[.16,1.9,15],Algorand:[.09,2,12],
-	Ripple:[.12,2.1,14],Tron:[1.2,3.5,16],Linea:[.24,1.3,15],
-	Mantle:[.22,1.5,14],Sonic:[.15,1.5,12],Scroll:[.25,1.5,15],
-	xDai:[.13,1.4,12],Berachain:[.24,1.5,15],TON:[.25,2,15],
-	Near:[.18,2,15],Starknet:[.26,1.5,18],Celo:[.13,1.5,12],
-	"zkSync Era":[.24,1.5,16],Unichain:[.18,1.3,12],
-	"World Chain":[.21,1.5,12],Ronin:[.21,1.7,15],Sei:[.18,1.8,15],
-	Cardano:[.32,2.5,20],"Plume Mainnet":[.24,1.7,16],
-	Arc:[.2,1.7,15],Pharos:[.25,2,18],CORE:[.27,2.3,18],
-	Bittensor:[.32,2.7,18],BSquared:[.35,3,22],
-	Noble:[.25,2,15],Mezo:[.34,2.6,17]
-};
-const FALLBACK_CHAIN=[1.5,5,30];
-const MECHANISMS={
-	Lending:[3,4,9,"Supply","Liquid markets only. No borrowing."],
-	Vault:[3,12,12,"Deposit","Review strategy."],
-	LP:[4,30,14,"Pair","Check pool depth and receipt."],
-	Perps:[4,25,14,"Post","No leverage."],
-	Staking:[3,12,11,"Stake","Check unbonding and slashing."],
-	RWA:[3,25,16,"Subscribe with","Check KYC and exits."],
-	Stablecoin:[4,18,13,"Supply","Check peg depth. No leverage."],
-	Network:[3,15,13,"Deposit","Follow docs."],
-	Insurance:[3,25,14,"Supply","Check claims and exit queue."],
-	Other:[3,20,13,"Deposit","Check deposit docs."]
-};
-const NATIVE=fromEntries(
-	"Algorand:ALGO|Bitcoin:BTC|BSquared:BTC|CORE:CORE|Flare:FLR|Hyperliquid L1:HYPE|Mezo:BTC|Monad:MON|Near:NEAR|Qubic:QU|Solana:SOL|Stacks:STX|Starknet:STRK|Sui:SUI|TON:TON|XDC:XDC|Bifrost Network:BNC|Mixin:XIN|XION:XION|ZIGChain:ZIG"
-		.split("|").map(entry=>entry.split(":")));
-const FAMILIES={
-	Lending:"Lending|Uncollateralized Lending|Collateral Markets|Collateral Management",
-	Vault:"Yield|Yield Aggregator|Risk Curators|Onchain Capital Allocator|Basis Trading|Leveraged Farming|Farm|Indexes|Options Vault|CeDeFi",
-	LP:"Dexs|Liquidity Manager",
-	Perps:"Derivatives|Synthetics|Options|Interest Rate Derivatives|Prediction Market",
-	Staking:"Liquid Staking|Liquid Restaking|Staking Pool|Restaking|Token Locker|Governance Incentives",
-	RWA:"RWA",
-	Stablecoin:"CDP|CDP Manager|Algo-Stables|Dual-Token Stablecoin|Stablecoin Wrapper|Stablecoin Issuer|Reserve Currency",
-	Network:"Chain|Payments|Decentralized BTC|Anchor BTC|Cross Chain Bridge",
-	Insurance:"Insurance"
-};
-const familyByCategory=new Map(entries(FAMILIES).flatMap(([family,categories]) =>
+const familyByCategory=new Map(entries(families).flatMap(([family,categories])=>
 	categories.split("|").map(category=>[category,family])));
 const productCategories=new Set(["Bridge","Canonical Bridge","Cross Chain Bridge","Restaked BTC","CEX"]),
 	liquid=new Set(["Liquid Staking","Liquid Restaking"]),
 	version=/\s+(?:v\s*\d+(?:\.\d+)*|\d+\.\d+(?:\.\d+)*)$/i,
 	exchange=/^(?:Binance|Coinbase|Bybit|Kraken|Bitget|OKX|Bitfinex|Gemini)\b/i,
 	receiptId=/^(wrapped|bridged|staked|restaked|savings)-/i;
-const byText=(a,b)=>a<b?-1:a>b?1:0,
+const byText=(a,b)=>(a>b)-(a<b),
 	limit=(value,low,high)=>min(high,max(low,value)),
 	count=(rows,test)=>rows.filter(test).length,
 	tally=(rows,get)=>record(["FARM","MARGINAL","SKIP"],v=>count(rows,p=>get(p)===v)),
@@ -84,7 +34,7 @@ const percent=(n,places=2)=>(n*100).toFixed(places)+"%",
 	weeks=days=>floor(days/7),
 	checksFor=checks=>entries(checks).map(([name,pass])=>({name,pass:!!pass}));
 
-function quantile(values,fraction){
+function quantile(values,fraction=.5){
 	if(!values.length) return null;
 	const sorted=values.toSorted((a,b)=>a-b),
 		index=(sorted.length-1)*fraction;
@@ -104,14 +54,14 @@ function prepare(snapshot){
 			ageDays=date===null?null:max(1,floor((asOf-date)/DAY));
 		const growth=limit(p.change_7d??A.missingGrowth,...A.growthClip),
 			carriedTvl=tvl*(1+growth/100);
-		const flags=[recordedWords.has(firstWord(name))&&"Name matches a recorded issuer",
-			isLiquid&&"Liquid staking or restaking",version.test(name)&&"Versioned name"].filter(Boolean);
 		const product=productCategories.has(category)||exchange.test(name)
 			||/\b(?:wrapped|bridged|staked)\b/i.test(name)||(!isLiquid&&/\bstaking\b/i.test(name));
 		const recorded=hasToken(p),
 			watched=watchlist.has(p.slug),
+			flags=recorded?[]:[recordedWords.has(firstWord(name))&&"Name matches a recorded issuer",
+				isLiquid&&"Liquid staking or restaking",version.test(name)&&"Versioned name"].filter(Boolean),
 			status=p.mcap_usd>0?"traded":recorded?"recorded":product&&!watched?"setAside":"ranked";
-		return{...p,family,date,ageDays,growth,carriedTvl,flags:recorded?[]:flags,
+		return{...p,family,date,ageDays,growth,carriedTvl,flags,
 			product,productPeer:product||isLiquid||receiptId.test(p.gecko_id),watchlist:watched,recorded,status,
 			size:log(carriedTvl/A.tvlReference),rawSize:log(tvl/A.tvlReference)};
 	});
@@ -126,9 +76,8 @@ function tokenPoints(records){
 	}
 	return[...tokens.values()].sort((a,b)=>byText(a.slug,b.slug));
 }
-const medianAge=rows=>quantile(rows.map(p=>p.ageDays).filter(Number.isFinite),0.5)??A.missingAgeFallback;
-
-const ageFeature=(p,fallback)=>log((p.ageDays??fallback)/A.year);
+const medianAge=rows=>quantile(rows.map(p=>p.ageDays).filter(Number.isFinite))??A.missingAgeFallback,
+	ageFeature=(p,fallback)=>log((p.ageDays??fallback)/A.year);
 
 function solve(matrix,target){
 	const rows=matrix.map((row,i)=>[...row,target[i]]),
@@ -152,34 +101,84 @@ function solve(matrix,target){
 const dot=(row,coefficients)=>row.reduce((sum,x,i)=>sum+x*coefficients[i],0),
 	zero=n=>Array(n).fill(0);
 
-const normalEquations=(n,penalties)=>({target:zero(n),matrix:penalties.map((v,i)=>zero(n).with(i,v))});
+const normalEquations=(penalties,n=penalties.length)=>({target:zero(n),matrix:penalties.map((v,i)=>zero(n).with(i,v))});
 
-function accumulate(system,x,residual,weight=1){
+function accumulate({matrix,target},x,residual,weight=1){
 	for(let i=0;i<x.length;i++){
-		system.target[i]+=x[i]*residual;
+		target[i]+=x[i]*residual;
 		if(x[i]===0) continue;
-		for(let j=0;j<x.length;j++) system.matrix[i][j]+=x[i]*x[j]*weight;
+		for(let j=0;j<x.length;j++) matrix[i][j]+=x[i]*x[j]*weight;
 	}
 }
 
 const valueTerms=[
 	["age","logAge",ageFeature],["growth","clippedGrowth",p=>p.growth/100],
-	...keys(FAMILIES).concat("Other").map(f=>["family",f,p=>Number(f===p.family)])
+	...keys(families).concat("Other").map(f=>["family",f,p=>+(f===p.family)])
 ];
-const valueFeatures=(p,{features,medianDays,omit})=>[
-	1,omit==="scale"?0:omit==="carry"?p.rawSize:p.size,...features.map(([,,read])=>read(p,medianDays))];
+const valueCandidates={
+	"Shrunk family offset":["group",p=>p.family],
+	"Shrunk category offset":["group",p=>p.category],
+	"Shrunk single-chain offset":["group",p=>p.chains.length===1?p.chains[0]:null],
+	"Chain breadth":["feature",p=>log(new Set(p.chains).size)],
+	"Quadratic log TVL":["feature",p=>p.rawSize**2],
+	"Log TVL hinge":["feature",p=>max(0,p.rawSize)],
+	"TVL × listing age":["feature",(p,age)=>p.rawSize*ageFeature(p,age)],
+	"Downside growth":["feature",p=>min(0,p.growth)/100],
+	"Continuous 7d carry":["carry",p=>p.rawSize+p.growth/100],
+	"Huber fit":["huber"],"Median residual intercept":["median"],
+	"Theil–Sen TVL fit":["theilSen"],"TVL slope shrinkage":["ridge"]
+};
+const valueFeatures=(p,{features,medianDays,omit,carry})=>[
+	1,omit==="scale"?0:omit==="carry"?p.rawSize:carry?.(p)??p.size,
+	...features.map(([,,read])=>read(p,medianDays))];
 
-function fitValue(points,terms,omit){
-	const features=valueTerms.filter(([term])=>terms.includes(term)),
-		fit={terms,features,medianDays:medianAge(points),omit},
+function fitValue(points,terms,omit,candidate){
+	const [method,read]=valueCandidates[candidate]??[],
+		features=valueTerms.filter(([term])=>terms.includes(term)),
+		fit={terms,features,medianDays:medianAge(points),omit,carry:method==="carry"?read:null,candidate};
+	if(method==="feature") features.push([candidate,candidate,read]);
+	const inputs=points.map(p=>valueFeatures(p,fit)),
 		names=["intercept","logCarriedTvl",...features.map(([,name])=>name)],
-		system=normalEquations(names.length,[1e-8,1e-8,...features.map(([term])=>term==="family"?A.familyPenalty:1e-8)]);
-	for(const p of points) accumulate(system,valueFeatures(p,fit),p.response);
-	return{...fit,names,coefficients:solve(system.matrix,system.target)};
+		penalties=[1e-8,1e-8+(method==="ridge"?sqrt(points.length):0),...features.map(([term])=>term==="family"?A.familyPenalty:1e-8)];
+	const regress=weights=>{
+		const system=normalEquations(penalties);
+		inputs.forEach((x,i)=>{
+			const w=weights?.[i]??1;
+			accumulate(system,x,points[i].response*w,w);
+		});
+		return solve(system.matrix,system.target);
+	};
+	let coefficients=regress();
+	const errors=()=>inputs.map((x,i)=>points[i].response-dot(x,coefficients));
+	if(method==="huber"){
+		const first=errors(),center=quantile(first),
+			cutoff=max(1e-8,1.345*1.4826*quantile(first.map(e=>abs(e-center))));
+		for(let i=0;i<20;i++) coefficients=regress(errors().map(e=>min(1,cutoff/abs(e))));
+	}
+	if(method==="theilSen"){
+		const residuals=errors(),slopes=[];
+		inputs.forEach(([,x],i)=>{
+			for(let j=0;j<i;j++){
+				const dx=x-inputs[j][1];
+				if(dx) slopes.push((residuals[i]-residuals[j])/dx);
+			}
+		});
+		coefficients[1]+=quantile(slopes)??0;
+	}
+	if(method==="median"||method==="theilSen") coefficients[0]+=quantile(errors());
+	const offsets=new Map(),group=method==="group"?read:null;
+	if(group){
+		errors().forEach((error,i)=>{
+			const key=group(points[i]),[sum,n]=offsets.get(key)??[0,A.familyPenalty];
+			if(key!=null) offsets.set(key,[sum+error,n+1]);
+		});
+		for(const [key,[sum,n]] of offsets) offsets.set(key,sum/n);
+	}
+	return{...fit,names,coefficients,group,offsets};
 }
 
-const logValue=(fit,p)=>dot(valueFeatures(p,fit),fit.coefficients),
-	medianRatio=points=>log(quantile(points.map(p=>p.mcap_usd/p.carriedTvl),0.5));
+const logValue=(fit,p)=>dot(valueFeatures(p,fit),fit.coefficients)+(fit.offsets.get(fit.group?.(p))??0),
+	medianRatio=points=>log(quantile(points.map(p=>p.mcap_usd/p.carriedTvl)));
 
 function folds(points,walk,warmup){
 	if(!walk) return points.map((p,i)=>[points.filter((_,j)=>i!==j),[p]]);
@@ -193,54 +192,57 @@ function folds(points,walk,warmup){
 }
 
 const blindTests=["loo","walk"];
+const issuerNote="untested assumption (no traded rows carry the flag)";
 
 function missSummary(misses){
 	const n=misses.length;
-	return{miss:n?exp(quantile(misses,.5)):null,n,
+	return{miss:n?exp(quantile(misses)):null,n,
 		hits:[2,3].map(x=>n?count(misses,m=>m<=log(x))/n:null)};
 }
 
 function termTest(term,withTerm,without){
 	const deltas=blindTests.map(k=>withTerm[k].n?without[k].miss-withTerm[k].miss:0);
-	return{term,withTerm,without,verdict:deltas.every(d=>d<0)?"fails both":"kept: "+
+	return{term,withTerm,without,verdict:deltas.every(d=>d<0)?"fails both":"kept · "+
 		["no measured effect","helps one","helps both tests"][count(deltas,d=>d>0)]};
 }
 
-function valueMiss(splits,terms,omit){
+function valueMiss(splits,terms,omit,candidate){
 	return missSummary(splits.flatMap(([train,test])=>{
-		if(!terms){
-			const ratio=medianRatio(train);
-			return test.map(p=>abs(log(p.carriedTvl)+ratio-p.response));
-		}
-		const fit=fitValue(train,terms,omit);
-		return test.map(p=>abs(logValue(fit,p)+(omit!=="issuer"&&p.flags.length?log(A.haircut):0)-p.response));
+		const fit=terms&&fitValue(train,terms,omit,candidate),ratio=fit?0:medianRatio(train);
+		return test.map(p=>abs((fit?logValue(fit,p):log(p.carriedTvl)+ratio)-p.response));
 	}));
 }
 
+const passesValue=({withTerm:a,without:b})=>blindTests.every(k=>a[k].n&&a[k].miss<b[k].miss)
+	&&a.family.n&&a.family.miss<=b.family.miss+.1;
+
 function chooseValue(points){
-	const families=[...new Set(points.map(p=>p.family))];
 	const splits={
 		loo:folds(points,false,A.valueWarmup),walk:folds(points,true,A.valueWarmup),
-		family:families.map(f=>[points.filter(p=>p.family!==f),points.filter(p=>p.family===f)])
+		family:unique(points.map(p=>p.family)).map(f=>[points.filter(p=>p.family!==f),points.filter(p=>p.family===f)])
 			.filter(([train])=>train.length)
 	};
 	const tests=keys(splits),
-		assess=terms=>({terms,...record(tests,k=>valueMiss(splits[k],terms))}),
+		assess=(terms,candidate,omit)=>({terms,candidate,...record(tests,k=>valueMiss(splits[k],terms,omit,candidate))}),
 		baseline=assess(null),
 		terms=["age","family","growth"],
 		trials=Array.from({length:1 << terms.length},(_,mask)=>assess(terms.filter((_,i)=>mask & (1 << i))));
-	const better=(a,b)=>tests.every(k=>a[k].n&&a[k].miss<b[k].miss),
-		volume=trial=>tests.reduce((product,k)=>product*(trial[k].miss??1),1);
-	const selected=trials.filter((trial,mask)=>terms.every((_,i)=>{
+	const volume=trial=>tests.reduce((product,k)=>product*(trial[k].miss??1),1),
+		better=(a,b)=>tests.every(k=>a[k].n&&a[k].miss<b[k].miss);
+	const deployed=trials.filter((trial,mask)=>terms.every((_,i)=>{
 		const bit=1 << i;
 		return !(mask & bit)||better(trial,trials[mask ^ bit]);
 	})).sort((a,b)=>volume(a)-volume(b))[0];
-	const labels={scale:"TVL scale exponent",carry:"7d-growth carry",issuer:"Issuer haircut",
-		age:"Listing age in cap",family:"Family in cap"};
-	const evidence=entries(labels).filter(([t])=>t!=="age"&&t!=="family"||selected.terms.includes(t))
-		.map(([omit,label])=>termTest(label,selected,record(blindTests,k=>
-			valueMiss(splits[k],selected.terms.filter(t=>t!==(omit==="carry"?"growth":omit)),omit))));
-	return{fit:fitValue(points,selected.terms),validation:{baseline,selected,trials,evidence}};
+	const search=keys(valueCandidates).map(term=>({term,withTerm:assess(deployed.terms,term),without:deployed})),
+		chosen=search.filter(passesValue).sort((a,b)=>volume(a.withTerm)-volume(b.withTerm))[0],
+		selected=chosen?.withTerm??deployed;
+	for(const row of search) row.verdict=row===chosen?"Adopted":passesValue(row)?"Eligible":"Rejected";
+	const labels={scale:"TVL scale exponent",carry:"7d-growth carry",age:"Listing age in cap",family:"Family in cap"},
+		evidence=entries(labels).filter(([t])=>t==="scale"||t==="carry"||selected.terms.includes(t))
+			.map(([omit,label])=>termTest(label,selected,
+				assess(selected.terms.filter(t=>t!==(omit==="carry"?"growth":omit)),selected.candidate,omit)));
+	evidence.push({term:"Issuer haircut",withTerm:selected,without:selected,verdict:issuerNote});
+	return{fit:fitValue(points,selected.terms,null,selected.candidate),validation:{baseline,deployed,selected,trials,evidence,search}};
 }
 
 const sigmoid=x=>1/(1+exp(-limit(x,-35,35))),
@@ -252,11 +254,11 @@ function fitTokenOdds(points,omit){
 		penalties=[1e-6,A.oddsPenalty,A.oddsPenalty];
 	let beta=zero(3);
 	for(let i=0;i<20;i++){
-		const system=normalEquations(beta.length,penalties);
+		const system=normalEquations(penalties);
 		system.target=beta.map((c,j)=>-c*penalties[j]);
 		for(let j=0;j<points.length;j++){
 			const x=inputs[j],prob=sigmoid(dot(x,beta));
-			accumulate(system,x,Number(points[j].recorded)-prob,prob*(1-prob));
+			accumulate(system,x,points[j].recorded-prob,prob*(1-prob));
 		}
 		const delta=solve(system.matrix,system.target);
 		beta=beta.map((c,j)=>c+delta[j]);
@@ -267,10 +269,8 @@ function fitTokenOdds(points,omit){
 
 const tokenOdds=(fit,p)=>sigmoid(dot(oddsFeatures(p,fit.age),fit.beta));
 
-function launchOdds(fit,p,s){
-	const age=p.ageDays??fit.age;
-	return record(A.horizons,h=>max(0,(tokenOdds(fit,{...p,ageDays:age+h})-s)/(1-s)));
-}
+const launchOdds=(fit,p)=>record(A.horizons,h=>max(0,
+	(tokenOdds(fit,{...p,ageDays:(p.ageDays??fit.age)+h})-p.tokenOdds)/(1-p.tokenOdds)));
 
 function attribution(p,ref,fit,odds){
 	const sized={...ref,rawSize:p.rawSize,size:p.rawSize+(ref.size-ref.rawSize)},
@@ -309,14 +309,14 @@ function testTokenOdds(splits,omit){
 	return{auc:auc(scored),...missSummary(scored.map(({recorded,score})=>-log(recorded?score:1-score)))};
 }
 
-function bootstrap(points,terms){
+function bootstrap(points,{terms,candidate}){
 	let seed=A.bootstrapSeed;
 	return Array.from({length:A.bootstrapDraws},()=>{
 		const sample=points.map(()=>{
 			seed=(Math.imul(seed,1664525)+1013904223) >>> 0;
 			return points[floor(seed*points.length/4294967296)];
 		});
-		return fitValue(sample,terms);
+		return fitValue(sample,terms,null,candidate);
 	});
 }
 
@@ -329,8 +329,8 @@ function nearestPeers(p,points){
 }
 
 function cheapestChain(chains,actions){
-	return[...new Set(chains)].map(name=>{
-		const [gas,bridge,bridgeMinutes]=hasOwn(CHAINS,name)?CHAINS[name]:FALLBACK_CHAIN;
+	return unique(chains).map(name=>{
+		const [gas,bridge,bridgeMinutes]=hasOwn(chainQuotes,name)?chainQuotes[name]:fallbackChain;
 		return{name,gas,bridge,bridgeMinutes,total:bridge+gas*(2*actions+A.claimActions)};
 	}).sort((a,b)=>a.total-b.total||a.bridgeMinutes-b.bridgeMinutes||byText(a.name,b.name))[0];
 }
@@ -381,23 +381,23 @@ function payThresholds({q,pStar,cost,drop,claimSell},quote){
 
 const stepCost=(min,fees=0)=>`${costUsd(wage(min)+fees)} · ${min} min`;
 
-function depositTicket(p,chain,capital){
-	if(p.family==="LP") return`${whole(capital/2)} USDC + ${whole(capital/2)} USDT`;
-	const native=NATIVE[chain]||(/^(Ethereum|Base|Arbitrum|Optimism|Linea|Ink|Scroll|zkSync Era)$/.test(chain)?"ETH":chain+" native asset"),
-		network=/BTC$/.test(p.category)?"BTC":NATIVE[chain]??"USDC",
-		asset={Staking:native,Network:network,Perps:p.category==="Prediction Market"?"USDC collateral":"USDC margin"}[p.family]||"USDC";
+function depositTicket({family,category},chain,capital){
+	if(family==="LP") return`${whole(capital/2)} USDC + ${whole(capital/2)} USDT`;
+	const native=assets[chain]||(ethChains.includes(chain)?"ETH":chain+" native asset"),
+		network=/BTC$/.test(category)?"BTC":assets[chain]??"USDC",
+		asset={Staking:native,Network:network,Perps:category==="Prediction Market"?"USDC collateral":"USDC margin"}[family]||"USDC";
 	return`${whole(capital)} ${asset}`;
 }
 
 function farmPlan(p,asOf,curve){
-	const [actions,bps,depositMinutes,verb,guidance]=MECHANISMS[p.family],
+	const [actions,bps,depositMinutes,verb,guidance]=mechanisms[p.family],
 		chain=cheapestChain(p.chains,actions),
 		{name,gas,bridge,bridgeMinutes}=chain,
 		{verifyMinutes,testUsd,exitMinutes,claimMinutes,weeklyMinutes,firstSaleShare}=A,
 		prep=A.routeHandsOnMinutes+A.testMinutes,slippage=bps/100;
 	const quote={entryGas:gas*(actions-1),exitGas:gas,slippage,delay:0,lockup:0};
 	const plan={
-		chain,quote,testGas:gas*actions,launchOdds:launchOdds(curve,p,p.tokenOdds),
+		chain,quote,testGas:gas*actions,launchOdds:launchOdds(curve,p),
 		competingTvl:p.tvl_usd*A.competingTvlShare,conditionalValue:p.launchValue*p.haircut,
 		handsOnMinutes:verifyMinutes+prep+depositMinutes+exitMinutes,capped:!!p.flags.length
 	};
@@ -437,9 +437,10 @@ function farmPlan(p,asOf,curve){
 	}};
 }
 
-function watchlistPortfolio(rows){
-	const farms=rows.filter(p=>p.watchlist&&p.plan.verdict==="FARM"),
-		budget=A.portfolioCapital,eligible=farms.length,
+const isFarm=p=>p.plan.verdict==="FARM";
+
+function watchlistPortfolio(farms){
+	const budget=A.portfolioCapital,eligible=farms.length,
 		total=(list,key)=>list.reduce((sum,p)=>sum+p[key],0),
 		overlap=min(...farms.map(p=>weeks(p.plan.horizon)));
 	for(let n=min(eligible,floor(budget/A.capitalLadder[0]));n>0;n--){
@@ -461,16 +462,13 @@ function watchlistPortfolio(rows){
 	return{budget,eligible,capital:0,unallocated:budget,positions:[],cost:0,net:0};
 }
 
-function boardRows(rows){
-	return rows.map(p=>({slug:p.slug,name:p.name,rank:p.rank,
-		implied_value_usd:p.score,launch_value_usd:p.launchValue,token_odds:p.tokenOdds,
-		issuer_factor:p.haircut,farm_steps:p.plan.steps.map(parts=>parts.join(" "))}));
-}
+const boardRows=rows=>rows.map(({slug,name,rank,score,launchValue,tokenOdds,haircut,plan})=>({slug,name,rank,
+	implied_value_usd:score,launch_value_usd:launchValue,token_odds:tokenOdds,
+	issuer_factor:haircut,farm_steps:plan.steps.map(parts=>parts.join(" "))}));
 
 function digest(rows){
-	const bytes=new TextEncoder().encode(JSON.stringify(rows));
 	let hash=2166136261;
-	for(const byte of bytes) hash=Math.imul(hash ^ byte,16777619);
+	for(const byte of new TextEncoder().encode(JSON.stringify(rows))) hash=Math.imul(hash^byte,16777619);
 	return(hash >>> 0).toString(16).padStart(8,"0");
 }
 
@@ -501,6 +499,7 @@ const orderedRows=rows=>count(rows,(p,i)=>p?.rank===i+1&&(!i||p.implied_value_us
 
 function selfChecks(model,snapshot,expectedDigest){
 	const {rows,board,counts,stress,portfolio:basket,reference,calibration,value,odds}=model,
+		{evidence,search,deployed,selected}=value.validation,
 		samples=rows.map(p=>p.plan).filter(p=>p.pStar!==null&&p.q>0&&p.drop>0);
 	return[...boardChecks(board,snapshot),...checksFor({
 		"group counts":counts.traded+counts.recorded+counts.setAside+counts.ranked===counts.total
@@ -530,11 +529,13 @@ function selfChecks(model,snapshot,expectedDigest){
 		}),
 		"stress counts":entries(stress).every(([key,{all,farm}]) =>
 			keys(all).every(v=>all[v]===count(rows,p=>p.plan.stress[key].verdict===v)
-				&&farm[v]===count(rows,p=>p.plan.verdict==="FARM"&&p.plan.stress[key].verdict===v))),
+				&&farm[v]===count(rows,p=>isFarm(p)&&p.plan.stress[key].verdict===v))),
 		"portfolio allocation":round((basket.capital+basket.unallocated)*100)===basket.budget*100
-			&&basket.positions.every(p=>p.verdict==="FARM"&&rows.some(r=>r.slug===p.slug&&r.watchlist&&r.plan.verdict==="FARM")),
-		"term table matches headline":[[value.validation.evidence,value.validation.selected],[odds.evidence,odds.validation]]
-			.every(([rows,headline])=>rows.length&&rows.every(({withTerm})=>blindTests.every(k=>withTerm[k].miss===headline[k].miss))),
+			&&basket.positions.every(p=>p.verdict==="FARM"&&rows.some(r=>p.slug===r.slug&&r.watchlist&&isFarm(r))),
+		"term table matches headline":[[evidence,selected],[odds.evidence,odds.validation]]
+			.every(([rows,headline])=>rows.length&&rows.every(row=>row.withTerm===headline)),
+		"value search":search.every(({withTerm,without,verdict})=>without===deployed
+			&&passesValue({withTerm,without})===(verdict!=="Rejected")&&(withTerm===selected)===(verdict==="Adopted")),
 		"board digest":typeof expectedDigest==="string"&&digest(boardRows(rows))===expectedDigest
 	})];
 }
@@ -544,7 +545,7 @@ function buildModel(snapshot){
 		points=tokenPoints(records);
 	if(points.length<3) throw new Error("Need three screened positive caps.");
 	const value=chooseValue(points),{fit}=value,
-		resamples=bootstrap(points,fit.terms),
+		resamples=bootstrap(points,fit),
 		oddsPoints=records.filter(p=>!p.product),
 		oddsFit=fitTokenOdds(oddsPoints),
 		oddsFolds=record(blindTests,k=>folds(oddsPoints,k==="walk",A.oddsWarmup)),
@@ -569,8 +570,7 @@ function buildModel(snapshot){
 	const groups=record(["traded","recorded","setAside","ranked"],k=>count(records,p=>p.status===k));
 	const counts={...groups,total:records.length,watchlistCovered:count(rows,p=>p.watchlist),
 		watchlistTotal:snapshot.watchlist.length,valueFit:points.length,oddsFit:oddsPoints.length};
-	const verdicts=tally(rows,p=>p.plan.verdict),
-		farms=rows.filter(p=>p.plan.verdict==="FARM");
+	const verdicts=tally(rows,p=>p.plan.verdict),farms=rows.filter(isFarm);
 	const stress=record(["doubleCost","halfShare"],k=>{
 		const verdict=p=>p.plan.stress[k].verdict;
 		return{all:tally(rows,verdict),farm:tally(farms,verdict)};
@@ -581,17 +581,17 @@ function buildModel(snapshot){
 		const ratio=p.launchValue/p.carriedTvl;
 		return{...p,ratio,outlier:ratio<peerRatios[0]||ratio>peerRatios[1]};
 	});
-	return{rows,reference,board:{rows:boardRows(rows)},counts,verdicts,stress,portfolio:watchlistPortfolio(rows),
+	return{rows,reference,board:{rows:boardRows(rows)},counts,verdicts,stress,portfolio:watchlistPortfolio(farms.filter(p=>p.watchlist)),
 		value,odds,calibration,audit,peerRatios,assumptions:settings};
 }
 const timing="Fixed TVL age curve. Snapshot has no launch dates.";
-const settings={parameters:A,chainQuotes:CHAINS,fallbackChain:FALLBACK_CHAIN,mechanisms:MECHANISMS,families:FAMILIES,timing,
+const settings={parameters:A,chainQuotes,fallbackChain,mechanisms,families,timing,
 	notes:[
-		"Cap, ID or symbol signal token status. Dedup by TVL. Audit: cap/carried TVL.",
-		timing,"F(a) is status at age a. q(H) = max(0, (F(a+H)−F(a))/(1−F(a))). Impute median age.",
+		"Token status uses cap, ID or symbol. Dedup by TVL. Audit uses cap/carried TVL.",
+		timing,"Issuer haircut · "+issuerNote,"F(a) is status at age a. q(H) = max(0, (F(a+H)−F(a))/(1−F(a))). Impute median age.",
 		"Prorate by eligible TVL. Exclude yield, tax, price moves.",
-		"First 2× ticket or best payoff/cost. Auto: best net, shortest hold.",
-		"Charge max(horizon, lockup) + delay. Slip on test, entry, exit and sale."
+		"First 2× ticket or best payoff/cost. Auto picks best net, shortest hold.",
+		"Charge max(horizon, lockup) + delay. Slip on test, entry, exit, sale."
 	]};
 
 const modelApi={buildModel,boardChecks,selfChecks,boardRows,digest,evaluateFarm,chooseFarm,oddsFactor,orderedRows,validSteps};

@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
+import api from "../dashboard/model.js";
 
 const width = 1440;
 const height = 980;
@@ -262,6 +263,7 @@ function readPage() {
     capMisses: [...document.querySelectorAll(".misses strong")].map(node => node.textContent),
     oddsMisses: read(".odds-misses")?.match(/[\d.]+×/g),
     termRows: [...document.querySelectorAll("#term-tests tbody tr")].map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
+    assumptions: read("#assumptions .drawer ul"),
     stress: read(".detail .facts"), stressVisible: visible(".detail .facts"), rowCheck: chips[0]?.textContent,
     rowPass: chips[0]?.dataset.pass,
     chart: read("#yield-chart p"), scope: document.querySelector("#filter-scope")?.value,
@@ -407,6 +409,15 @@ async function shoot(output, destination) {
   const board = JSON.parse(readFileSync(join(output, "board.json"), "utf8")).rows;
   const boardBySlug = new Map(board.map(row => [row.slug, row]));
   const url = pathToFileURL(join(output, "dashboard", "index.html")).href;
+  const data = readFileSync(join(output, "data.js"), "utf8").trim();
+  const { snapshot } = JSON.parse(data.slice("globalThis.LaunchRadarData = ".length, -1));
+  const { value, odds } = api.buildModel(snapshot);
+  const { selected, baseline, evidence, search } = value.validation;
+  const termRows = [...evidence, ...odds.evidence,
+    { term: "Flat cap / TVL ratio", withTerm: selected, without: baseline, verdict: "Baseline" }, ...search
+  ].map(({ term, withTerm, without, verdict }) => [term,
+    ...["loo", "walk", "family"].flatMap(key => [withTerm[key], without[key]].map(sample => sample?.n
+      ? `${sample.miss.toFixed(withTerm.family ? 3 : 2)}× / ${(sample.hits[1] * 100).toFixed(0)}%` : "—")), verdict]);
   const work = mkdtempSync("/work/.tmp/rw-firefox-");
   try {
     let port;
@@ -453,13 +464,15 @@ async function shoot(output, destination) {
       }
       if (name === "calibration") {
         if (!info.timing?.includes("F walk-forward AUC")) throw new Error("Missing launch calibration.");
-        const terms = new Set(info.termRows.map(row => row[0]));
-        if (!["TVL scale exponent", "7d-growth carry", "Listing age in token odds", "TVL in token odds", "Flat cap / TVL ratio"]
-          .every(term => terms.has(term)) || info.termRows.some(([term, looWith, looWithout, walkWith, walkWithout]) => {
-          const headline = term.includes("odds") ? info.oddsMisses : info.capMisses;
-          return ![looWith, looWithout, walkWith, walkWithout].every(cell => /^\d+\.\d{2}× \/ \d+%$/.test(cell))
-            || looWith.split(" ")[0] !== headline?.[0] || walkWith.split(" ")[0] !== headline?.[1];
-        })) throw new Error("Missing term evidence or a with-column mismatch.");
+        const cap = ["loo", "walk", "family"].map(key => `${selected[key].miss.toFixed(3)}×`);
+        const oddsMiss = ["loo", "walk"].map(key => `${odds.validation[key].miss.toFixed(2)}×`);
+        if (info.capMisses.join() !== cap.join() || info.oddsMisses?.join() !== oddsMiss.join()) {
+          throw new Error("Headline misses differ from the fitted model.");
+        }
+        if (JSON.stringify(info.termRows) !== JSON.stringify(termRows)) throw new Error("Calibration rows differ from the fitted model.");
+        if (!info.assumptions?.includes("untested assumption (no traded rows carry the flag)")) {
+          throw new Error("Missing issuer haircut note in Assumptions.");
+        }
         console.log("Calibration terms (median miss / within 3×):");
         for (const row of info.termRows) console.log(`  ${row.join(" | ")}`);
       }
