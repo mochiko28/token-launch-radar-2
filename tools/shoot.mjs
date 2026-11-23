@@ -16,8 +16,15 @@ const SHOTS = process.argv[5] ? process.argv[5].split(' ').map((s) => [s.split('
 const H = Number(process.env.SHOT_H || 1340);
 const LO = 300 * 1024, HI = 350 * 1000; // inside 300-350 KB whether a KB is 1,000 or 1,024 bytes
 
-const port = 9300 + Math.floor(Math.random() * 500);
+// A port nobody answers on: a leftover browser on a reused port would hand back its own stale page.
+let port;
+for (let i = 0; i < 20 && !port; i++) {
+  const p = 9300 + Math.floor(Math.random() * 500);
+  try { await fetch(`http://127.0.0.1:${p}/json`); } catch { port = p; }
+}
+if (!port) throw new Error('no free debugging port');
 const proc = spawn(chrome, ['--headless', `--remote-debugging-port=${port}`, `--window-size=1440,${H}`, '--hide-scrollbars', '--force-device-scale-factor=1', '--no-sandbox', '--allow-file-access-from-files', 'about:blank'], { stdio: 'ignore' });
+process.on('exit', () => proc.kill());
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let target;
 for (let i = 0; i < 50 && !target; i++) {
@@ -37,6 +44,8 @@ for (const [name, hash, h] of SHOTS) {
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: h || H, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: page + hash });
   await sleep(900);
+  const at = (await send('Runtime.evaluate', { expression: 'location.href', returnByValue: true })).result.result.value;
+  if (at !== page + hash) throw new Error(`${name}: browser shows ${at}, not ${page + hash}`);
   const png = Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64');
   let file = name + '.png', bytes = png;
   if (!process.argv[5] && (png.length < LO || png.length > HI)) {
