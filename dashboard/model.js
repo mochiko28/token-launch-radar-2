@@ -108,6 +108,7 @@ Crypto Card Issuer|load|if card top-ups qualify|redemption
 Privacy|deposit|in eligible privacy pool|withdrawal access`),
 	{abs,ceil,exp,floor,log,max,min,round,sqrt}=Math
 const record=(keys,read)=>object(keys.map(k=>[k,read(k)])),unique=items=>[...new Set(items)],
+	same=(a,b)=>JSON.stringify(a)===JSON.stringify(b),
 	DAY=86_400_000,
 	familyOf=new Map(entries(families).flatMap(([family,categories])=>
 	categories.split("|").map(category=>[category,family])))
@@ -244,10 +245,12 @@ function rangeFit(pts,form){
 const forms={current:"Full token-likeness",direct:"Age power on cap",pooled:"Family-pooled age power",shrink:"Shrunk token-likeness"},
 	outerTerms={growth:"7-day growth",age:"Listing age",issuer:"Issuer factor"},
 	outerTests={walk:"Walk-forward",family:"Leave-one-family-out"},
+	weights=[.125,.25,.5,.75,1],
 	valueSplits=(pts,k,warmup)=>k==="walk"?folds(pts,true,warmup):leaveOut(pts,p=>p.family),
 	ageWeight=(form,w)=>form==="current"?1:form==="shrink"?w:0,
 	ageFactor=(s,w)=>1-w*(1-s),
-	errorOf=(p,cap,age,issuer)=>p.response-log(scoreOf(cap,age,issuer))
+	errorOf=(p,cap,age,issuer)=>p.response-log(scoreOf(cap,age,issuer)),
+	valueError=(fit,[p,s,h],w)=>errorOf(p,exp(capLog(fit,p)),ageFactor(s,w),h)
 function trainingRows(test,recs,k){
 	const held=new Set(test.map(tokenId))
 	return recs.filter(p=>!held.has(tokenId(p))&&
@@ -262,57 +265,64 @@ function tuneWeight(pts,recs,schemes){
 		const fit=fitValue(train)
 		return valueInputs(test,trainingRows(test,recs,k)).map(([p,s,h])=>[p,exp(capLog(fit,p)),s,h])
 	}))
-	const weights=[.125,.25,.5,.75,1]
 	return errors.length?weights.map(w=>[w,medianMiss(errors.map(([p,cap,s,h])=>errorOf(p,cap,ageFactor(s,w),h)))])
 		.sort((a,b)=>a[1]-b[1])[0][0]:.5
 }
-function outerFolds(pts,recs){
-	return record(keys(outerTests),k=>valueSplits(pts,k).map(([train,test])=>{
-		const eligible=trainingRows(test,recs,k),w=tuneWeight(train,eligible,[k]),
+function outerFolds(pts,recs,inner=false){
+	return record(keys(outerTests),k=>valueSplits(pts,k,inner?12:undefined).map(([train,test])=>{
+		const eligible=trainingRows(test,recs,k),w=inner?0:tuneWeight(train,eligible,[k]),
 			fits=record(keys(forms),f=>fitValue(train,f)),
 			ratio=quant(train.map(p=>p.mcap_usd/p.tvl_usd)),
-			label=k==="walk"?new Date(test[0].date).toISOString().slice(0,10):test[0].family,
-			inputs=valueInputs(test,eligible),rows=inputs.map(([p,s,h])=>{
-			const errors=record(keys(forms),f=>errorOf(p,exp(capLog(fits[f],p)),ageFactor(s,ageWeight(f,w)),h))
+			inputs=valueInputs(test,eligible),rows=inputs.map(input=>{
+			const [p]=input,errors=record(keys(forms),f=>valueError(fits[f],input,ageWeight(f,w)))
+			if(inner) for(const w of weights) errors[w]=valueError(fits.current,input,w)
 			return{slug:p.slug,...errors,flat:p.response-log(p.tvl_usd*ratio)}
 		})
-		return{label,rows,train,inputs,w,fits}
+		return{family:test[0].family,rows,train,inputs,w,fits,eligible}
 	}))
 }
 const outerMiss=(rows,kind)=>medianMiss(rows.map(row=>row[kind])),
 	outerSummary=(rows,form)=>({miss:outerMiss(rows,form),flat:outerMiss(rows,"flat"),n:rows.length}),
-	summarizeFolds=(folds,form)=>folds.map(({label,rows})=>({label,...outerSummary(rows,form)})),
 	outerScores=(tests,kinds)=>{
 		const errors=record(keys(tests),k=>tests[k].flatMap(f=>f.rows))
 		return record(kinds,f=>({...record(keys(tests),k=>outerMiss(errors[k],f)),pooled:outerMiss(values(errors).flat(),f)}))
 	},
 	chooseForm=({flat,...scores})=>keys(scores).filter(f=>keys(outerTests).every(k=>scores[f][k]!=null&&scores[f][k]<flat[k]))
 		.sort((a,b)=>scores[a].pooled-scores[b].pooled)[0]
+function confirmForm({train,eligible,fits,inputs,rows}){
+	const inner=outerScores(outerFolds(train,eligible,true),["current","direct","pooled","flat",...weights]),
+		w=weights.reduce((a,b)=>inner[b].pooled<inner[a].pooled?b:a),
+		{current,direct,pooled,flat}=inner,
+		form=chooseForm({current,direct,pooled,shrink:inner[w],flat})??"current",
+		weight=ageWeight(form,w)
+	inputs.forEach((input,i)=>rows[i].confirmed=valueError(fits[form],input,weight))
+}
 function valueTest(pts,recs){
 	const tests=outerFolds(pts,recs),candidates=outerScores(tests,[...keys(forms),"flat"]),
 		winner=chooseForm(candidates),form=winner??"current",
 		weight=ageWeight(form,form==="shrink"?tuneWeight(pts,recs,keys(tests)):0),
 		fit=fitValue(pts,form)
-	for(const [k,folds] of entries(tests)) tests[k]=folds.map(({label,rows,train,inputs,w,fits})=>{
-		const noGrowth=fitValue(train,form,true),noAge=fits.current
-		inputs.forEach(([p,s,h],i)=>{
-			const cap=exp(capLog(fits[form],p)),factor=ageFactor(s,ageWeight(form,w))
-			Object.assign(rows[i],{growth:errorOf(p,exp(capLog(noGrowth,p)),factor,h),
-				age:errorOf(p,exp(capLog(noAge,p)),1,h),issuer:errorOf(p,cap,factor,1)})
+	for(const [k,folds] of entries(tests)) tests[k]=folds.map(fold=>{
+		confirmForm(fold)
+		const {family,rows,train,inputs,w,fits}=fold,noGrowth=fitValue(train,form,true),amount=ageWeight(form,w)
+		inputs.forEach((input,i)=>{
+			const [p,s]=input
+			Object.assign(rows[i],{growth:valueError(noGrowth,input,amount),age:valueError(fits.current,input,0),
+				issuer:valueError(fits[form],[p,s,1],amount)})
 		})
-		return{label,rows,train,quantiles:k==="family"?rangeFit(train,form):null}
+		return{family,rows,train,quantiles:k==="family"?rangeFit(train,form):null}
 	})
 	const misses=outerScores(tests,keys(outerTerms)),
-		headline=record(keys(tests),k=>outerSummary(tests[k].flatMap(f=>f.rows),form)),
-		foldScores=record(keys(tests),k=>summarizeFolds(tests[k],form)),
+		headline=confirmation(tests),
 		issuerNote=misses.issuer.pooled>candidates[form].pooled?"Lower pooled miss with the factor":"Issuer assumption raised or tied pooled miss",
 		ablation=entries(outerTerms).map(([k,term])=>({term,withTerm:candidates[form],without:misses[k]})),
 		bands=tests.family.filter(f=>f.quantiles),n=bands.flatMap(f=>f.rows).length,
 		hits=record(coverage,k=>bands.reduce((sum,f)=>sum+count(f.rows,r=>inside(r[form],f.quantiles[k])),0)),
 		labels=record(coverage,k=>n?round(100*hits[k]/n):null)
-	return{tests,candidates,form,winner,weight,fit,headline,foldScores,ablation,issuerNote,
+	return{tests,candidates,form,winner,weight,fit,headline,ablation,issuerNote,
 		ranges:{quantiles:rangeFit(pts,form),hits,labels,n}}
 }
+const confirmation=tests=>record(keys(tests),k=>outerSummary(tests[k].flatMap(f=>f.rows),"confirmed"))
 const sigmoid=x=>1/(1+exp(-limit(x,-35,35))),
 	oddsFeatures=(p,age)=>[1,p.rawSize,logAge(p,age)]
 function fitOdds(pts){
@@ -524,7 +534,7 @@ const orderedRows=rs=>count(rs,(p,i)=>p?.rank===i+1&&(!i||p.implied_value_usd<=r
 	validSteps=steps=>Array.isArray(steps)&&steps.length>=3&&steps.length<=12
 		&&steps.every(s=>typeof s==="string"&&/^.{20,600}$/s.test(s.trim())&&/\$\d.*\d+ min/u.test(s))
 function selfChecks({rows:rs,board,counts,recs,stress,calibration,value},snap,expectedDigest){
-	const {headline,foldScores,tests,fit,form,weight,candidates,ranges:{hits,labels,n}}=value,
+	const {headline,tests,fit,form,weight,candidates,ranges:{hits,labels,n}}=value,
 		calibrationBySlug=new Map(calibration.map(p=>[p.slug,p])),
 		bands=tests.family.filter(f=>f.quantiles),
 		plans=rs.map(p=>p.plan),samples=plans.filter(p=>p.pStar!==null&&p.q>0&&p.drop>0),close=(a,b)=>abs(a-b)<1e-8
@@ -544,14 +554,12 @@ function selfChecks({rows:rs,board,counts,recs,stress,calibration,value},snap,ex
 		}),
 		"displayed value equation":rs.every(p=>equationScore(p.equation)===p.score),
 		"bootstrap bands":rs.every(p=>p.band.low>0&&p.band.low<=p.band.high&&p.tokenOdds>0&&p.tokenOdds<1),
-		"outer headline and selection replay":form===(chooseForm(candidates)??"current")
-			&&JSON.stringify(candidates)===JSON.stringify(outerScores(tests,keys(candidates)))
-			&&entries(tests).every(([k,folds])=>
-				JSON.stringify(headline[k])===JSON.stringify(outerSummary(folds.flatMap(f=>f.rows),form))
-				&&JSON.stringify(foldScores[k])===JSON.stringify(summarizeFolds(folds,form))),
-		"outer band coverage label":n===bands.flatMap(f=>f.rows).length&&bands.every(({train,label,rows,quantiles})=>
-			train.every(p=>p.family!==label)&&rows.every(r=>calibrationBySlug.get(r.slug).family===label)
-				&&JSON.stringify(quantiles)===JSON.stringify(rangeFit(train,form)))&&coverage.every(k=>{
+		"outer candidate replay":form===(chooseForm(candidates)??"current")&&same(candidates,outerScores(tests,keys(candidates))),
+		"training-only headline":same(headline,confirmation(tests))
+			&&values(tests).flat().every(f=>f.rows.every(r=>finite(r.confirmed))),
+		"outer band coverage label":n===bands.flatMap(f=>f.rows).length&&bands.every(({train,family,rows,quantiles})=>
+			train.every(p=>p.family!==family)&&rows.every(r=>calibrationBySlug.get(r.slug).family===family)
+				&&same(quantiles,rangeFit(train,form)))&&coverage.every(k=>{
 			const covered=bands.flatMap(f=>f.rows.filter(r=>inside(r[form],f.quantiles[k]))).length
 			return hits[k]===covered&&labels[k]===(n?round(100*covered/n):null)
 		}),
@@ -588,7 +596,7 @@ function selfChecks({rows:rs,board,counts,recs,stress,calibration,value},snap,ex
 		"value term replay":value.ablation.every((a,i)=>{
 			const [k,label]=entries(outerTerms)[i]
 			return a.term===label&&a.withTerm===candidates[form]
-				&&JSON.stringify(a.without)===JSON.stringify(outerScores(tests,[k])[k])
+				&&same(a.without,outerScores(tests,[k])[k])
 		}),
 		"board digest":digest(boardRows(rs))===expectedDigest
 	})]

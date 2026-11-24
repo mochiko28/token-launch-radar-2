@@ -195,6 +195,31 @@ const pages = [...shots,
 
 function readPage() {
   const read = selector => document.querySelector(selector)?.textContent.trim();
+  const picked = () => [...document.querySelectorAll("#compare input")];
+  while (picked().length) picked()[0].click();
+  let comparePass;
+  if (location.hash === "#board") {
+    const inputs = [...document.querySelectorAll("#results input[name=compare]")];
+    inputs.slice(0, 4).forEach(input => input.click());
+    comparePass = read("#compare-count") === "Compare 3/3" && picked().map(input => input.value).join() === "1,2,3"
+      && inputs[3].disabled && !inputs[3].checked;
+    const search = document.querySelector("#search");
+    const searchFor = value => {
+      search.value = value;
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    searchFor("__no_protocol__");
+    comparePass &&= picked().length === 3 && !document.querySelector("#results input");
+    searchFor("");
+    picked().at(-1).click();
+    comparePass &&= read("#compare-count") === "Compare 2/3"
+      && !document.querySelector('#results input[value="3"]').checked && !document.querySelector('#results input[value="4"]').disabled;
+    document.querySelectorAll("#results input:checked").forEach(input => input.click());
+    comparePass &&= read("#compare-count") === "Compare 0/3" && !picked().length;
+  }
+  if (location.hash === "#board?chain=Ethereum&verdict=MARGINAL") {
+    [...document.querySelectorAll("#results input")].slice(0, 2).forEach(input => input.click());
+  }
   const rows = [...document.querySelectorAll("tr[data-slug]")];
   const tableBottom = document.querySelector("#results .scroll")?.getBoundingClientRect().bottom;
   const rangesInline = rows.every(row => {
@@ -330,12 +355,13 @@ function readPage() {
     sources: read(".sources"), sourcesVisible: visible(".sources"),
     peersVisible: visible(".peers"), peersBounds: document.querySelector(".peers")?.getBoundingClientRect().toJSON(),
     heldOut: read(".misses"), likeness: read(".likeness"),
-    selection: read(".selection"),
+    candidateHeading: read(".candidates h2"),
     candidateRows: [...document.querySelectorAll(".candidates tbody tr")]
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     termRows: [...document.querySelectorAll(".ablation tbody tr")]
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
-    foldRows: [...document.querySelectorAll(".folds tbody tr")]
+    comparePass, compareVisible: visible("#compare"), compareRanks: picked().map(input => Number(input.value)),
+    compareRows: [...document.querySelectorAll("#compare tbody tr")]
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     assumptions: read("#assumptions .drawer ul"),
     assumptionTables: [...document.querySelectorAll("#assumptions table")].map(table => table.textContent),
@@ -517,22 +543,19 @@ async function shoot(output, destination) {
   const gasLine = `${transactions} tx × ${money(chain.gas)} on ${chain.name} = ${money(gas)}`;
   const likenessTest = `Token-screen ranking accuracy (AUC) ${odds.validation.walk.auc.toFixed(3)} walk-forward`;
   const mult = miss => miss == null ? "—" : `${miss.toFixed(3)}×`;
-  const { headline, foldScores, ranges, candidates, form, winner, weight } = value;
+  const { headline, ranges, candidates, form } = value;
   const scheme = { walk: "Walk-forward", family: "Leave-one-family-out" };
   const levels = [80, 50];
   const rangeLabels = levels.map(level => ranges.n ? `${ranges.labels[level]}% range` : "Uncalibrated range");
   const coverage = ranges.n ? `Family holdout coverage · ${levels.map((level, i) =>
     `${rangeLabels[i]} (${ranges.hits[level]}/${ranges.n})`).join(" · ")}` : "Range coverage unavailable";
   const comparisons = ["walk", "family", "pooled"];
-  const candidateRows = Object.entries(candidates).map(([key, scores]) => [
-    (api.forms[key] ?? "Flat ratio") + (key === form ? " · deployed" : ""),
-    ...comparisons.map(test => mult(scores[test]))
+  const candidateRows = Object.entries(api.forms).map(([key, label]) => [
+    label + (key === form ? " · deployed" : ""), ...comparisons.map(test => mult(candidates[key][test]))
   ]);
   const termRows = value.ablation.map(({ term, withTerm, without }) => [
     term, ...comparisons.map(key => `${mult(withTerm[key])} / ${mult(without[key])}`)
   ]);
-  const foldRows = Object.keys(scheme).flatMap(key => foldScores[key].map(({ label, miss, flat, n }) =>
-    [label, mult(miss), mult(flat), String(n)]));
   const work = mkdtempSync("/work/.tmp/rw-firefox-");
   try {
     let port;
@@ -603,14 +626,16 @@ async function shoot(output, destination) {
       if (["1-board.jpg", "calibration"].includes(name) && (
         !Object.entries(scheme).every(([key, label]) => {
           const { miss, flat, n } = headline[key];
-          return info.heldOut?.includes(`${label} · n=${n}${mult(miss)} / ${mult(flat)}`);
+          const outcome = miss !== null && miss >= flat ? "Flat ratio ties or wins." : "";
+          return info.heldOut?.includes(`${label} · n=${n}${mult(miss)} / ${mult(flat)}${outcome}`);
         })
-        || info.coverage !== coverage || info.nested !== "Outer test · refit on training only")) {
+        || info.coverage !== coverage || info.nested !== "Form chosen inside training only")) {
         throw new Error(`${name}: calibration summary is incomplete.`);
       }
       if (name === "1-board.jpg" && (info.rows.length !== board.length || info.completeRows < 10)) {
         throw new Error(`The full board did not render with 10 complete rows in view (${info.completeRows}).`);
       }
+      if (name === "1-board.jpg" && !info.comparePass) throw new Error("Compare limit, filtering or removal failed.");
       if (info.farms) {
         const ticket = ({ plan }) => plan.test ?? plan;
         const eligible = rows.filter(row => slugs.has(row.slug) && ticket(row).net >= 0)
@@ -637,7 +662,7 @@ async function shoot(output, destination) {
       }
       if (page.hash.startsWith("#detail/")) {
         const slug = page.hash.slice(8);
-        const { name: protocol, plan, score } = modelBySlug.get(slug);
+        const { name: protocol, plan, score, launchValue } = modelBySlug.get(slug);
         const rate = (100 * assumptions.parameters.riskFreeRate).toFixed(0);
         const hourly = assumptions.parameters.hourlyUsd;
         if (!info.decisionVisible || !info.quotePass || info.quotes.length !== 10 || info.route !== plan.route
@@ -646,8 +671,8 @@ async function shoot(output, destination) {
           throw new Error(`${name}: Decision mismatch or out of view (${info.decision.join(" | ")}).`);
         }
         if (!provesValue(info.equation, score, info.amount) || !info.sourcesVisible
-          || !["fit to traded caps", "snapshot TVL", "7-day TVL change", "days since listing", "Issuer factor",
-            value.issuerNote, "Outer test and term ablation"].every(label => info.sources.includes(label))) {
+          || ![`Traded-cap fit $${Math.round(launchValue).toLocaleString("en-US")}`, "7-day growth", "d listed",
+            "Issuer factor", "Calibration →"].every(label => info.sources.includes(label))) {
           throw new Error(`${name}: value equation or held-out evidence is incomplete.`);
         }
         for (const state of info.quotes) {
@@ -684,17 +709,15 @@ async function shoot(output, destination) {
       if (name === "calibration") {
         if (!info.likeness?.includes(likenessTest)) throw new Error("Missing token-screen ranking accuracy.");
         if (JSON.stringify(info.candidateRows) !== JSON.stringify(candidateRows)
-          || !info.selection?.startsWith(`${api.forms[form]} deployed. ${winner ? "Lowest pooled miss" : "Retained because no form"}`)
-          || (form === "shrink" && !info.selection.endsWith(`Full-data fit: ${weight}.`))) {
-          throw new Error("Candidate rows or deployment rationale differ from the outer tests.");
+          || info.candidateHeading !== "Candidates scored on outer folds, for reference") {
+          throw new Error("Reference candidate rows differ from the outer tests.");
         }
         if (JSON.stringify(info.termRows) !== JSON.stringify(termRows)) throw new Error("Ablation rows differ from the outer tests.");
-        if (JSON.stringify(info.foldRows) !== JSON.stringify(foldRows)) throw new Error("Individual fold rows differ from the outer tests.");
         if (!info.assumptions?.includes(value.issuerNote)) throw new Error("Missing issuer factor evidence in Assumptions.");
         if (!info.assumptionTables.some(table => table.includes("Gas/tx") && /Other chains\$1\.50/.test(table))) {
           throw new Error("Missing chain gas assumptions or fallback.");
         }
-        console.log(info.selection);
+        console.log(info.candidateHeading);
         for (const row of info.candidateRows) console.log(`  ${row.join(" | ")}`);
         console.log("Value terms (median miss with / without):");
         for (const row of info.termRows) console.log(`  ${row.join(" | ")}`);
@@ -725,6 +748,16 @@ async function shoot(output, destination) {
       }
       if (name === "3-filtered.jpg") {
         const expected = rows.filter(row => row.chains.includes("Ethereum") && row.plan.verdict === "MARGINAL");
+        const compared = expected.slice(0, 2);
+        const [values, equations, verdicts, nets, plans] = info.compareRows;
+        if (!info.compareVisible || info.compareRanks.join() !== compared.map(row => row.rank).join()
+          || info.compareRows.length !== 5 || compared.some(({ rank, plan }, i) => {
+            const score = board[rank - 1].implied_value_usd, formatted = `$${score.toLocaleString("en-US")}`, col = i + 1;
+            return values[col] !== formatted || !provesValue(equations[col], score, formatted)
+              || verdicts[col] !== plan.verdict || nets[col] !== signedMoney(plan.net)
+              || plans[col] !== `${plan.handsOnMinutes} min hands-on · ${plan.horizon} d · ${money(plan.cost)}`;
+          })) throw new Error("The side-by-side comparison differs from the ranked rows.");
+        console.log("Compare selection limit, filtering, removal and displayed values pass.");
         if (info.completeRows < 5 || expected.length >= board.length || info.rows.length !== expected.length
           || expected.some(row => !slugs.has(row.slug)) || !info.rankLabel.startsWith(`Rank (of ${board.length})`)
           || info.activeFilters.join() !== "Verdict: MARGINAL,Listed on: Ethereum" || info.reset !== "#board") {

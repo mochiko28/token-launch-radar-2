@@ -1,5 +1,5 @@
 :root{
---ink:#142835;--dim:#4f5e66;--sheet:#fffaf0;--wash:#efe1c9;--rule:#ded0bc;--line:1px solid var(--rule);
+--ink:#142835;--sheet:#fffaf0;--wash:#efe1c9;--line:1px solid #ded0bc;
 --signal:#f4ad49;--gain:#12634d;--loss:#993829;
 font:15px/1.5 Adwaita Sans,FreeSans,sans-serif;
 font-variant-numeric:tabular-nums;color:var(--ink);background:#f2eade
@@ -9,7 +9,7 @@ body,h1,h2,h3,p{margin:0}
 a{color:inherit;text-decoration:none}
 a:hover{text-decoration:underline}
 button,select,input{font:inherit;color:inherit}
-button,select,summary{cursor:pointer}
+button,select{cursor:pointer}
 :focus-visible{outline:2px solid}
 h1{font:700 clamp(2.4rem,4vw,3.9rem)/1 FreeSerif,serif;letter-spacing:-.035em}
 h2{font-size:1.14rem;line-height:1.25}
@@ -20,32 +20,32 @@ body>header{background:var(--ink);color:var(--sheet);border-bottom:2px solid var
 .intro,.readings,.integrity,nav{display:flex}
 .mast{min-height:56px;gap:32px}
 .brand{gap:8px;font-weight:700}
-.brand span,[aria-current]{color:var(--signal)}
+.brand span,nav [aria-current]{color:var(--signal)}
 nav{gap:24px;margin-right:auto}
 [aria-sort] a,.watch,.back,.kicker,.steps h3{color:#873a10}
-.panel{border:var(--line);min-width:0}
+.panel{border:var(--line)}
+.panel,.detail>div{min-width:0}
 .btn{border:0;padding:4px 12px;background:var(--signal);color:var(--ink)}
 #checks,.rank,.kicker{font:.76rem monospace}
-small{color:var(--dim)}
+small{color:#4f5e66}
 .intro,.bar,.dialog-top{justify-content:space-between}
 .integrity,.readings{flex-wrap:wrap}
 .intro{align-items:end;margin:12px 0 24px}
 .integrity{gap:2px;margin:-17px 0 8px}
 .chip{padding:2px 1px;white-space:nowrap;font-size:.68rem}
 .back{margin-top:16px}
-.kpis,.groups,.board,.detail,.rail,.detail>div,.filters,.steps li,.quotes{display:grid}
+.kpis,.groups,.board,.detail,.detail>div,.filters,.steps li,.quotes{display:grid}
 .kpis{grid:auto/1.25fr 1.55fr 1fr .68fr;gap:12px;margin-bottom:8px}
 .kpi{padding:4px 12px;line-height:1.25}
 .kpi h2,.filters label,.kicker{text-transform:uppercase}
 .kpi strong{font-size:1.94rem}
 .groups{grid:auto/1fr 1fr}
-#token-groups a{text-decoration:underline}
-#token-groups [aria-current]{color:inherit;font-weight:700}
+#token-groups a,.evidence{text-decoration:underline}
+#token-groups [aria-current]{font-weight:700}
 .readings,.board,.detail{gap:1rem}
 :not(strong)>small,.readings span,svg,.back{display:block}
 .misses strong{font-size:1.4rem}
 small,.sources,.rail,.back,.kpi{font-size:.8rem}
-.evidence{text-decoration:underline}
 .valuation,.decision,.steps small,thead,.rank{background:var(--wash)}
 .board,.detail{align-items:start}
 .board{grid:auto/1fr 290px}
@@ -64,24 +64,23 @@ table{width:100%;border-collapse:collapse}
 th{text-align:left}
 thead{font-size:.75rem}
 .ranks{min-width:1020px;font-size:.88rem;line-height:1.15}
-.ranks :is(td,th){padding:2px 4px}
-.ranks tbody :is(td,th){vertical-align:top;padding-bottom:17px}
-.ranks :is(td,small){white-space:nowrap}
-.ranks tr>:nth-child(8){padding-left:8px}
-.ranks td:nth-child(9) small{white-space:normal}
+.ranks{
+	td,th{padding:2px 4px}
+	tbody :is(td,th){vertical-align:top;padding-bottom:17px}
+	td,small{white-space:nowrap}
+	tr>:first-child{text-align:center}
+	tr>:nth-child(8){padding-left:8px}
+	td:last-child small{white-space:normal}
+	.badge{display:inline-block;min-width:9ch;text-align:center;border:1px solid var(--mark);font-size:11px}
+}
 .value{position:relative}
 .value b{font-size:1rem}
 .value .equation{position:absolute;left:4px;bottom:2px;font-size:.75rem}
 .range{width:42px;height:8px;margin-left:4px;vertical-align:middle;background:var(--wash)}
 .range path{stroke:var(--ink);stroke-width:2}
 .range path:first-child{stroke:var(--signal);stroke-width:4}
-.change,.ranks .badge,.range{display:inline-block;text-align:center}
-.change{padding:2px 6px;border-radius:1em;background:var(--wash)}
-.change.pos{background:#d9ebe1}
-.change.neg{background:#f5ddd5}
-.ranks .badge{min-width:9ch;border:1px solid var(--mark);border-radius:2px;font-size:11px}
-.ranks .skip{--mark:var(--ink);--tint:transparent}
-.ranks tr>:first-child{text-align:center}
+.range{display:inline-block}
+input[name=compare]{vertical-align:middle;margin:0 0 0 4px}
 tbody tr{border-bottom:var(--line)}
 .protocol,.amount{font-weight:750}
 .pos,.chip[data-pass=true]{color:var(--gain)}
@@ -91,14 +90,13 @@ tbody tr{border-bottom:var(--line)}
 .marginal{--mark:#854608;--tint:#ffe3b1}
 .skip{--mark:#435783;--tint:#e3e8f0}
 .inset,.empty{padding:12px}
-.plans div,.pay,.steps li,.sources{border-top:var(--line)}
+.plans div,.steps li,.sources{border-top:var(--line)}
 .plans{line-height:1.2}
 .plans div{padding-block:8px}
 .plans b{float:right}
 .pay{padding-top:8px}
 .detail{grid:auto/5fr 6fr}
 .decision{border-left:3px solid var(--signal);padding:8px;margin:4px 0}
-.detail>div{min-width:0}
 .steps li,.filters{gap:8px}
 .steps{list-style:none;margin:6px 0 0;padding:0}
 .steps li{grid:auto/7fr 3fr}
@@ -123,4 +121,4 @@ dialog{margin:0 0 0 auto;height:100%;max-height:none;width:min(640px,100%);borde
 	.filters label:first-child{grid-column:span 2}
 	.detail{grid:auto/1fr}
 }
-@media(max-width:500px){.kpis,.rail,.steps li{grid:auto/1fr}}
+@media(max-width:500px){.kpis,.steps li{grid:auto/1fr}}

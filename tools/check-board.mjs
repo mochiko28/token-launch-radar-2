@@ -158,7 +158,7 @@ function report(output, input) {
   console.log(`${passed}/${self.length} model self-checks pass (including board digest)`);
   const { traded, recorded, setAside, ranked, watchlistCovered, watchlistTotal, total, valueFit, oddsFit } = model.counts;
   console.log(`${traded} traded with cap + ${recorded} token recorded without cap + ${setAside} set aside + ${ranked} pre-token ranked = ${total} | watchlist ${watchlistCovered}/${watchlistTotal}`);
-  const { fit, headline, foldScores, ablation, ranges, form, winner, weight, candidates } = model.value;
+  const { fit, headline, tests, ablation, ranges, form, winner, weight, candidates } = model.value;
   const names = ["intercept", "logGrowthAdjustedTvl"];
   const curve = names.map((name, i) => `${name}=${fit.coefficients[i].toFixed(6)}`).join(", ");
   console.log(`Log market-cap fit (${valueFit} tokens, TVL divided by $100M): ${curve}`);
@@ -169,10 +169,11 @@ function report(output, input) {
   console.log(`Deployed ${api.forms[form]}${form === "shrink" ? ` (full-data weight ${weight})` : ""}. ${winner
     ? "Lowest pooled miss among forms beating the flat ratio on both tests."
     : "No form beat the flat ratio on both tests."}`);
-  console.log("Deployed value outer test, refit on training only");
+  console.log("Form chosen inside training only");
   for (const [key, label] of [["walk", "Walk-forward"], ["family", "Leave-one-family-out"]]) {
     const { miss, flat, n } = headline[key];
-    console.log(`${label} median miss ${show(miss)} vs ${show(flat)} flat (n=${n} across ${foldScores[key].length} folds)`);
+    const outcome = miss !== null && miss >= flat ? " · Flat ratio ties or wins." : "";
+    console.log(`${label} median miss ${show(miss)} vs ${show(flat)} flat (n=${n} across ${tests[key].length} folds)${outcome}`);
   }
   for (const { term, withTerm, without } of ablation) {
     console.log(`${term} (with / without) · ${["walk", "family", "pooled"].map(key =>
