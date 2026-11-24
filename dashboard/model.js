@@ -198,7 +198,7 @@ function accum({matrix,target},x,residual,weight=1){
 	}
 }
 
-function fitValue(pts,form="current",omit){
+function fitValue(pts,form,omit){
 	const age=form==="direct"||form==="pooled"?medianAge(pts):0,
 		families=form==="pooled"?unique(pts.map(p=>p.family)):[],
 		shrink=sqrt(pts.length),fit={age,families,omit},
@@ -365,7 +365,7 @@ const refM=A.refTvl/1e6,scoreEq=([base,tvl,slope,...terms])=>max(1,round(terms.r
 function equationFor(fit,p){
 	const [intercept,slope]=fit.coefs,terms=[
 		["growth",exp((p.size-p.rawSize)*slope)],
-		[fit.age?"age":"likeness",fit.age?exp(dot(capInputs(fit,p).slice(2),fit.coefs.slice(2))):p.valueAge],
+		[fit.age?"age":"token-likeness",fit.age?exp(dot(capInputs(fit,p).slice(2),fit.coefs.slice(2))):p.valueAge],
 		["issuer",p.haircut]]
 	let shown
 	for(let digits=4;digits<=17;digits++){

@@ -92,8 +92,13 @@ function jpegSize(bytes) {
 const fits = bytes => bytes.length >= minimum && bytes.length < maximum;
 const sizeMiss = bytes => Math.abs(bytes.length - targetSize);
 const displaySigns = text => text.replace(/(^|[\s$(,])-(?=\$?\d)/g, "$1−");
+const displayStep = text => displaySigns(text).replaceAll(/ p10\)(?= two weeks)/g, ", bottom 10% cutoff)")
+  .replaceAll(" + carry ", " + capital cost ");
 
-function provesValue(line, score, displayed) {
+function provesValue(line, score, displayed, clipped) {
+  const marks = line.match(/ \(clipped\)/g)?.length ?? 0;
+  if (clipped ? marks !== 1 || !/ × growth [\d.e+-]+ \(clipped\) × /.test(line) : marks) return false;
+  line = line.replace(" (clipped)", "");
   const [product, result] = line.split(" = ");
   const [base, scale, ...factors] = product.split(" × ");
   const [, tvl, reference, exponent] = /^\((.+)M\/(.+)M\)\^(.+)$/.exec(scale) ?? [];
@@ -347,7 +352,7 @@ function readPage() {
     reset: document.querySelector("#active-filters a")?.getAttribute("href"),
     rankLabel: read("#sort-rank"),
     jargon: (`${document.querySelector("#view").textContent}\n${read("#assumptions .drawer")}`
-      .match(/\bp\*|\bx\d+(?:\.\d+)?\s+q\b|\bq\s*(?:=|\(|≥|\d)|½\s*q\b|F walk-forward/gu) ?? []),
+      .match(/\bp\*|\bx\d+(?:\.\d+)?\s+q\b|\bq\s*(?:=|\(|≥|\d)|½\s*q\b|F walk-forward|\bp10\b|circ\. cap|gecko_id|\bcarry\b|Board F\/M\/S/giu) ?? []),
     summary: read(".route"), route: read(".plan-route"), defaultHalfOdds,
     decision: decision(), decisionVisible: visible(".decision"),
     coverage: read(".coverage"), nested: read(".nested"),
@@ -385,6 +390,7 @@ function readPage() {
     assumptionTables: [...document.querySelectorAll("#assumptions table")].map(table => table.textContent),
     actionCounts: ["cover", "rail", "detail"].map(place => read(`#${place}-counts`)),
     listingNote: read(".chain-note"),
+    gridKey: read(".grid-key"), gridKeyVisible: visible(".grid-key"),
     stress: read(".stress"), stressVisible: visible(".stress"), rowCheck: chips[0]?.textContent,
     rowPass: chips[0]?.dataset.pass,
     rows: rows.map(row => {
@@ -535,11 +541,17 @@ async function shoot(output, destination) {
   if (api.digest(board) !== boardDigest || JSON.stringify(api.exportManifest(board)) !== JSON.stringify(manifest)) {
     throw new Error("Offline payload digest or manifest differs from board.json.");
   }
-  const { value, odds, rows, recs, counts, verdicts, assumptions } = api.buildModel(snapshot);
+  const model = api.buildModel(snapshot);
+  const { value, odds, rows, recs, counts, verdicts, assumptions } = model;
+  const checks = api.selfChecks(model, snapshot, boardDigest);
+  const checkCount = `${checks.filter(check => check.pass).length}/${checks.length}`;
+  const exportedWatchlist = snapshot.watchlist.filter(slug => boardBySlug.has(slug)).length;
+  const [lowGrowth, highGrowth] = assumptions.parameters.clip;
+  const clipped = ({ change_7d: growth }) => growth < lowGrowth || growth > highGrowth;
   const verdictBySlug = new Map(manifest.map(([, slug, , verdict]) => [slug, verdict]));
   const upshift = rows.find(row => row.slug === "upshift");
   const { exits: rawExits, trial: { gas }, chain, tx } = upshift.plan;
-  const exits = rawExits.map(displaySigns);
+  const exits = rawExits.map(displayStep);
   const modelBySlug = new Map(rows.map(row => [row.slug, row]));
   for (const { slug, chains, plan } of rows) {
     const { name } = plan.chain;
@@ -559,7 +571,7 @@ async function shoot(output, destination) {
     return (rounded > 0 ? "+" : "") + displaySigns(money(rounded));
   };
   const totalTime = p => `${p.mins} min hands-on (${p.prepMins} setup + ${p.exitMins} exit + ${p.checkMins} weekly checks)`;
-  const totalCost = p => `${money(p.cost)} total (gas ${money(p.gas)} + funding ${money(p.funding)} + slippage ${money(p.slip)} + time ${money(p.labor)} + carry ${money(p.carry)})`;
+  const totalCost = p => `${money(p.cost)} total (gas ${money(p.gas)} + funding ${money(p.funding)} + slippage ${money(p.slip)} + time ${money(p.labor)} + capital cost ${money(p.carry)})`;
   const actionLine = p => api.firstAction(p) + (p.trial ? "" : ` · Expected net ${signedMoney(p.net)}`);
   const watchTerms = (p, format = compact) => {
     const { capital, horizon, net } = p.trial;
@@ -634,7 +646,7 @@ async function shoot(output, destination) {
       if (!["EPERM", "EACCES"].includes(error.code)) throw error;
       console.log("Loopback TCP unavailable. Using Firefox headless PNG capture with page diagnostics.");
     }
-    const rowProof = "Shown rows = board.json (digest ok)";
+    const rowProof = "ranks and values match board.json";
     const groupNames = { traded: "traded", setAside: "set aside", recorded: "token, no cap", ranked: "ranked" };
     const reasonNames = {
       cap: "Positive market cap", id: "Token ID or symbol recorded", product: "Wrapped, staked or bridged product",
@@ -642,13 +654,17 @@ async function shoot(output, destination) {
     };
     const verify = (name, info) => {
       const check = /^(\d+)\/(\d+) self-checks pass(?: · .+)?$/.exec(info.checks);
-      if (!check || check[1] !== check[2] || Number(check[1]) === 0 || info.checksPass !== "true") {
+      if (!check || `${check[1]}/${check[2]}` !== checkCount || check[1] !== check[2] || info.checksPass !== "true") {
         throw new Error(`${name}: ${info.checks}`);
       }
-      if (info.jargon.length) throw new Error(`${name}: probability jargon rendered: ${info.jargon.join(", ")}`);
+      if (info.jargon.length) throw new Error(`${name}: jargon rendered: ${info.jargon.join(", ")}`);
       if (["1-board.jpg", "3-filtered.jpg", "watchlist-skip"].includes(name)) {
-        if (!info.integrityPass || !info.integrity.includes(`✓ Export watchlist ${counts.watchCovered}/${counts.watchTotal}`)) {
+        if (!info.integrityPass || info.integrity[1] !== `✓ ${exportedWatchlist}/${snapshot.watchlist.length} watchlist rows exported`
+          || info.integrity[2] !== `✓ ${checkCount} self-checks pass`) {
           throw new Error(`${name}: integrity strip failed: ${info.integrity.join(" · ")}`);
+        }
+        if (!info.gridKeyVisible || info.gridKey !== "Amber bar shows value range · Tick shows estimate · ◆ Watchlist") {
+          throw new Error(`${name}: range and watchlist key is missing or out of view.`);
         }
       }
       if (name === "1-board.jpg" && JSON.stringify(info.tokenLinks) !== JSON.stringify(Object.entries(groupNames)
@@ -681,20 +697,21 @@ async function shoot(output, destination) {
       if (info.scrollbar) throw new Error(`${name}: page scrollbar occupies ${info.scrollbar}px`);
       const slugs = new Set(info.rows.map(([slug]) => slug));
       if (slugs.size !== info.rows.length || info.rows.some(([slug, rank, value, equation, verdict, , net, ticket], i) => {
-        const row = boardBySlug.get(slug), plan = modelBySlug.get(slug).plan;
+        const row = boardBySlug.get(slug), modelRow = modelBySlug.get(slug), { plan } = modelRow;
         const first = api.firstAction(plan);
         const checklist = plan.trial ? watchTerms(plan, capital => `$${capital.toLocaleString("en-US")}`).join(" · ")
           : `${first} · expected net ${net}`;
         const terms = plan.trial ? watchTerms(plan).join("\n")
           : `${first.split(" · ")[0]} ${compact(plan.capital)} ${net}\n${plan.horizon} d`;
-        return row?.rank !== rank || !provesValue(equation, row.implied_value_usd, value) || verdictBySlug.get(slug) !== verdict
+        return row?.rank !== rank || value !== compact(row.implied_value_usd)
+          || !provesValue(equation, row.implied_value_usd, value, clipped(modelRow)) || verdictBySlug.get(slug) !== verdict
           || (!plan.trial && net !== signedMoney(plan.net)) || ticket !== terms
           || !row.farm_steps[0].startsWith(`${checklist}.`)
           || (i > 0 && info.rows[i - 1][1] >= rank);
       })) {
         throw new Error(`${name}: page order, values or equation differ from board.json`);
       }
-      if (info.rows.length && (info.rowPass !== "true" || info.rowCheck !== `✓ ${rowProof} · ${info.rows.length}/${info.rows.length}`)) {
+      if (info.rows.length && (info.rowPass !== "true" || info.rowCheck !== `✓ ${info.rows.length}/${info.rows.length} ${rowProof}`)) {
         throw new Error(`${name}: ${info.rowCheck}`);
       }
       if (info.rows.length) {
@@ -724,7 +741,7 @@ async function shoot(output, destination) {
           .sort((a, b) => b.plan.net - a.plan.net).slice(0, 5);
         if (!info.farmsVisible || info.farmHeading !== `Top funded plans ${actionCounts}`
           || info.actionCounts.slice(0, 2).some(text => text !== actionCounts)
-          || info.listingNote !== "Listed on = chains in the snapshot; plan route = cheapest priced chain among them"
+          || info.listingNote !== "Plan route uses the cheapest priced listed chain."
           || info.farmLinks.length !== best.length || new Set(info.farmLinks).size !== best.length
           || info.farmActions.join() !== best.map(({ plan }) => api.firstAction(plan)).join()
           || info.farmLinks.some((href, i) => href.split("?")[0] !== `#detail/${encodeURIComponent(best[i].slug)}`)
@@ -732,7 +749,7 @@ async function shoot(output, destination) {
           || info.farmTimes.join() !== best.map(({ plan }) => `${plan.mins} min hands-on`).join()
           || info.farmCosts.join() !== best.map(({ plan }) => `${money(plan.cost)} total cost`).join()
           || info.farmRoutes.join() !== best.map(row => row.plan.route).join()
-          || (!best.length && !info.farms.includes("No funded plans in these results."))) {
+          || (!best.length && !info.farms.includes("No funded plans."))) {
           throw new Error(`${name}: the break-even panel differs from the visible rows. ${JSON.stringify({
             visible: info.farmsVisible, bounds: info.farmBounds, links: info.farmLinks, expected: best.map(row => row.slug),
             actions: info.farmActions, nets: info.farmNets
@@ -747,11 +764,11 @@ async function shoot(output, destination) {
         const hourly = assumptions.parameters.hourlyUsd;
         if (!info.decisionVisible || !info.quotePass || info.quotes.length !== 10 || info.route !== plan.route
           || info.summary !== actionLine(plan) || info.actionCounts[2] !== actionCounts
-          || !info.checks.endsWith(` · ${rowProof} · 1/1`)
-          || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get(slug).farm_steps.map(displaySigns))) {
+          || !info.checks.endsWith(" · Rank, value, range and checklist match board.json")
+          || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get(slug).farm_steps.map(displayStep))) {
           throw new Error(`${name}: Decision mismatch or out of view (${info.decision.join(" | ")}).`);
         }
-        if (!provesValue(info.equation, score, info.amount) || !info.sourcesVisible
+        if (!provesValue(info.equation, score, info.amount, clipped(row)) || !info.sourcesVisible
           || ![`Traded-cap fit $${Math.round(launchCap).toLocaleString("en-US")}`, "7-day growth", "d listed",
             "Issuer factor", "Calibration →"].every(label => info.sources.includes(label))) {
           throw new Error(`${name}: value equation or held-out evidence is incomplete.`);
@@ -783,7 +800,7 @@ async function shoot(output, destination) {
             `Launch chance (${horizon} d) ${chance(q)} · Token outcome ${signedMoney(tokenNet)}`,
             `No-token outcome ${signedMoney(noToken)}`,
             totalCost(result),
-            `${totalTime(result)} at $${hourly}/h · carry at ${rate}%/yr for ${hold} d`,
+            `${totalTime(result)} at $${hourly}/h · capital cost at ${rate}%/yr for ${hold} d`,
             `Break-even chance ${threshold(pStar)} → ${verdict}`,
             `${action.trial ? "Net before cash reward" : "Expected net"} ${signedMoney(net)} = launch chance × token outcome + chance of no token × no-token outcome.`
           ];
@@ -817,7 +834,7 @@ async function shoot(output, destination) {
       if (name === "calibration") {
         if (!info.likeness?.includes(likenessTest)) throw new Error("Missing token-screen ranking accuracy.");
         if (JSON.stringify(info.candidateRows) !== JSON.stringify(candidateRows)
-          || info.candidateHeading !== "Candidates scored on outer folds, for reference") {
+          || info.candidateHeading !== "Reference scores on outer folds") {
           throw new Error("Reference candidate rows differ from the outer tests.");
         }
         if (JSON.stringify(info.termRows) !== JSON.stringify(termRows)) throw new Error("Ablation rows differ from the outer tests.");
@@ -832,17 +849,17 @@ async function shoot(output, destination) {
       }
       if (name === "2-detail.jpg" && (info.steps.length < 3
         || !info.tokenDetailVisible
-        || info.tokenDetail !== "Token screen: pre-token — no gecko_id, no symbol, no market cap recorded in the snapshot"
+        || info.tokenDetail !== "Token screen · no CoinGecko ID, token symbol or market cap in the snapshot"
         || !info.valueRange.startsWith(`${rangeLabel} $`) || info.valueRange.includes(" · ")
         || info.labels.join() !== "First action,Entry trigger,Verify,Rehearse,Entry,Monitor,Exit,Claim & sell"
         || !info.quotes[0]?.age.caption.includes("no launch dates") || !info.oddsNote?.includes(likenessTest)
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
         || !info.steps.some(step => step.includes(upshift.name) && step.includes("KYC, caps and withdrawals"))
-        || !info.steps.some(step => step.includes(`${upshift.category} p10`))
+        || !info.steps.some(step => step.includes(`${upshift.category}, bottom 10% cutoff`))
         || !info.steps.some(step => step.includes("allocator vault. Hold shares"))
         || !info.gasVisible || info.gas !== gasLine || !info.exitsVisible
         || JSON.stringify(info.exits) !== JSON.stringify(exits) || !info.steps.some(step => step.includes(exits[0]))
-        || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps.map(displaySigns))
+        || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps.map(displayStep))
         || !info.planVisible || !info.quoteVisible || !info.quotePass || !info.peersVisible
         || !info.steps[1].startsWith(`Enter only if ${upshift.plan.trigger.rule}.`)
         || !info.steps[3].includes("put in $80 USDC and withdraw it")

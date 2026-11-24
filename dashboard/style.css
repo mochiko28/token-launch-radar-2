@@ -31,8 +31,8 @@ small{color:#4f5e66}
 .intro,.bar,.dialog-top,.age div{justify-content:space-between}
 .integrity,.readings{flex-wrap:wrap}
 .intro{align-items:end;margin:12px 0 24px}
-.integrity{gap:2px;margin:-17px 0 8px}
-.chip{padding:2px 1px;white-space:nowrap;font-size:.68rem}
+.integrity{gap:4px;margin:-17px 0 8px}
+.chip{padding:2px 6px}
 .back{margin-top:16px}
 .kpis,.groups,.board,.detail,.detail>div,.filters,.steps li,.quotes,.age{display:grid}
 .kpis{grid:auto/1fr 1.9fr 1fr .68fr;gap:12px;margin-bottom:8px}
@@ -43,12 +43,12 @@ small{color:#4f5e66}
 #token-groups a,.evidence{text-decoration:underline}
 #token-groups [aria-current]{font-weight:700}
 .readings,.board,.detail{gap:1rem}
-:not(strong)>small,.readings span,.back{display:block}
+small,.readings span,.back{display:block}
 .misses strong{font-size:1.4rem}
-small,.sources,.rail,.back,.kpi{font-size:.8rem}
+small,.sources,.rail,.back,.kpi,.chip{font-size:.8rem}
 .valuation,.decision,.steps small,thead,.rank,.range,.age svg{background:var(--wash)}
 .board,.detail{align-items:start}
-.board{grid:auto/1fr 290px}
+.board{grid:auto/1fr 280px}
 .detail>div{gap:12px}
 .bar{padding:12px 16px 8px}
 .filters{grid:auto/1.4fr repeat(6,1fr);padding:0 16px 8px}
@@ -59,13 +59,13 @@ small,.sources,.rail,.back,.kpi{font-size:.8rem}
 }
 .scroll{overflow:auto}
 #active-filters:not(:empty){display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0 16px 8px}
-#active-filters .chip{padding:2px 8px;background:var(--wash);font-size:.8rem;white-space:normal}
+#active-filters .chip{padding:2px 8px;background:var(--wash)}
 #results .scroll{max-height:675px}
 table{width:100%;border-collapse:collapse}
 th{text-align:left}
 thead{font-size:.75rem}
-.ranks{min-width:1020px;font-size:.88rem;line-height:1.15}
 .ranks{
+	min-width:1020px;font-size:.88rem;line-height:1.15;
 	td,th{padding:2px 4px}
 	tbody :is(td,th){vertical-align:top;padding-bottom:17px}
 	td,small{white-space:nowrap}
