@@ -24,8 +24,7 @@ body>header{background:var(--ink);color:var(--sheet);border-bottom:2px solid var
 nav{gap:24px;margin-right:auto}
 [aria-sort] a,.watch,.back,.kicker,.steps h3{color:#873a10}
 .panel{border:var(--line);min-width:0}
-.btn,.chip{border:0}
-.btn{padding:4px 12px;background:var(--signal);color:var(--ink)}
+.btn{border:0;padding:4px 12px;background:var(--signal);color:var(--ink)}
 #checks,.rank,.kicker{font:.76rem monospace}
 small{color:var(--dim)}
 .intro,.bar,.dialog-top{justify-content:space-between}
@@ -82,8 +81,7 @@ thead{font-size:.75rem}
 .change.neg{background:#f5ddd5}
 .ranks .badge{min-width:9ch;border:1px solid var(--mark);border-radius:2px;font-size:11px}
 .ranks .skip{--mark:var(--ink);--tint:transparent}
-.rank,.ranks th:first-child{text-align:center}
-.compare{margin:0 16px 8px}
+.ranks tr>:first-child{text-align:center}
 tbody tr{border-bottom:var(--line)}
 .protocol,.amount{font-weight:750}
 .pos,.chip[data-pass=true]{color:var(--gain)}

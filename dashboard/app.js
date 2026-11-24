@@ -6,9 +6,9 @@ const html=(items,draw)=>items.map(draw).join(""),view=$("#view"),check=$("#chec
 	results=selfChecks(model,snap,boardDigest),
 	passed=count(results,c=>c.pass),allPass=passed===results.length,selfCount=`${passed}/${results.length}`,
 	signed=s=>s.replace(/(^|[\s$(,])-(?=\$?\d)/g,"$1−"),
-	dollars=opts=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",...opts}).format,
-	cents=dollars(),money=n=>signed(cents(n)),short=dollars({notation:"compact",maximumFractionDigits:2}),usd=whole
-const dash="—",mult=n=>n==null?dash:signed(n.toFixed(3))+"×",
+	money=n=>signed(costUsd(n)),short=new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",
+		notation:"compact",maximumFractionDigits:2}).format,usd=whole
+const dash="—",mult=n=>n==null?dash:n.toFixed(3)+"×",
 	sign=n=>n>0?"+":"",
 	chg=n=>n==null?dash:sign(n)+signed(n.toFixed(2))+"%",
 	pill=n=>n==null?dash:`<b class="change ${tone(n)}"><span aria-hidden=true>${n>0?"↑ ":n<0?"↓ ":""}</span>${chg(n)}</b>`,
@@ -22,13 +22,13 @@ const {rows:rs,recs,counts:ns,verdicts,stress,value,odds,assumptions:setup,board
 	showAuc=fold=>fold.auc?.toFixed(3)??dash
 const aucLabel="Token-screen ranking accuracy (AUC)",
 	likenessTest=`${aucLabel} ${showAuc(auc.walk)} walk-forward`,
-	{headline,foldScores,ablation,issuerNote,ranges:{labels,hits,n:rangeN}}=value,
+	{headline,foldScores,ablation,issuerNote,candidates,form,winner,weight,ranges:{labels,hits,n:rangeN}}=value,
 	levelsShown=[80,50],rangeLabel=k=>labels[k]==null?"Uncalibrated range":`${labels[k]}% range`,
 	groups=[["traded","traded"],["setAside","set aside"],["recorded","token, no cap"],["ranked","ranked"]],
 	choices=items=>["",...unique(items).sort()]
 const grades=keys(verdicts),
 	scenarios=[["doubleCost","2× cost"],["halfShare","Reward share halved"]],
-	oddsLabel="Token-likeness",launchLabel=h=>`Launch chance (${h} d)`,
+	oddsLabel="Token-likeness",
 	cols={
 	rank:["Rank","rank","asc"],name:["Protocol","name","asc"],
 	value:["Implied value","score"],odds:[oddsLabel,"tokenOdds"],tvl:["TVL","tvl_usd"],
@@ -48,8 +48,7 @@ const ariaSort=st=>st.dir==="asc"?"ascending":"descending",defaults={q:"",sort:"
 function readRoute(){
 	const [path,query]=location.hash.slice(1).split("?"),[route,slug]=path.split("/"),qs=new URLSearchParams(query),
 		get=k=>qs.get(k),sort=get("sort"),dir=get("dir"),
-		st={...defaults,route:hasOwn(pages,route)?route:"board",slug,q:get("q")??"",
-			compare:unique(qs.getAll("compare")).filter(s=>bySlug.has(s)).slice(0,3)}
+		st={...defaults,route:hasOwn(pages,route)?route:"board",slug,q:get("q")??""}
 	if(hasOwn(cols,sort)) st.sort=sort
 	st.dir=["asc","desc"].includes(dir)?dir:order(st.sort)
 	for(const [,k,opts] of filters) if(opts.includes(get(k))) st[k]=get(k)
@@ -58,7 +57,6 @@ function readRoute(){
 function link(route,st,slug=""){
 	const qs=new URLSearchParams()
 	for(const k in defaults) if(st[k]!==defaults[k]) qs.set(k,st[k])
-	for(const slug of st.compare) qs.append("compare",slug)
 	if(st.dir!==order(st.sort)) qs.set("dir",st.dir)
 	return "#"+route+(slug&&"/"+slug)+(qs.size?"?"+qs:"")
 }
@@ -85,7 +83,7 @@ const tokenLinks=(st,separator="")=>groups.map(([k,lbl])=>
 const kpis=st=>`<section class=kpis>
 ${card("Snapshot",`<strong>${ns.total}</strong>
 <div class=groups id=token-groups>${tokenLinks(st)}</div>`)}
-${card(missTitle,valueStats+`<a class=evidence href="${href("calibration",st)}">Fold results and term tests →</a>`)}
+${card(missTitle,valueStats+`<a class=evidence href="${href("calibration",st)}">Candidate and term tests →</a>`)}
 ${card(aucLabel,`<div class=readings>${html([["loo","Leave-one-out"],["walk","Walk-forward"]],([k,lbl])=>
 	`<div><strong>${showAuc(auc[k])}</strong><span>${lbl}</span></div>`)}</div><p>Snapshot score from TVL and listing age compared with traded-token peers`)}
 ${card("Watchlist",`<strong>${ns.watchlistCovered}<small> / ${ns.watchlistTotal}</small></strong>
@@ -113,7 +111,7 @@ ${kpis(st)}
 <div class=bar><h2>Protocols</h2><small id=shown role=status></small></div>
 <div class=filters>${searchBox(st)}
 ${html(filters,spec=>filter(spec,st))}</div>
-<div id=active-filters></div><div id=compare></div><div id=results></div>
+<div id=active-filters></div><div id=results></div>
 </section><aside class=rail id=plans></aside></div>`
 function filtered({scope,family,chain,verdict,flag,tvl,q,sort,dir}){
 	const field=cols[sort][1],read=typeof field==="function"?field:p=>p[field]
@@ -146,18 +144,7 @@ function tableRow(r,st){
 <td>${pct(tokenOdds,1)}<td>${short(tvl_usd)}
 <td>${pill(change_7d)}
 <td>${days(r)}
-<td>${badge(fp.verdict)}<td>${net(fp.net)}<small>${usd(fp.capital)} · ${fp.horizon} d</small>
-<td><input type=checkbox data-compare="${k}" id=pick-${rank} aria-label="Compare ${esc(r.name)}"${st.compare.includes(slug)?" checked":st.compare.length===3?" disabled":""}>`
-}
-function compare(st){
-	const picks=st.compare.map(slug=>bySlug.get(slug))
-	if(!picks.length) return ""
-	const update=(compare,lbl,title=lbl)=>`<a class=btn href="${href("board",{...st,compare})}" title="${esc(title)}">${lbl}</a>`,
-		heads=picks.map(p=>pLink(p,st)+" "+update(st.compare.filter(s=>s!==p.slug),"×",`Remove ${p.name}`)),
-		stats=[["Value",p=>short(p.score)],["TVL",p=>short(p.tvl_usd)],
-		["Verdict",p=>badge(p.plan.verdict)],["Expected net",p=>net(p.plan.net)]]
-	return`<div class=compare><div class=bar><h2>Compare</h2>${update([],"Clear")}</div>
-${facts(["Metric",...heads],stats.map(([lbl,read])=>[lbl,...picks.map(read)]))}</div>`
+<td>${badge(fp.verdict)}<td>${net(fp.net)}<small>${usd(fp.capital)} · ${fp.horizon} d</small>`
 }
 function matchesExport(rank,slug,value,verdict,format){
 	const row=manifest?.[rank-1]
@@ -194,11 +181,10 @@ function drawBoard(st){
 		if(k==="rank"&&activeFilters.length) lbl=`Rank (of ${ns.ranked})`
 		return`<th${active?` aria-sort=${ariaSort(st)}`:""}>
 <a id=sort-${k} href="${href("board",{...st,sort:k,dir})}">${lbl}${active?` <span aria-hidden=true>${dir==="desc"?"↑":"↓"}</span>`:""}</a>`
-	})+"<th>Compare"
+	})
 	$("#results").innerHTML=rows.length?table("ranks",heads,html(rows,r=>tableRow(r,st))," role=region aria-label=Rankings"):"<p class=empty>No matches."
 	verifyRows(rows,st)
 	$("#plans").innerHTML=plans(st,rows)
-	$("#compare").innerHTML=compare(st)
 }
 
 const table=(kind,heads,body,attrs="")=>`<div class=scroll tabindex=0${attrs}><table class=${kind}><thead><tr>${heads}<tbody>${body}</table></div>`,
@@ -208,7 +194,7 @@ function valueSources(r,st){
 	return`<div class=sources><p>Base and power fit to traded caps.
 <p>Estimated cap if a token trades ${usd(r.launchValue)} · snapshot TVL ${usd(r.tvl_usd)}
 <p>7-day TVL change ${chg(r.change_7d)}${r.growth!==r.change_7d?` (uses ${chg(r.growth)})`:""}
-<p>Token-likeness uses TVL and days since listing (${r.ageDays==null?"median used":days(r)+" d"}).
+<p>${forms[form]} uses days since listing (${r.ageDays==null?"median used":days(r)+" d"}).${form==="shrink"?` Factor = 1 − ${weight} × (1 − token-likeness).`:""}
 <p>Issuer factor · ${r.flags.length?r.flags.map(esc).join(" · "):"No flags"} · ${issuerNote}
 <p><a class=evidence href="${href("calibration",st)}">Outer test and term ablation →</a></div>`
 }
@@ -225,7 +211,7 @@ function cashFlows(fp,quote,result){
 		half=evaluateFarm(fp,capital,{quote,horizon,q:q/2}),pay=targetsFor(result,quote),
 		[marginal,farm]=pay.targets.map(t=>`${needs(t.odds,q)} or drop ${maybeMoney(t.drop)}`)
 	return`<div class=decision>
-<p><b>${launchLabel(horizon)} ${chance(q)} · Token outcome ${decisionNet(withToken)}</b>
+<p><b>Launch chance (${horizon} d) ${chance(q)} · Token outcome ${decisionNet(withToken)}</b>
 <p><b>No-token outcome ${decisionNet(noToken)}</b>
 <p>${farmCost(result)}
 <p>${farmTime(result)} at ${usd(hourlyUsd)}/h · carry at ${pct(riskFreeRate,0)}/yr for ${holding} d
@@ -281,19 +267,20 @@ ${inset(`Stress · snapshot defaults (${fp.horizon} d)`,facts("Scenario|Capital|
 </div></div>`
 }
 function calibration(){
-	const table=facts(["Term","Pooled outer effect",...values(outerTests),"Reason"],
-		ablation.map(({term,withTerm,without,reason})=>[term,
-			`Miss ${mult(withTerm.pooled)} with / ${mult(without.pooled)} without`,...keys(outerTests)
-			.map(k=>`${mult(withTerm[k])} / ${mult(without[k])}`),reason])),
+	const scores=facts(["Value form",...values(outerTests),"Pooled"],entries(candidates).map(([f,s])=>
+		[(forms[f]??"Flat ratio")+(f===form?" · deployed":""),mult(s.walk),mult(s.family),mult(s.pooled)])),
+		table=facts(["Term",...values(outerTests),"Pooled"],ablation.map(({term,withTerm,without})=>
+			[term,...["walk","family","pooled"].map(k=>`${mult(withTerm[k])} / ${mult(without[k])}`)])),
 		folds=html(entries(outerTests),([k,label])=>`<h3>${label}</h3>${facts("Held out|Deployed|Flat ratio|n",
 			foldScores[k].map(f=>[f.label,mult(f.miss),mult(f.flat),f.n]))}`)
 	return`${intro("Trading-token calibration")}
-${inset(missTitle,valueStats+`<p>Flat ratio multiplies held-out TVL by the median cap-to-TVL ratio in training.
-<p>Walk-forward orders listings by date. Both tests use TVL, growth and caps from the snapshot.
-<p>For each family holdout, we set range bounds using leave-one-out cap residuals from training peers. Coverage counts held-out caps inside those bounds applied to the implied value. The published ranges use all traded peers for calibration.</p>
+${inset(missTitle,valueStats+`<p>Flat ratio uses the training median cap-to-TVL ratio.
+<p>Walk-forward orders snapshot rows by listing date.
+<p>Range bounds use leave-one-out training cap residuals.</p>
 <details class=folds><summary>Individual outer folds</summary>${folds}</details>`)}
-${inset("Value terms · median miss with / without",`<p>Each test removes one term. The age test removes the whole token-likeness factor. The pooled result combines ${headline.walk.n+headline.family.n} outer predictions.</p>${table}
-<p>The issuer rule fired on ${value.flagged} held-out predictions using only training issuer names.</p>`," ablation")}
+${inset("Candidate forms · median miss",`<p class=selection>${forms[form]} deployed. ${winner?"Lowest pooled miss among forms beating the flat ratio on both tests.":"Retained because no form beat the flat ratio on both tests."}${form==="shrink"?` Inner folds tune the weight. Full-data fit: ${weight}.`:""}</p>${scores}
+<p>Pooled scores combine both tests.</p>`," candidates")}
+${inset("Deployed terms · median miss with / without",`<p>Growth ablation refits on raw TVL. Age ablation drops its full factor.</p>${table}`," ablation")}
 ${inset(oddsLabel,`<p class=likeness>${likenessTest}. ${setup.timing}`)}`
 }
 const tokens=st=>`${intro("Token screen","Pre-token means the snapshot records no token.")}
@@ -376,16 +363,7 @@ function updateBoard(st){
 }
 
 view.onchange=({target:el})=>{
-	const slug=el.dataset.compare,st=readRoute()
-	if(slug){
-		st.compare=el.checked?[...st.compare,slug].slice(0,3):st.compare.filter(p=>p!==slug)
-		const scroll=$("#results .scroll").scrollTop
-		updateBoard(st)
-		$("#results .scroll").scrollTop=scroll
-		$("#"+el.id)?.focus({preventScroll:true})
-	} else if(el.matches(".filters select")){
-		location.hash=link("board",{...st,[el.name]:el.value})
-	}
+	if(el.matches(".filters select")) location.hash=link("board",{...readRoute(),[el.name]:el.value})
 }
 onhashchange=render
 render()

@@ -330,6 +330,9 @@ function readPage() {
     sources: read(".sources"), sourcesVisible: visible(".sources"),
     peersVisible: visible(".peers"), peersBounds: document.querySelector(".peers")?.getBoundingClientRect().toJSON(),
     heldOut: read(".misses"), likeness: read(".likeness"),
+    selection: read(".selection"),
+    candidateRows: [...document.querySelectorAll(".candidates tbody tr")]
+      .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     termRows: [...document.querySelectorAll(".ablation tbody tr")]
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     foldRows: [...document.querySelectorAll(".folds tbody tr")]
@@ -514,15 +517,20 @@ async function shoot(output, destination) {
   const gasLine = `${transactions} tx × ${money(chain.gas)} on ${chain.name} = ${money(gas)}`;
   const likenessTest = `Token-screen ranking accuracy (AUC) ${odds.validation.walk.auc.toFixed(3)} walk-forward`;
   const mult = miss => miss == null ? "—" : `${miss.toFixed(3)}×`;
-  const { headline, foldScores, ranges } = value;
+  const { headline, foldScores, ranges, candidates, form, winner, weight } = value;
   const scheme = { walk: "Walk-forward", family: "Leave-one-family-out" };
   const levels = [80, 50];
   const rangeLabels = levels.map(level => ranges.n ? `${ranges.labels[level]}% range` : "Uncalibrated range");
   const coverage = ranges.n ? `Family holdout coverage · ${levels.map((level, i) =>
     `${rangeLabels[i]} (${ranges.hits[level]}/${ranges.n})`).join(" · ")}` : "Range coverage unavailable";
-  const termRows = value.ablation.map(({ term, withTerm, without, reason }) => [term,
-    `Miss ${mult(withTerm.pooled)} with / ${mult(without.pooled)} without`,
-    ...Object.keys(scheme).map(key => `${mult(withTerm[key])} / ${mult(without[key])}`), reason]);
+  const comparisons = ["walk", "family", "pooled"];
+  const candidateRows = Object.entries(candidates).map(([key, scores]) => [
+    (api.forms[key] ?? "Flat ratio") + (key === form ? " · deployed" : ""),
+    ...comparisons.map(test => mult(scores[test]))
+  ]);
+  const termRows = value.ablation.map(({ term, withTerm, without }) => [
+    term, ...comparisons.map(key => `${mult(withTerm[key])} / ${mult(without[key])}`)
+  ]);
   const foldRows = Object.keys(scheme).flatMap(key => foldScores[key].map(({ label, miss, flat, n }) =>
     [label, mult(miss), mult(flat), String(n)]));
   const work = mkdtempSync("/work/.tmp/rw-firefox-");
@@ -675,12 +683,19 @@ async function shoot(output, destination) {
       }
       if (name === "calibration") {
         if (!info.likeness?.includes(likenessTest)) throw new Error("Missing token-screen ranking accuracy.");
+        if (JSON.stringify(info.candidateRows) !== JSON.stringify(candidateRows)
+          || !info.selection?.startsWith(`${api.forms[form]} deployed. ${winner ? "Lowest pooled miss" : "Retained because no form"}`)
+          || (form === "shrink" && !info.selection.endsWith(`Full-data fit: ${weight}.`))) {
+          throw new Error("Candidate rows or deployment rationale differ from the outer tests.");
+        }
         if (JSON.stringify(info.termRows) !== JSON.stringify(termRows)) throw new Error("Ablation rows differ from the outer tests.");
         if (JSON.stringify(info.foldRows) !== JSON.stringify(foldRows)) throw new Error("Individual fold rows differ from the outer tests.");
         if (!info.assumptions?.includes(value.issuerNote)) throw new Error("Missing issuer factor evidence in Assumptions.");
         if (!info.assumptionTables.some(table => table.includes("Gas/tx") && /Other chains\$1\.50/.test(table))) {
           throw new Error("Missing chain gas assumptions or fallback.");
         }
+        console.log(info.selection);
+        for (const row of info.candidateRows) console.log(`  ${row.join(" | ")}`);
         console.log("Value terms (median miss with / without):");
         for (const row of info.termRows) console.log(`  ${row.join(" | ")}`);
       }
