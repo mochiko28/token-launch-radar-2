@@ -16,23 +16,23 @@ const dash="—",hit=n=>n==null?dash:pct(n,0),
 	net=n=>sign(n)+money(n),decisionNet=n=>net(decisionUsd(n)),
 	tone=n=>n>0?"pos":n<0?"neg":"",
 	esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c])
-const {rows:rs,counts:ns,verdicts,stress,portfolio,value,odds,assumptions:setup,board:{rows:board}}=model,
+const {rows:rs,counts:ns,verdicts,stress,value,odds,assumptions:setup,board:{rows:board}}=model,
 	hash=digest(board),sameHash=hash===boardDigest,
 	{parameters:{horizons,tvlReference,riskFreeRate,hourlyUsd}}=setup,
 	auc=odds.validation,{loo,walk}=auc,
 	showAuc=fold=>fold.auc?.toFixed(3)??dash
-const timing=`${setup.timing} F walk-forward AUC ${showAuc(walk)} (n=${walk.n}).`,
+const likenessTest=`Token-likeness test: AUC ${showAuc(walk)} walk-forward`,
 	valTests=entries({loo:"Leave-one-out",walk:"Walk-forward",family:"Family hold-out"}),
 	{baseline,selected,trials,evidence,search}=value.validation,
 	{ranges:{heldOut,n:rangeN},nested}=value,
 	groups=[["traded"],["recorded","token, no cap"],["setAside","set aside"],["ranked"]],
 	choices=items=>["",...unique(items).sort()]
 const grades=keys(verdicts),
-	scenarios=[["doubleCost","2× cost"],["halfShare","½ share"]],
-	oddsLabel="Token status odds",
+	scenarios=[["doubleCost","2× cost"],["halfShare","Reward share halved"]],
+	oddsLabel="Token-likeness",launchLabel=h=>`Launch chance (${h} d)`,
 	cols={
 	rank:["Rank","rank","asc"],name:["Protocol","name","asc"],
-	value:["Implied value","score"],odds:["Token&nbsp;status odds","tokenOdds"],tvl:["TVL","tvl_usd"],
+	value:["Implied value","score"],odds:[oddsLabel,"tokenOdds"],tvl:["TVL","tvl_usd"],
 	growth:["7d TVL","change_7d"],days:["Days listed","ageDays"],
 	verdict:["Verdict",p=>grades.indexOf(p.plan.verdict),"asc"],net:["Expected net",p=>p.plan.net]
 }
@@ -40,7 +40,7 @@ const order=k=>cols[k][2]||"desc",filters=[
 	["Scope","scope",["all","watchlist"],"All ranked","Watchlist"],
 	["Family","family",choices(rs.map(p=>p.family)),"All families"],
 	["Verdict","verdict",["",...grades],"All verdicts"],
-	["Chain","chain",choices(rs.flatMap(p=>p.chains)),"All chains"],
+	["Listed chain","chain",choices(rs.flatMap(p=>p.chains)),"All chains"],
 	["Min TVL","tvl",["",1e7,5e7,1e8,5e8].map(String),"Any TVL"],
 	["Issuer","flag",["","flagged","clear"],"Any issuer","Flagged","No flags"]
 ]
@@ -86,38 +86,34 @@ ${card("Snapshot",`<strong>${ns.total}</strong>
 <div class=groups>${html(groups,([k,lbl=k])=>`<span><b>${ns[k]}</b> ${lbl}</span>`)}</div>`)}
 ${card(missTitle,valueStats)}
 ${card(`${oddsLabel} · held-out AUC`,`<div class=readings>${html(valTests.slice(0,2),([k,lbl])=>
-	`<div><strong>${showAuc(auc[k])}</strong><span>${lbl}</span></div>`)}</div><p>TVL + age`)}
+	`<div><strong>${showAuc(auc[k])}</strong><span>${lbl}</span></div>`)}</div><p>Snapshot score from TVL and listing age compared with traded-token peers`)}
 ${card("Watchlist",`<strong>${ns.watchlistCovered}<small> / ${ns.watchlistTotal}</small></strong>
 <p>Floor ${short(snap.floor_usd)}`)}</section>`
 const option=(v,lbl,selected)=>`<option value="${esc(v)}"${selected?" selected":""}>${esc(lbl)}`,
-	filter=([lbl,k,opts,...names],st)=>`<label>${lbl}<select name=${k}>${html(opts,(v,i)=>option(v,names[i]??(k==="tvl"?short(v)+"+":v),v===st[k]))}</select></label>`
-
-const {positions,capital,cost,net:gain,unallocated,eligible,budget}=portfolio,
-	holdings=st=>inset("",`<div><h2>${short(budget)} watchlist portfolio</h2>
-<p>${positions.length}/${eligible} FARM · Shared checks
-<p>${unallocated?usd(unallocated)+" idle":"Score-weighted surplus"}</div>
-<div class=positions>${html(positions,p=>`<div>${pLink(p,st)}<small>${usd(p.capital)} capital · ${money(p.cost)} cost · ${net(p.net)} net</small></div>`)}</div>
-${stats([["Capital",usd(capital)],["Cost",money(cost)],["Expected net",net(gain),tone(gain)]],"totals")}`," portfolio")
-const best=rs.filter(({plan:p})=>p.pStar!==null&&p.q>=p.pStar).sort((a,b)=>b.plan.net-a.plan.net).slice(0,5),
-	plans=st=>inset("Best plans that clear break-even",`<p>${grades.map(v=>verdicts[v]+" "+v).join(" · ")} · FARM ≥ 2p* with clear flags · MARGINAL ≥ p*
+	filterName=(k,v,name)=>name??(k==="tvl"?short(v)+"+":v),
+	filter=([lbl,k,opts,...names],st)=>`<label>${lbl}<select name=${k}>${html(opts,(v,i)=>option(v,filterName(k,v,names[i]),v===st[k]))}</select></label>`
+function plans(st,rows){
+	const best=rows.filter(({plan:p})=>p.verdict!=="SKIP").sort((a,b)=>b.plan.net-a.plan.net).slice(0,5)
+	return inset("Best plans that clear break-even",best.length?`<p>${grades.map(v=>count(rows,p=>p.plan.verdict===v)+" "+v).join(" · ")}
 ${html(best,p=>{
 	const f=p.plan
 	return`<div><b class=pos>${net(f.net)} net</b>${pLink(p,st)} ${badge(f.verdict)}
-<small class=action>${esc(f.action)}</small><small>${usd(f.capital)} · ${f.horizon} d · ${f.handsOnMinutes} min hands-on<br>q ${pct(f.q)} vs p* ${pct(f.pStar)}</small>
+<small class=action>${esc(f.action)}</small><small>${usd(f.capital)} · ${f.handsOnMinutes} min hands-on<br>${launchLabel(f.horizon)} ${chance(f.q)} · Break-even chance ${breakEven(f.pStar)}</small>
 <small class=outcomes>Token ${decisionNet(f.withToken)} · No token ${decisionNet(f.noToken)}</small></div>`
-})||"None."}`," plans")
+})}`:"<p>No visible row clears break-even."," plans")
+}
 const boardShell=st=>`${intro("Pre-token rankings","30–365 d farms")}
 <div class=integrity role=group aria-label=Integrity></div>
-${kpis}${st.scope==="watchlist"?holdings(st):""}
+${kpis}
 <div class=board><section class=panel>
 <div class=bar><h2>Protocols</h2><small id=shown role=status></small></div>
 <div class=filters><label>Search<input id=search type=search value="${esc(st.q)}" autocomplete=off></label>
 ${html(filters,spec=>filter(spec,st))}</div>
-<div id=compare></div><div id=results></div>
+<div id=active-filters></div><div id=compare></div><div id=results></div>
 </section><aside class=rail>
 ${inset("Expected yield by age",`<div id=yield></div>
 <div class=legend>${html(grades,v=>`<span class=${v.toLowerCase()}>${v}</span>`)}</div>`)}
-${plans(st)}
+<div id=plans></div>
 </aside></div>
 <details class="panel inset" id=check-help><summary>Integrity</summary><ul>
 <li>LOO: log-cap residuals. WF: prior rows.
@@ -152,7 +148,7 @@ function tableRow(r,st){
 <td>${pct(tokenOdds,1)}<td>${short(tvl_usd)}
 <td>${pill(change_7d)}
 <td>${days(r)}
-<td>${badge(fp.verdict)}<td>${net(fp.net)}<small>${fp.horizon} d${fp.verdict==="SKIP"?` · ${esc(fp.chain.name)} ${oddsFactor(fp.pay.targets[0].oddsRatio)} q`:""}</small>
+<td>${badge(fp.verdict)}<td>${net(fp.net)}<small>${fp.horizon} d${fp.verdict==="SKIP"?` · ${needs(fp.pStar,fp.q)}`:""}</small>
 <td><input type=checkbox data-compare="${k}" id=pick-${rank} aria-label="Compare ${esc(r.name)}"${st.compare.includes(slug)?" checked":st.compare.length===3?" disabled":""}>`
 }
 function compare(st){
@@ -186,26 +182,30 @@ function integrity(matched,total,rowsPass){
 		[sameHash,`Hash ${hash}`],
 		[checks["group counts"],`${ns.total}=${groups.map(([k])=>ns[k]).join("+")}`],
 		[checks.coverage,`Watchlist ${ns.watchlistCovered}/${ns.watchlistTotal}`],
-		[checks.sorted_by_value,`Sorted ${board.length}`],
 		miss("loo","Value LOO"),miss("walk","Walk"),
 		[checks["80% LOO coverage"],`80% range: ${hit(heldOut[80])} held-out`],
 		[!!nested.folds,`nested WF ${mult(nested.miss)}`],
-		[loo.auc>.5&&walk.auc>.5,`AUC ${showAuc(loo)}/${showAuc(walk)}`],
-		[checks.farm_steps,`Plans ${board.length}`],
+		[loo.auc>.5&&walk.auc>.5,likenessTest],
 		[allPass,`Checks ${selfCount}`]
 	],([ok,lbl])=>`<button class=chip data-pass=${ok}>${ok?"✓":"✗"} ${lbl}</button>`)
 }
 function drawBoard(st){
-	const rows=filtered(st)
+	const rows=filtered(st),activeFilters=filters.flatMap(([lbl,k,opts,...names])=>
+		st[k]===defaults[k]?[]:[`${lbl}: ${filterName(k,st[k],names[opts.indexOf(st[k])])}`])
+	if(st.q.trim()) activeFilters.unshift(`Search: ${st.q.trim()}`)
+	$("#active-filters").innerHTML=activeFilters.length?`${html(activeFilters,s=>`<span class=chip>${esc(s)}</span>`)}
+<a class=btn href="${href("board",{...st,...defaults,sort:st.sort})}">Reset filters</a>`:""
 	$("#shown").textContent=`${rows.length}/${st.scope==="watchlist"?ns.watchlistCovered:ns.ranked} shown`
 	const heads=html(entries(cols),([k,[lbl]])=>{
 		const active=k===st.sort,dir=active?(st.dir==="asc"?"desc":"asc"):order(k)
-			return`<th${active?` aria-sort=${ariaSort(st)}`:""}>
+		if(k==="rank"&&activeFilters.length) lbl=`Rank (of ${ns.ranked})`
+		return`<th${active?` aria-sort=${ariaSort(st)}`:""}>
 <a id=sort-${k} href="${href("board",{...st,sort:k,dir})}">${lbl}${active?` <span aria-hidden=true>${dir==="desc"?"↑":"↓"}</span>`:""}</a>`
 	})+"<th>Compare"
 	$("#results").innerHTML=rows.length?table("ranks",heads,html(rows,r=>tableRow(r,st))," role=region aria-label=Rankings"):"<p class=empty>No matches."
 	verifyRows(rows,st)
 	$("#yield").innerHTML=yieldChart(rows)
+	$("#plans").innerHTML=plans(st,rows)
 	$("#compare").innerHTML=compare(st)
 }
 function yieldChart(rs){
@@ -243,41 +243,39 @@ const stats=(items,kind="")=>`<dl class="${kind}">${html(items,([lbl,val,style="
 function drivers(r){
 	const {rank,name,score}=model.reference,factors=values(r.attribution)
 	return`<div class=drivers><p><b>${mult(r.score/score,3)}</b> vs median #${rank} ${esc(name)} (${usd(score)})
-${stats(["TVL size","7d carry","Age on odds","Issuer","Family","Rounding"]
+${stats(["TVL size","7d carry","Listing age","Issuer","Family","Rounding"]
 	.map((lbl,i)=>[lbl,mult(factors[i],3)]).filter(([,x],i)=>i<4||x!=="1.000×"))}</div>`
 }
 const quoteFields=[
 	["entryGas","Entry gas $"],["exitGas","Exit gas $"],["slippage","Slippage %",100],
 	["delay","Exit delay (d)",36500],["lockup","Lockup days",36500]
 ],
-	maybe=(n,fmt)=>n==null?"Unreachable":fmt(n)
-function payLine({pay,horizon,capped,chain}){
-	const [marginal,farm]=pay.targets.map(t=>`q ${maybe(t.odds,pct)} (${oddsFactor(t.oddsRatio)}) or drop ${maybe(t.drop,money)} (${mult(t.dropRatio)})`)
-	return`<p class=pay><b>What would make it pay</b> · ${esc(chain.name)} · ${horizon} d${capped?" · FARM needs clear flags":""}
-<br>MARGINAL ${marginal} · all-in cost ≤ ${maybe(pay.maxCost,money)}<br>FARM ${farm}`
-}
-function cashFlows(fp,quote=fp.quote,result=fp){
+	maybeMoney=n=>n==null?"unreachable":money(n),
+	quoteHeadline=(fp,{capital,horizon})=>`${fp.quoteTicket(capital)} on ${fp.chain.name} · ${horizon} d`
+function cashFlows(fp,quote,result){
 	const {horizon,q,capital,noToken,withToken,pStar,gas,fees,timeCost,holding,capitalCharge,drop,claimSell,verdict,net:gain}=result,
-		{chain,transactions}=fp,gasBasis=gas===fp.gas?`${transactions} tx x ${money(chain.gas)}`:"Quoted gas",
-		half=evaluateFarm(fp,capital,{quote,horizon,q:q/2}),odds=decisionQ(q),
-		threshold=pStar===null?"Break-even unreachable":`Needs q ≥ p* = ${pct(pStar)}`
+		{chain,transactions}=fp,gasBasis=quote.entryGas===fp.quote.entryGas&&quote.exitGas===fp.quote.exitGas
+			?`${transactions} tx × ${money(chain.gas)}`:"Quoted gas",
+		half=evaluateFarm(fp,capital,{quote,horizon,q:q/2}),pay=targetsFor(result,quote),
+		[marginal,farm]=pay.targets.map(t=>`${needs(t.odds,q)} or drop ${maybeMoney(t.drop)}`)
 	return`<div class=decision>
-<p><b>Token in window (q = ${odds}): ${decisionNet(withToken)}</b>
-<p><b>No token: ${decisionNet(noToken)}</b> · costs rounded
+<p><b>${launchLabel(horizon)} ${chance(q)} · Token outcome ${decisionNet(withToken)}</b>
+<p><b>No-token outcome ${decisionNet(noToken)}</b>
 <p>Gas ${money(gas)} + funding ${money(chain.bridge)} + slippage ${money(fees-chain.bridge)} + hands-on time ${money(timeCost)}
 <p>+ Capital carry ${money(capitalCharge)} at a ${pct(riskFreeRate,0)}/yr stablecoin base rate for ${holding} d
-<p>${threshold}; model q = ${odds} → ${badge(verdict)}
-<p><b>Expected net ${decisionNet(gain)}</b> = q × token net − (1 − q) × no-token cost</div>
+<p>Break-even chance ${breakEven(pStar)} → ${badge(verdict)}
+<p><b>Expected net ${decisionNet(gain)}</b> = launch chance × token outcome + chance of no token × no-token outcome. Displayed figures rounded.</div>
 <p>${usd(capital)} · ${horizon} d window · time at ${usd(hourlyUsd)}/h
-<p class=gas>${gasBasis} on ${esc(chain.name)} = ${money(gas)}<br>${pct(gas/-noToken,1)} of all-in cost
-<p>Drop ${money(drop)} − claim &amp; sell ${money(claimSell)} · Net APR ${signed(pct(result.conditionalApr))}
-<p class=half-q>½ q (${pct(q/2)}) · ${net(half.net)} · ${badge(half.verdict)}`
+<p class=gas>${gasBasis} on ${esc(chain.name)} = ${money(gas)}
+<p>Drop ${money(drop)} − claim &amp; sell ${money(claimSell)}
+<p class=half-q>Launch chance halved (${chance(q/2)}) · ${net(half.net)} · ${badge(half.verdict)}
+<p class=pay><b>What would make it pay</b> · ${esc(chain.name)} · ${horizon} d${fp.capped?" · FARM needs clear flags":""}
+<br>MARGINAL ${marginal} · all-in cost ≤ ${maybeMoney(pay.maxCost)}<br>FARM ${farm}`
 }
 
 const quotePanel=({plan:fp,slug})=>inset("Decision",`
-<div id=quote-result aria-live=polite>${cashFlows(fp)}</div>
-${payLine(fp)}
-<p>${timing}
+<div id=quote-result aria-live=polite>${cashFlows(fp,fp.quote,fp)}</div>
+<p class=timing>${setup.timing} ${likenessTest}.
 <form id=quote data-slug="${esc(slug)}" class=quotes>
 <label>Horizon<select name=horizon>${option(0,"Auto")}${html(horizons,h=>option(h,h+" days"))}</select></label>
 ${html(quoteFields,([k,lbl,max=1e6])=>`<label>${lbl}
@@ -294,7 +292,7 @@ function detail(st,r){
 	const {plan:fp,flags,band,ranges,rangeFarm:[low,high]}=r,
 		summary=`${rowName(r)} · ${short(r.tvl_usd)} TVL · ${chg(r.change_7d)} 7d · ${days(r)} d listed`,
 		lbl=`<p class=kicker>#${r.rank}/${ns.ranked}${r.watchlist?" · ◆ Watchlist":""}`,
-		lead=`<p class=route>${esc(fp.ticket)} on ${esc(fp.chain.name)}`,
+		lead=`<p class=route>${esc(quoteHeadline(fp,fp))}`,
 		stressRows=[[null,"Default"],...scenarios].map(([k,lbl])=>{
 		const p=fp.stress[k]??fp,{all=verdicts,farm}=stress[k]??{}
 		return[lbl,usd(p.capital),badge(p.verdict),net(p.net),grades.map(v=>farm?`${all[v]} (${farm[v]})`:all[v]).join(" / ")]
@@ -310,15 +308,15 @@ ${quotePanel(r)}
 <div class=equation>${factors.map(([n,lbl])=>`<div><b>${n}</b><small>${lbl}</small></div>`).join("×")}</div>
 ${drivers(r)}
 ${stats([["Launch p10–p90",range([band.low,band.high])],
-		["Odds-weighted band",range([band.weightedLow,band.weightedHigh])]],"band")}
+		["Token-likeness weighted band",range([band.weightedLow,band.weightedHigh])]],"band")}
 <p>${flags.length?flags.map(esc).join(" · ")+" · MARGINAL cap":"No flags"}
 </section>
 ${inset("Nearest traded peers",facts("Protocol|TVL|Cap",
 		r.peers.map(p=>[esc(p.name),short(p.tvl_usd),short(p.mcap_usd)]))," peers")}
 </div><div>
-${inset("Farm checklist",`<p class=range-net>Expected net ${net(low.net)} / ${net(high.net)} · ${flips.join(" · ")||"robust across 80% range"}
+${inset("Farm checklist · snapshot defaults",`<p class=range-net>Expected net ${net(low.net)} / ${net(high.net)} · ${flips.join(" · ")||"robust across 80% range"}
 <h3>Exit triggers</h3><ul class=exits>${html(fp.exits,s=>`<li>${esc(signed(s))}`)}</ul>${tree(fp.steps)}`)}
-${inset(`Stress · ${fp.horizon} d · resized`,facts("Scenario|Capital|Verdict|Net|Board F/M/S",stressRows)+"<small>(Default FARM)</small>"," stress")}
+${inset(`Stress · snapshot defaults (${fp.horizon} d)`,facts("Scenario|Capital|Verdict|Net|Board F/M/S",stressRows)+"<small>(Default FARM)</small>"," stress")}
 </div></div>`
 }
 function calibration(){
@@ -327,8 +325,8 @@ function calibration(){
 			terms.map(({term,withTerm,without,verdict})=>[term,...valTests.flatMap(([k])=>
 				[withTerm[k],without[k]].map(f=>f?.n?`${mult(f.miss,withTerm.family?3:2)} / ${hit(f.hits[1])}`:dash)),verdict]))
 	return`${intro("Trading-token calibration")}
-${inset("Launch probability q",`<p>${timing}<p class=odds-misses>Median miss · LOO/WF · ${mult(loo.miss)} / ${mult(walk.miss)}`)}
-${inset("Terms · miss / within 3×",`<p>Odds miss: 1/P(status). Adopt: better LOO/WF, family miss rises ≤0.1×.${ablation}`)}
+${inset(oddsLabel,`<p>${likenessTest}<p class=odds-misses>Median miss · LOO/WF · ${mult(loo.miss)} / ${mult(walk.miss)}`)}
+${inset("Terms · miss / within 3×",`<p>Token-likeness miss uses the inverse score for the observed status. Adopt: better LOO/WF, family miss rises ≤0.1×.${ablation}`)}
 <div class=research>
 ${inset(`${ns.valueFit} screened tokens`,facts("Protocol|Family|Carried TVL|Cap|Fit",
 	model.calibration.toSorted((a,b)=>b.mcap_usd-a.mcap_usd)
@@ -352,7 +350,7 @@ function drawer(){
 	const {parameters,chainQuotes,fallbackChain,mechanisms,families,notes}=setup,
 		section=(heads,obj,read)=>facts(heads,entries(obj).map(([k,v])=>[k,...read(v)]))
 	return`<ul>${html(notes,s=>`<li>${esc(s)}`)}</ul>
-${facts("Parameter|Value",entries(parameters).map(([k,v])=>[k.replace(/[A-Z]/g,c=>" "+c.toLowerCase()),signed(String(v))]))}
+${facts("Parameter|Value",entries(parameters).map(([k,v])=>[k.replace(/^odds/,"token-likeness").replace(/[A-Z]/g,c=>" "+c.toLowerCase()),signed(String(v))]))}
 ${section("Chain|Gas/tx|Funding|Time",{...chainQuotes,"Other chains":fallbackChain},([g,f,m])=>[money(g),money(f),m+" min"])}
 ${section("Family|Actions|Fees|Time|Deposit",mechanisms,([n,bps,m,verb,where])=>[n,bps+" bps",m+" min",verb+" "+esc(where)])}
 ${section("Family|Categories",families,cats=>[cats.replaceAll("|",", ")])}`
@@ -383,7 +381,7 @@ check.title=results.map(({name,pass})=>`${name}: ${pass?"pass":"fail"}`).join("\
 $(".drawer").innerHTML=drawer()
 $("#open").onclick=()=>$("#assumptions").showModal()
 view.onclick=({target})=>{
-	if(!target.matches(".chip")) return
+	if(!target.matches(".integrity .chip")) return
 	const help=$("#check-help")
 	help.open=true
 	help.firstChild.focus()
@@ -399,7 +397,9 @@ view.oninput=({target:el})=>{
 		input.nextElementSibling.textContent=observed?"Quoted":"Default"
 		if(observed) quote[input.name]=input.valueAsNumber
 	}
-	$("#quote-result").innerHTML=cashFlows(fp,quote,chooseFarm(fp,quote,+form.elements.horizon.value))
+	const result=chooseFarm(fp,quote,+form.elements.horizon.value)
+	$("#quote-result").innerHTML=cashFlows(fp,quote,result)
+	$(".route").textContent=quoteHeadline(fp,result)
 }
 function nav(st){
 	$(".brand").href=link("board",st)

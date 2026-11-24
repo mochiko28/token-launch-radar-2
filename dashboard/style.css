@@ -16,8 +16,8 @@ h2{font-size:1.14rem;line-height:1.25}
 .frame{width:min(1328px,95%);margin:auto}
 body>header{background:var(--ink);color:var(--sheet);border-bottom:2px solid var(--signal)}
 .chip,.panel,dialog,.dialog-top{background:var(--sheet)}
-.brand,.mast,.bar,.dialog-top,.portfolio,.equation{display:flex;align-items:center}
-.intro,.readings,.legend,.positions,.integrity,dl,nav{display:flex}
+.brand,.mast,.bar,.dialog-top,.equation{display:flex;align-items:center}
+.intro,.readings,.legend,.integrity,dl,nav{display:flex}
 .mast{min-height:56px;gap:32px}
 .brand{gap:8px;font-weight:700}
 .brand span,[aria-current]{color:var(--signal)}
@@ -29,7 +29,7 @@ nav{gap:24px;margin-right:auto}
 #checks,.rank,.kicker,footer{font:.76rem monospace}
 small,dt,.curve,footer{color:var(--dim)}
 .intro,.bar,.dialog-top{justify-content:space-between}
-.integrity,.readings,.portfolio,.positions,.drivers dl{flex-wrap:wrap}
+.integrity,.readings,.drivers dl{flex-wrap:wrap}
 .intro{align-items:end;margin:12px 0 24px}
 .integrity{gap:2px;margin:-17px 0 8px}
 .chip{padding:2px 1px;white-space:nowrap;font-size:.68rem}
@@ -40,11 +40,11 @@ small,dt,.curve,footer{color:var(--dim)}
 .kpi h2,.filters label,.kicker{text-transform:uppercase}
 .kpi strong{font-size:1.94rem}
 .groups{grid:auto/1fr 1fr}
-.readings,.band,.totals,.board,.detail,.research,.drivers dl{gap:1rem}
+.readings,.band,.board,.detail,.research,.drivers dl{gap:1rem}
 :not(strong)>small,.readings span,svg,.back{display:block}
 .misses strong{font-size:1.4rem}
-small,dt,.curve,.drivers,.rail,.portfolio p,.hint,.back,.kpi{font-size:.8rem}
-.valuation,.portfolio,.decision,.steps small,thead,.rank{background:var(--wash)}
+small,dt,.curve,.drivers,.rail,.hint,.back,.kpi{font-size:.8rem}
+.valuation,.decision,.steps small,thead,.rank{background:var(--wash)}
 .board,.detail,.research{align-items:start}
 .board{grid:auto/1fr 310px}
 .rail,.detail>div,.legend,.equation{gap:12px}
@@ -55,7 +55,9 @@ small,dt,.curve,.drivers,.rail,.portfolio p,.hint,.back,.kpi{font-size:.8rem}
 	input,select{width:100%;height:34px;padding:4px 8px;border:var(--line);background:var(--sheet)}
 }
 .scroll{overflow:auto}
-#results .scroll{max-height:511px;.portfolio+div &{max-height:318px}}
+#active-filters:not(:empty){display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0 16px 8px}
+#active-filters .chip{padding:2px 8px;background:var(--wash);font-size:.8rem;white-space:normal}
+#results .scroll{max-height:511px}
 table{width:100%;border-collapse:collapse}
 th{text-align:left}
 thead{font-size:.75rem}
@@ -97,8 +99,6 @@ circle{fill:var(--mark)}
 .plans{line-height:1.2}
 .plans b{float:right}
 .pay{padding-top:8px}
-.portfolio{gap:12px 24px;margin-bottom:16px}
-.positions,.positions>div{flex:1}
 .detail{grid:auto/5fr 6fr}
 .decision{border-left:3px solid var(--signal);padding:8px;margin:4px 0}
 .detail>div{min-width:0}

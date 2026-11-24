@@ -165,18 +165,13 @@ function report(output, input) {
   for (const [key, label] of [["loo", "LOO"], ["walk", "Walk-forward"], ["family", "Family hold-out"]]) {
     console.log(`${label} median miss ${validation.selected[key].miss.toFixed(3)}x vs ${validation.baseline[key].miss.toFixed(3)}x flat (n=${validation.selected[key].n})`);
     const result = model.odds.validation[key];
-    if (result) console.log(`${label} token odds AUC ${result.auc.toFixed(3)} (n=${result.n} of ${oddsFit})`);
+    if (result) console.log(`${label} token-likeness AUC ${result.auc.toFixed(3)} (n=${result.n} of ${oddsFit})`);
   }
-  console.log("Token odds are the logistic probability of a snapshot token record given TVL and listing age. The snapshot has no launch dates.");
+  console.log(model.assumptions.timing);
   console.log(Object.entries(model.verdicts).map(([name, n]) => `${name} ${n}`).join(" | "));
   for (const [scenario, { all, farm }] of Object.entries(model.stress)) {
     console.log(`${scenario}, all rows (base FARM): ${Object.entries(all).map(([verdict, count]) => `${verdict} ${count} (${farm[verdict]})`).join(" | ")}`);
   }
-  const { portfolio } = model;
-  console.log(`Portfolio: ${portfolio.positions.length} positions, $${portfolio.capital.toFixed(2)} capital, $${portfolio.cost.toFixed(2)} cost, $${portfolio.net.toFixed(2)} expected net`);
-  console.table(portfolio.positions.map(({ name, capital, cost, net }) => ({
-    name, capital: capital.toFixed(2), cost: cost.toFixed(2), expected_net: net.toFixed(2)
-  })));
   console.table(model.rows.slice(0, 10).map(p => ({
     name: p.name, value_usd: p.score, token_odds: p.tokenOdds.toFixed(4), verdict: p.plan.verdict
   })));

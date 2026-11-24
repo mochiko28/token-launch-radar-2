@@ -8,9 +8,11 @@ import api from "../dashboard/model.js";
 
 const width = 1440;
 const height = 980;
+const boardHeight = 1120;
 const detailHeight = 1340;
-const minimum = 300 * 1024;
+const minimum = 300_000;
 const maximum = 350_000;
+const targetSize = 305_000;
 
 async function freePort() {
   const server = createServer();
@@ -88,6 +90,7 @@ function jpegSize(bytes) {
 }
 
 const fits = bytes => bytes.length >= minimum && bytes.length < maximum;
+const sizeMiss = bytes => Math.abs(bytes.length - targetSize);
 const displaySigns = text => text.replace(/(^|[\s$(,])-(?=\$?\d)/g, "$1−");
 
 async function captureJpeg(call, context, work) {
@@ -96,22 +99,26 @@ async function captureJpeg(call, context, work) {
     return Buffer.from(data, "base64");
   };
   const candidates = [];
+  let best;
   try {
     let low = 1;
-    let high = 100;
+    let high = 1000;
     while (low <= high) {
       const quality = Math.ceil((low + high) / 2);
-      const bytes = await capture({ type: "image/jpeg", quality: quality / 100 });
+      const bytes = await capture({ type: "image/jpeg", quality: quality / 1000 });
       if (bytes.readUInt16BE(0) !== 0xffd8) break;
-      if (fits(bytes)) return { bytes, encoder: `BiDi quality ${quality / 100}` };
+      if (fits(bytes) && (!best || sizeMiss(bytes) < sizeMiss(best.bytes))) {
+        best = { bytes, encoder: `BiDi quality ${quality / 1000}` };
+      }
       candidates.push(`BiDi ${quality}: ${bytes.length}`);
-      if (bytes.length < minimum) low = quality + 1;
+      if (bytes.length < targetSize) low = quality + 1;
       else high = quality - 1;
     }
   } catch (error) {
     candidates.push(error.message);
   }
 
+  if (best) return best;
   const png = join(work, "bidi.png");
   writeFileSync(png, await capture({ type: "image/png" }));
   return encodeJpeg(png, work, candidates);
@@ -119,6 +126,29 @@ async function captureJpeg(call, context, work) {
 
 function encodeJpeg(png, work, candidates = []) {
   const jpeg = join(work, "candidate.jpg");
+  let best;
+  const consider = (bytes, encoder) => {
+    if (fits(bytes) && (!best || sizeMiss(bytes) < sizeMiss(best.bytes))) best = { bytes, encoder };
+    return best && sizeMiss(best.bytes) <= 3000;
+  };
+  for (const mode of [[], ["-optimize"]]) {
+    let low = 85;
+    let high = 100;
+    while (low <= high) {
+      const quality = Math.ceil((low + high) / 2);
+      const result = spawnSync("/usr/bin/cjpeg", [
+        "-quality", String(quality), "-sample", "1x1", ...mode, png
+      ], { timeout: 10_000, maxBuffer: 2 * 1024 * 1024 });
+      if (result.error?.code === "ENOENT") break;
+      if (result.status !== 0) throw new Error(String(result.error || result.stderr));
+      const bytes = result.stdout;
+      const encoder = `cjpeg quality ${quality}${mode.length ? " optimized" : ""}`;
+      if (consider(bytes, encoder)) return best;
+      candidates.push(`${encoder}: ${bytes.length}`);
+      if (bytes.length < targetSize) low = quality + 1;
+      else high = quality - 1;
+    }
+  }
   for (const [format, huffman] of [
     ["yuvj444p", "optimal"], ["yuvj444p", "default"], ["yuvj422p", "default"], ["yuvj420p", "default"]
   ]) {
@@ -130,36 +160,24 @@ function encodeJpeg(png, work, candidates = []) {
       ], { timeout: 10_000 });
       if (ffmpeg.status !== 0) throw new Error(String(ffmpeg.error || ffmpeg.stderr));
       const bytes = readFileSync(jpeg);
-      if (fits(bytes)) return { bytes, encoder: `ffmpeg -q:v ${quality} ${format} (${huffman} Huffman)` };
+      if (consider(bytes, `ffmpeg -q:v ${quality} ${format} (${huffman} Huffman)`)) return best;
       candidates.push(`${format}/${huffman} q${quality}: ${bytes.length}`);
       if (bytes.length < minimum) break;
     }
   }
-  for (const mode of [[], ["-optimize"]]) {
-    for (let quality = 100; quality >= 85; quality--) {
-      const result = spawnSync("/usr/bin/cjpeg", [
-        "-quality", String(quality), "-sample", "1x1", ...mode, png
-      ], { timeout: 10_000, maxBuffer: 2 * 1024 * 1024 });
-      if (result.error?.code === "ENOENT") break;
-      if (result.status !== 0) throw new Error(String(result.error || result.stderr));
-      const bytes = result.stdout;
-      const encoder = `cjpeg quality ${quality}${mode.length ? " optimized" : ""}`;
-      if (fits(bytes)) return { bytes, encoder };
-      candidates.push(`${encoder}: ${bytes.length}`);
-      if (bytes.length < minimum) break;
-    }
-  }
+  if (best) return best;
   throw new Error(`No JPEG met the byte budget. ${candidates.join(", ")}`);
 }
 
 const shots = [
-  { name: "1-board.jpg", hash: "#board", viewHeight: 1050 },
+  { name: "1-board.jpg", hash: "#board", viewHeight: boardHeight },
   { name: "2-detail.jpg", hash: "#detail/upshift", viewHeight: detailHeight },
-  { name: "3-filtered.jpg", hash: "#board?scope=watchlist&verdict=SKIP" }
+  { name: "3-filtered.jpg", hash: "#board?chain=Ethereum&verdict=MARGINAL", viewHeight: boardHeight }
 ];
 const pages = [...shots,
   { name: "mezzanine", hash: "#detail/mezzanine", viewHeight: detailHeight, probeOnly: true },
-  { name: "calibration", hash: "#calibration", probeOnly: true }
+  { name: "calibration", hash: "#calibration", probeOnly: true },
+  { name: "watchlist-skip", hash: "#board?scope=watchlist&verdict=SKIP", probeOnly: true }
 ];
 
 function readPage() {
@@ -191,51 +209,51 @@ function readPage() {
   const decision = () => [...document.querySelectorAll(".decision p")].map(p => p.textContent.trim());
   const halfOdds = () => read(".half-q");
   let quotePass, defaultHalfOdds;
+  const quotes = [];
   if (form) {
-    const initial = read("#quote-result");
     defaultHalfOdds = halfOdds();
     const inputs = [...form.querySelectorAll("input")];
     const horizon = form.elements.horizon;
+    const quoteState = () => ({
+      horizon: Number(horizon.value),
+      overrides: Object.fromEntries(inputs.filter(input => input.validity.valid && input.value)
+        .map(input => [input.name, input.valueAsNumber])),
+      decision: decision(),
+      headline: read(".route"),
+      pay: read(".pay"),
+      gas: read(".gas"),
+      halfChance: halfOdds(),
+      context: [document.querySelector(".steps").closest("section").textContent, read(".stress")]
+    });
+    const initial = quoteState();
+    quotes.push(initial);
     const defaulted = () => inputs.every(input => input.nextElementSibling.textContent === "Default");
     const fieldsValid = inputs.map(input => input.name).join() === "entryGas,exitGas,slippage,delay,lockup";
-    quotePass = fieldsValid && defaulted() && initial.includes("No token") && initial.includes("Needs q ≥ p*")
+    quotePass = fieldsValid && defaulted()
       && horizon?.value === "0" && [...horizon.options].map(option => option.value).join() === "0,30,90,180,365"
       && visible("#quote select");
     if (quotePass) {
       const update = control => control.dispatchEvent(new Event("input", { bubbles: true }));
-      const metrics = () => {
-        const lines = decision();
-        const [, , , carry, threshold, expected] = lines;
-        const net = Number(expected.split(" = ")[0].replace("−", "-").replace(/[^\d.-]/g, ""));
-        const [, pStar, q, verdict] = /^Needs q ≥ p\* = ([\d.]+%); model q = ([\d.]+%) → (\w+)$/.exec(threshold) ?? [];
-        return { carry, pStar, q, verdict, net };
-      };
       const select = h => { horizon.value = h; update(horizon); };
-      const best = [...horizon.options].slice(1).map(option => {
+      for (const option of [...horizon.options].slice(1)) {
         select(option.value);
-        const result = metrics();
-        quotePass &&= Boolean(result.q) && result.carry.endsWith(`for ${option.value} d`);
-        return result;
-      }).sort((a, b) => b.net - a.net)[0];
-      select(0);
-      quotePass &&= read("#quote-result") === initial && JSON.stringify(metrics()) === JSON.stringify(best);
+        quotes.push(quoteState());
+      }
       const values = [10000, 7, 1, 12, 45];
       select(30);
-      const before = metrics();
-      inputs.forEach((input, i) => { input.value = values[i]; });
-      update(inputs[0]);
-      const after = metrics();
-      quotePass &&= after.pStar !== before.pStar && after.q === before.q
-        && after.net !== before.net && after.verdict === "SKIP" && after.carry.endsWith("for 57 d")
-        && /^Quoted gas on .+ = \$/.test(read(".gas"))
-        && halfOdds() !== defaultHalfOdds && halfOdds().includes("SKIP")
-        && inputs.every(input => input.nextElementSibling.textContent === "Quoted");
+      inputs.forEach((input, i) => {
+        input.value = values[i];
+        update(input);
+        quotes.push(quoteState());
+        quotePass &&= input.nextElementSibling.textContent === "Quoted";
+      });
       inputs.forEach(input => { input.value = ""; });
       select(0);
-      quotePass &&= read("#quote-result") === initial && defaulted();
+      const restored = () => JSON.stringify(quoteState()) === JSON.stringify(initial) && defaulted();
+      quotePass &&= restored();
       inputs[0].value = "-1";
       update(inputs[0]);
-      quotePass &&= read("#quote-result") === initial && defaulted();
+      quotePass &&= restored();
       inputs[0].value = "";
     }
   }
@@ -255,7 +273,7 @@ function readPage() {
   const integrity = chips.map(chip => chip.textContent);
   const integrityLines = new Set(chips.map(chip => chip.offsetTop)).size;
   const integrityWidth = chips.length ? [chips[0].parentElement.clientWidth, chips.reduce((sum, chip) => sum + chip.offsetWidth, 0)] : [];
-  const integrityPass = chips.length === 12 && visible(".integrity")
+  const integrityPass = chips.length === 10 && visible(".integrity")
     && integrityLines === 1
     && chips.every(chip => chip.dataset.pass === "true" && chip.textContent.startsWith("✓ "));
   const helpPass = chips.every(chip => {
@@ -272,25 +290,27 @@ function readPage() {
     loadMs: performance.getEntriesByType("navigation")[0].domContentLoadedEventEnd,
     checks: read("#checks"), checksPass: document.querySelector("#checks")?.dataset.pass,
     integrity, integrityPass, integrityLines, integrityWidth, helpPass, title: read("h1"), count: read("#shown"), first: read("tbody tr th a"),
-    portfolio: read(".portfolio"),
+    activeFilters: [...document.querySelectorAll("#active-filters .chip")].map(node => node.textContent),
+    reset: document.querySelector("#active-filters a")?.getAttribute("href"),
+    rankLabel: read("#sort-rank"),
+    jargon: (`${document.querySelector("#view").textContent}\n${read("#assumptions .drawer")}`
+      .match(/\bp\*|\bx\d+(?:\.\d+)?\s+q\b|\bq\s*(?:=|\(|≥|\d)|½\s*q\b|F walk-forward/gu) ?? []),
     summary: read(".route"), defaultHalfOdds,
     decision: decision(), decisionVisible: visible(".decision"),
     coverage: read(".coverage"), nested: read(".nested"),
     valueRange: read(".value-range"), rangeFarm: read(".range-net"),
-    oddsNote: read(".pay + p"), pay: read(".pay"), payVisible: visible(".pay"),
-    farms: read(".plans"), farmsVisible: visible(".plans"),
+    oddsNote: read(".timing"), pay: read(".pay"), payVisible: visible(".pay"),
+    farms: read(".plans"), farmsVisible: visible(".plans"), farmBounds: document.querySelector(".plans")?.getBoundingClientRect().toJSON(),
     farmLinks: [...document.querySelectorAll(".plans a")].map(a => a.getAttribute("href")),
     farmBadges: [...document.querySelectorAll(".plans .badge")].map(chip => chip.textContent),
     farmActions: [...document.querySelectorAll(".plans .action")].map(hint => hint.textContent),
     farmOutcomes: [...document.querySelectorAll(".plans .outcomes")].map(line => line.textContent),
-    oddsInline: rows.every(row => !row.querySelector(".skip") || /\S\u00a0q$/.test(row.cells[8].querySelector("small").textContent)),
-    positions: document.querySelectorAll(".positions > div").length,
     labels, steps,
     gas: document.querySelector(".gas")?.innerText.replace("\n", " · "), gasVisible: visible(".gas"),
     exits: [...document.querySelectorAll(".exits li")].map(li => li.textContent),
     exitsVisible: visible(".exits"),
     planVisible: visible(".steps"),
-    quoteVisible: visible(".quote"), quotePass,
+    quoteVisible: visible(".quote"), quotePass, quotes,
     attribution: read(".drivers"), attributionVisible: visible(".drivers"),
     peersVisible: visible(".peers"),
     curve: read(".curve"), heldOut: read(".misses"), timing: read(".research") && read("#view .inset p"),
@@ -300,14 +320,12 @@ function readPage() {
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     assumptions: read("#assumptions .drawer ul"),
     assumptionTables: [...document.querySelectorAll("#assumptions table")].map(table => table.textContent),
-    stress: read(".stress .facts"), stressVisible: visible(".stress"), rowCheck: chips[0]?.textContent,
+    stress: read(".stress"), stressVisible: visible(".stress"), rowCheck: chips[0]?.textContent,
     rowPass: chips[0]?.dataset.pass,
     chart: read("#yield p"), chartVisible: visible("#yield svg"), labelsFit,
     chartBounds: [plotBox, ...boxes].map(box => box?.toJSON()),
     chartNames: names.map(name => name.textContent),
     chartAxes: [...(plot?.children ?? [])].filter(node => node.localName === "text").map(axis => axis.textContent),
-    scope: document.querySelector("select[name=scope]")?.value,
-    filter: document.querySelector("select[name=verdict]")?.value,
     rows: rows.map(row => {
       const { slug, factors } = row.dataset;
       return [slug, Number(row.cells[0].textContent), ...factors.split(",").map(Number), row.querySelector(".badge").textContent, watchlist.has(slug)];
@@ -453,7 +471,7 @@ async function shoot(output, destination) {
   const { snapshot } = JSON.parse(data.slice("globalThis.LaunchRadarData = ".length, -1));
   const { value, odds, rows, assumptions } = api.buildModel(snapshot);
   const upshift = rows.find(row => row.slug === "upshift");
-  const { exits: rawExits, gas, chain, cost, transactions } = upshift.plan;
+  const { exits: rawExits, gas, chain, transactions } = upshift.plan;
   const exits = rawExits.map(displaySigns);
   const modelBySlug = new Map(rows.map(row => [row.slug, row]));
   for (const { slug, chains, plan } of rows) {
@@ -465,7 +483,7 @@ async function shoot(output, destination) {
       || steps.join(" ").split("cheapest priced route").length !== (chainCount > 1 ? 2 : 1)
       || !steps[3].includes(`fund ${name},`) || !steps[5].includes(`rehearsal on ${name},`)
       || !steps[7].includes(`on ${name}.`)
-      || (plan.verdict === "SKIP" && !steps.at(-1).includes(`${name} needs`))) {
+      || (plan.verdict === "SKIP" && !steps.at(-1).includes(`${name} ·`))) {
       throw new Error(`${slug}: checklist differs from priced chain ${name}.`);
     }
   }
@@ -474,7 +492,11 @@ async function shoot(output, destination) {
     const rounded = Number(value.toFixed(2));
     return (rounded > 0 ? "+" : "") + displaySigns(money(rounded));
   };
-  const gasLine = `${transactions} tx x ${money(chain.gas)} on ${chain.name} = ${money(gas)} · ${(100 * (gas / cost)).toFixed(1)}% of all-in cost`;
+  const chance = value => `${(100 * value).toFixed(1)}%`;
+  const threshold = value => value == null || value > 1 ? "unreachable" : chance(value);
+  const needed = (value, q) => value == null || value > 1 ? `unreachable at ${chance(q)}` : `needs ${chance(value)} vs ${chance(q)}`;
+  const gasLine = `${transactions} tx × ${money(chain.gas)} on ${chain.name} = ${money(gas)}`;
+  const likenessTest = `Token-likeness test: AUC ${odds.validation.walk.auc.toFixed(3)} walk-forward`;
   const { selected, baseline, evidence, search } = value.validation;
   const termRows = [...evidence, ...odds.evidence,
     { term: "Flat cap / TVL ratio", withTerm: selected, without: baseline, verdict: "Baseline" }, ...search
@@ -496,8 +518,11 @@ async function shoot(output, destination) {
         throw new Error(`${name}: ${info.checks}`);
       }
       if (name === "2-detail.jpg" && !info.checks.endsWith(" · 1/1 rows match")) throw new Error(`${name}: missing row check`);
-      if (["1-board.jpg", "3-filtered.jpg"].includes(name) && (!info.integrityPass || !info.helpPass)) {
-        throw new Error(`${name}: integrity strip or explanation failed (${info.integrityLines} lines, widths ${info.integrityWidth}, help ${info.helpPass}): ${info.integrity.join(" · ")}`);
+      if (info.jargon.length) throw new Error(`${name}: probability jargon rendered: ${info.jargon.join(", ")}`);
+      if (["1-board.jpg", "3-filtered.jpg", "watchlist-skip"].includes(name)) {
+        if (!info.integrityPass || !info.helpPass || !info.integrity.includes(`✓ ${likenessTest}`)) {
+          throw new Error(`${name}: integrity strip or explanation failed (${info.integrityLines} lines, widths ${info.integrityWidth}, help ${info.helpPass}): ${info.integrity.join(" · ")}`);
+        }
       }
       const page = pages.find(page => page.name === name);
       if (info.width !== width || info.height !== (page.viewHeight ?? height) || info.dpr !== 1) {
@@ -517,7 +542,6 @@ async function shoot(output, destination) {
       }
       if (info.rows.length) {
         if (!info.rangesInline) throw new Error(`${name}: implied-value range moved off the figure's line`);
-        if (!info.oddsInline) throw new Error(`${name}: expected net multiplier and q can wrap separately`);
         const top = [...slugs].map(slug => modelBySlug.get(slug))
           .filter(row => row.ageDays != null && Number.isFinite(row.plan.expectedYield))
           .sort((a, b) => b.plan.expectedYield - a.plan.expectedYield || a.rank - b.rank)
@@ -538,38 +562,62 @@ async function shoot(output, destination) {
       if (name === "1-board.jpg" && (info.rows.length !== board.length || info.completeRows < 10 || !info.chart)) {
         throw new Error(`The full board did not render with 10 complete rows in view (${info.completeRows}).`);
       }
-      if (name === "1-board.jpg" && (!info.farmsVisible || !info.farms?.includes("Best plans that clear break-even")
-        || info.farmLinks.length !== 5 || new Set(info.farmLinks).size !== 5
-        || info.farmBadges.length !== 5 || info.farmBadges.some(badge => badge !== "MARGINAL")
-        || info.farmActions.length !== 5 || info.farmOutcomes.length !== 5
-        || info.farmLinks.some((href, i) => {
-          const plan = modelBySlug.get(decodeURIComponent(href.slice(8)))?.plan;
-          return !href.startsWith("#detail/") || plan?.action !== info.farmActions[i]
-            || info.farmOutcomes[i] !== `Token ${signedMoney(plan.withToken)} · No token ${signedMoney(plan.noToken)}`;
-        }))) {
-        throw new Error("The break-even panel did not render five linked MARGINAL plans.");
+      if (info.rows.length) {
+        const best = rows.filter(row => slugs.has(row.slug) && row.plan.verdict !== "SKIP")
+          .sort((a, b) => b.plan.net - a.plan.net).slice(0, 5);
+        if (!info.farmsVisible || !info.farms?.includes("Best plans that clear break-even")
+          || info.farmLinks.length !== best.length || new Set(info.farmLinks).size !== best.length
+          || info.farmBadges.join() !== best.map(row => row.plan.verdict).join()
+          || info.farmActions.join() !== best.map(row => row.plan.action).join()
+          || info.farmLinks.some((href, i) => href.split("?")[0] !== `#detail/${encodeURIComponent(best[i].slug)}`)
+          || info.farmOutcomes.join() !== best.map(({ plan }) => `Token ${signedMoney(plan.withToken)} · No token ${signedMoney(plan.noToken)}`).join()
+          || (!best.length && !info.farms.includes("No visible row clears break-even."))) {
+          throw new Error(`${name}: the break-even panel differs from the visible rows. ${JSON.stringify({
+            visible: info.farmsVisible, bounds: info.farmBounds, links: info.farmLinks, expected: best.map(row => row.slug), badges: info.farmBadges,
+            actions: info.farmActions, outcomes: info.farmOutcomes
+          })}`);
+        }
       }
       if (page.hash.startsWith("#detail/")) {
         const { name: protocol, plan } = modelBySlug.get(page.hash.slice(8));
-        const { withToken, noToken, q, pStar, verdict, gas, fees, timeCost, capitalCharge, chain, holding, net } = plan;
-        const odds = `${(100 * q).toFixed(5)}%`;
         const rate = (100 * assumptions.parameters.riskFreeRate).toFixed(0);
-        const expected = [
-          `Token in window (q = ${odds}): ${signedMoney(withToken)}`,
-          `No token: ${signedMoney(noToken)} · costs rounded`,
-          `Gas ${money(gas)} + funding ${money(chain.bridge)} + slippage ${money(fees - chain.bridge)} + hands-on time ${money(timeCost)}`,
-          `+ Capital carry ${money(capitalCharge)} at a ${rate}%/yr stablecoin base rate for ${holding} d`,
-          `Needs q ≥ p* = ${(100 * pStar).toFixed(2)}%; model q = ${odds} → ${verdict}`,
-          `Expected net ${signedMoney(net)} = q × token net − (1 − q) × no-token cost`
-        ];
-        if (!info.decisionVisible || JSON.stringify(info.decision) !== JSON.stringify(expected)
+        if (!info.decisionVisible || !info.quotePass || info.quotes.length !== 10
           || !info.checks.endsWith(" · 1/1 rows match")) {
           throw new Error(`${name}: Decision mismatch or out of view (${info.decision.join(" | ")}).`);
+        }
+        for (const state of info.quotes) {
+          const quote = { ...plan.quote, ...state.overrides };
+          const { withToken, noToken, q, pStar, verdict, gas, fees, timeCost, capitalCharge, holding, net, horizon, capital, drop, claimSell } =
+            api.chooseFarm(plan, quote, state.horizon);
+          const { chain, transactions } = plan;
+          const half = api.evaluateFarm(plan, capital, { quote, horizon, q: q / 2 });
+          const quotedGas = quote.entryGas !== plan.quote.entryGas || quote.exitGas !== plan.quote.exitGas;
+          const gasBasis = quotedGas ? "Quoted gas" : `${transactions} tx × ${money(chain.gas)}`;
+          const expected = [
+            `Launch chance (${horizon} d) ${chance(q)} · Token outcome ${signedMoney(withToken)}`,
+            `No-token outcome ${signedMoney(noToken)}`,
+            `Gas ${money(gas)} + funding ${money(chain.bridge)} + slippage ${money(fees - chain.bridge)} + hands-on time ${money(timeCost)}`,
+            `+ Capital carry ${money(capitalCharge)} at a ${rate}%/yr stablecoin base rate for ${holding} d`,
+            `Break-even chance ${threshold(pStar)} → ${verdict}`,
+            `Expected net ${signedMoney(net)} = launch chance × token outcome + chance of no token × no-token outcome. Displayed figures rounded.`
+          ];
+          if (state.decision.join("\n") !== expected.join("\n")
+            || state.headline !== `${plan.quoteTicket(capital)} on ${chain.name} · ${horizon} d`
+            || !state.pay.includes(`What would make it pay · ${chain.name} · ${horizon} d`)
+            || !state.pay.includes(`MARGINAL ${needed(pStar, q)}`)
+            || !state.pay.includes(`FARM ${needed(pStar == null ? null : 2 * pStar, q)}`)
+            || !state.pay.includes(`all-in cost ≤ ${q * (drop - claimSell) < 0 ? "unreachable" : money(q * (drop - claimSell))}`)
+            || state.gas !== `${gasBasis} on ${chain.name} = ${money(gas)}`
+            || state.halfChance !== `Launch chance halved (${chance(q / 2)}) · ${signedMoney(half.net)} · ${half.verdict}`
+            || state.context.join() !== info.quotes[0].context.join()
+            || state.context.some(text => !text.includes("snapshot defaults"))) {
+            throw new Error(`${name}: inconsistent quote at ${horizon} d (${JSON.stringify(state.overrides)}).`);
+          }
         }
         console.log(`${protocol} · ${info.checks}\nDecision\n${info.decision.join("\n")}`);
       }
       if (name === "calibration") {
-        if (!info.timing?.includes("F walk-forward AUC")) throw new Error("Missing launch calibration.");
+        if (!info.timing?.includes(likenessTest)) throw new Error("Missing token-likeness test.");
         const cap = ["loo", "walk", "family"].map(key => `${selected[key].miss.toFixed(3)}×`);
         const oddsMiss = ["loo", "walk"].map(key => `${odds.validation[key].miss.toFixed(2)}×`);
         if (info.capMisses.join() !== cap.join() || info.oddsMisses?.join() !== oddsMiss.join()) {
@@ -589,8 +637,8 @@ async function shoot(output, destination) {
         || !/^80% \$.*–\$.* · 50% \$.*–\$/u.test(info.valueRange)
         || !/Expected net.*(robust across 80% range|flips to .+ at (low|high) end)/iu.test(info.rangeFarm)
         || info.labels.map(label => label.split(" ")[0]).join() !== "1,2a,2b,2c,3a,3b,3c,4,5,6,7"
-        || info.summary !== `${upshift.plan.ticket} on ${chain.name}`
-        || !info.oddsNote?.includes("No launch dates") || !info.oddsNote.includes("F walk-forward AUC")
+        || info.summary !== `${upshift.plan.ticket} on ${chain.name} · ${upshift.plan.horizon} d`
+        || !info.oddsNote?.includes("no launch dates") || !info.oddsNote.includes(likenessTest)
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
         || ![upshift.name, chain.name, "deposit caps", "cheapest priced route"].every(text => info.steps[0].includes(text))
         || !info.steps.some(step => step.startsWith("If TVL") && step.includes(`${upshift.category} p10`))
@@ -599,17 +647,24 @@ async function shoot(output, destination) {
         || JSON.stringify(info.exits) !== JSON.stringify(exits) || !info.steps.some(step => step.startsWith("If " + exits[0]))
         || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps.map(displaySigns))
         || !info.attributionVisible || !info.planVisible || !info.quoteVisible || !info.quotePass || !info.peersVisible
-        || !["TVL size", "7d carry", "Age on odds", "Issuer"].every(label => info.attribution?.includes(label))
-        || !info.steps.some(step => step.includes("p*") && /Gas \+ slip cap \$[\d.]+/.test(step))
+        || !["TVL size", "7d carry", "Listing age", "Issuer"].every(label => info.attribution?.includes(label))
+        || !info.steps.some(step => step.includes("break-even chance") && /Gas \+ slip cap \$[\d.]+/.test(step))
         || !info.steps.some(step => step.includes("deposit $80 USDC and withdraw it"))
         || !info.payVisible || !info.pay?.includes(`What would make it pay · ${chain.name} ·`)
         || !info.steps.at(-1).startsWith("Revisit if points or snapshot announced.")
-        || !info.stressVisible || !info.stress?.includes("½ share"))) {
+        || !info.stressVisible || !info.stress?.includes("Reward share halved"))) {
         throw new Error(`Detail checks failed: ${JSON.stringify(info)}`);
       }
-      if (name === "3-filtered.jpg" && (!info.portfolio?.includes("watchlist portfolio") || info.scope !== "watchlist" || info.filter !== "SKIP"
-        || !info.rows.length || info.rows.some(row => row[6] !== "SKIP" || !row[7]))) {
-        throw new Error("The filtered watchlist did not render.");
+      if (name === "3-filtered.jpg") {
+        const expected = rows.filter(row => row.chains.includes("Ethereum") && row.plan.verdict === "MARGINAL");
+        if (info.completeRows < 5 || expected.length >= board.length || info.rows.length !== expected.length
+          || expected.some(row => !slugs.has(row.slug)) || !info.rankLabel.startsWith(`Rank (of ${board.length})`)
+          || info.activeFilters.join() !== "Verdict: MARGINAL,Listed chain: Ethereum" || info.reset !== "#board") {
+          throw new Error("The filtered board did not render with five complete rows, global ranks, and active filters.");
+        }
+      }
+      if (name === "watchlist-skip" && (!info.rows.length || info.rows.some(row => row[6] !== "SKIP" || !row[7]))) {
+        throw new Error("The watchlist SKIP empty-rail check did not use the selected rows.");
       }
     };
     const images = port ? await shootBidi(url, work, port, verify) : await shootCli(output, work, verify);
@@ -618,15 +673,16 @@ async function shoot(output, destination) {
       const dimensions = jpegSize(bytes);
       if (dimensions[0] !== width || dimensions[1] !== info.height) throw new Error("Unexpected screenshot dimensions.");
       writeFileSync(join(destination, name), bytes);
-      const content = [info.title, info.count, info.rowCheck, info.first, info.chart, info.summary, info.defaultHalfOdds, info.portfolio].filter(Boolean).join(" · ");
+      const content = [info.title, info.count, info.rowCheck, info.first, info.chart, info.summary, info.defaultHalfOdds, ...info.activeFilters].filter(Boolean).join(" · ");
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
       if (name === "1-board.jpg") console.log(`  ${info.completeRows} complete rows in view · DOM ready in ${info.loadMs} ms · ${info.coverage} · ${info.nested}`);
+      if (name === "3-filtered.jpg") console.log(`  ${info.completeRows} complete rows in view`);
       if (name === "2-detail.jpg") console.log(`  ${info.gas}\n  ${info.exits.join("\n  ")}`);
       if (info.valueRange) console.log(`  ${info.valueRange} · ${info.rangeFarm}`);
       if (info.integrity.length) console.log(`  ${info.integrityLines} integrity line · ${info.integrity.join(" · ")}`);
     }
     console.log("Firefox reported no console errors or uncaught exceptions.");
-    console.log("Calibration, detail attribution, board-matched decision tree, and live quote horizon selection, update and reset pass.");
+    console.log("Calibration, detail attribution, board-matched checklist, live quote edits and reset, and filtered rail pass.");
   } finally {
     spawnSync("find", [work, "-mindepth", "1", "-delete"]);
     rmdirSync(work);
