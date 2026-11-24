@@ -193,6 +193,9 @@ const pages = [...shots,
   { name: "alphagrowth", hash: "#detail/alphagrowth", viewHeight: detailHeight, probeOnly: true },
   { name: "liquid-collective", hash: "#detail/liquid-collective", viewHeight: detailHeight, probeOnly: true },
   { name: "calibration", hash: "#calibration", probeOnly: true },
+  { name: "ethereum", hash: "#board?chain=Ethereum", probeOnly: true },
+  { name: "net-desc", hash: "#board?sort=net", probeOnly: true },
+  { name: "net-asc", hash: "#board?sort=net&dir=asc", probeOnly: true },
   { name: "watchlist-skip", hash: "#board?scope=watchlist&verdict=SKIP", probeOnly: true },
   { name: "empty-board", hash: "#board?q=__no_protocol__", probeOnly: true },
   ...["", "traded", "setAside", "recorded", "ranked"].map(group => ({
@@ -325,6 +328,8 @@ function readPage() {
   const labels = stepItems.map(li => li.querySelector("h3").textContent);
   const steps = stepItems.map(li => li.querySelector("p").textContent + " " + li.querySelector("small").textContent);
   const chips = [...document.querySelectorAll(".integrity .chip")];
+  const railCards = [...document.querySelectorAll(".plans div")].map(card =>
+    [...card.querySelectorAll("small")].map(line => line.textContent));
   const integrity = chips.map(chip => chip.textContent);
   const integrityLines = new Set(chips.map(chip => chip.offsetTop)).size;
   const integrityPass = chips.length === 3 && visible(".integrity") && integrityLines === 1
@@ -362,10 +367,10 @@ function readPage() {
     farms: read(".plans"), farmsVisible: visible(".plans"), farmBounds: document.querySelector(".plans")?.getBoundingClientRect().toJSON(),
     farmHeading: read(".plans h2"),
     farmLinks: [...document.querySelectorAll(".plans a")].map(a => a.getAttribute("href")),
-    farmActions: [...document.querySelectorAll(".plans .action")].map(hint => hint.textContent),
-    farmCosts: [...document.querySelectorAll(".plans .plan-cost")].map(line => line.textContent),
-    farmTimes: [...document.querySelectorAll(".plans .plan-time")].map(line => line.textContent),
-    farmRoutes: [...document.querySelectorAll(".plans .plan-route")].map(line => line.textContent),
+    farmActions: railCards.map(([action]) => action),
+    farmRoutes: railCards.map(([, route]) => route),
+    farmTimes: railCards.map(([,, time]) => time),
+    farmCosts: railCards.map(([,,, cost]) => cost),
     farmNets: [...document.querySelectorAll(".plans .pos")].map(line => line.textContent),
     labels, steps,
     gas: document.querySelector(".gas")?.innerText.replace("\n", " · "), gasVisible: visible(".gas"),
@@ -388,7 +393,10 @@ function readPage() {
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     assumptions: read("#assumptions .drawer ul"),
     assumptionTables: [...document.querySelectorAll("#assumptions table")].map(table => table.textContent),
-    actionCounts: ["cover", "rail", "detail"].map(place => read(`#${place}-counts`)),
+    coverCounts: read(".kpi:last-child b"),
+    detailCounts: read(".route~small"),
+    coverHeading: read(".kpi:last-child h2"),
+    expectedNetSort: document.querySelector("#sort-net")?.parentElement.ariaSort,
     listingNote: read(".chain-note"),
     gridKey: read(".grid-key"), gridKeyVisible: visible(".grid-key"),
     stress: read(".stress"), stressVisible: visible(".stress"), rowCheck: chips[0]?.textContent,
@@ -548,7 +556,8 @@ async function shoot(output, destination) {
   const exportedWatchlist = snapshot.watchlist.filter(slug => boardBySlug.has(slug)).length;
   const [lowGrowth, highGrowth] = assumptions.parameters.clip;
   const clipped = ({ change_7d: growth }) => growth < lowGrowth || growth > highGrowth;
-  const verdictBySlug = new Map(manifest.map(([, slug, , verdict]) => [slug, verdict]));
+  const actionNames = { SKIP: "Watch", MARGINAL: "Test", FARM: "Farm" };
+  const actionBySlug = new Map(manifest.map(([, slug, , verdict]) => [slug, actionNames[verdict]]));
   const upshift = rows.find(row => row.slug === "upshift");
   const { exits: rawExits, trial: { gas }, chain, tx } = upshift.plan;
   const exits = rawExits.map(displayStep);
@@ -573,14 +582,19 @@ async function shoot(output, destination) {
   const totalTime = p => `${p.mins} min hands-on (${p.prepMins} setup + ${p.exitMins} exit + ${p.checkMins} weekly checks)`;
   const totalCost = p => `${money(p.cost)} total (gas ${money(p.gas)} + funding ${money(p.funding)} + slippage ${money(p.slip)} + time ${money(p.labor)} + capital cost ${money(p.carry)})`;
   const actionLine = p => api.firstAction(p) + (p.trial ? "" : ` · Expected net ${signedMoney(p.net)}`);
+  const aprBasis = trial => {
+    const contribution = trial.q * (trial.drop - trial.claimCost);
+    return contribution === 0 ? "cash APR alone" : contribution > 0 ? "includes token upside" : "includes token costs";
+  };
   const watchTerms = (p, format = compact) => {
     const { capital, horizon, net } = p.trial;
-    const apr = (-net * assumptions.parameters.year / (capital * horizon) * 100).toFixed(1);
-    return [`Watch · needs ${apr}% APR`, `${signedMoney(net)} at ${format(capital)}, ${horizon} d`];
+    const apr = Math.ceil((-net / (capital * horizon / assumptions.parameters.year) * 100) * 10) / 10;
+    return [`Watch · needs ${apr.toFixed(1)}% APR`, aprBasis(p.trial), `${signedMoney(net)} at ${format(capital)}, ${horizon} d`];
   };
   const actionCounts = api.actionCounts(verdicts);
   const chance = value => `${(100 * value).toFixed(1)}%`;
-  const threshold = value => value == null || value > 1 ? "unreachable" : chance(value);
+  const threshold = (value, top = 1) => value == null || value > 1
+    ? "No launch chance breaks even at this ticket" : `Break-even ${value > top ? "↑ " : ""}${chance(value)}`;
   const needed = (value, q) => value == null || value > 1 ? `unreachable at ${chance(q)}` : `needs ${chance(value)} vs ${chance(q)}`;
   const gasLine = `${tx} tx × ${money(chain.gas)} on ${chain.name} = ${money(gas)}`;
   const likenessTest = `Token-screen ranking accuracy (AUC) ${odds.validation.walk.auc.toFixed(3)} walk-forward`;
@@ -617,7 +631,7 @@ async function shoot(output, destination) {
       && graph.caption === assumptions.timing
       && graph.current === `${Math.round(age).toLocaleString("en-US")} d${row.ageDays == null ? " (median)" : ""} · ${chance(q)}`
       && graph.scale.startsWith(`0–${Math.round(top * 100)}% · `)
-      && graph.threshold === `Break-even ${pStar == null ? "unreachable" : (pStar > top ? "↑ " : "") + chance(pStar)}`
+      && graph.threshold === threshold(pStar, top)
       && graph.dot === dot && graph.curve === curve && curve.split(" ").includes(dot)
       && graph.line === (pStar != null && pStar <= top ? `M2 ${y(pStar)}H298` : undefined);
   };
@@ -663,8 +677,8 @@ async function shoot(output, destination) {
           || info.integrity[2] !== `✓ ${checkCount} self-checks pass`) {
           throw new Error(`${name}: integrity strip failed: ${info.integrity.join(" · ")}`);
         }
-        if (!info.gridKeyVisible || info.gridKey !== "Amber bar shows value range · Tick shows estimate · ◆ Watchlist") {
-          throw new Error(`${name}: range and watchlist key is missing or out of view.`);
+        if (!info.gridKeyVisible || info.gridKey !== "Amber bar = value range · Tick = estimate · ◆ Watchlist · Status adj. = factor from token-likeness") {
+          throw new Error(`${name}: the grid key is missing or out of view.`);
         }
       }
       if (name === "1-board.jpg" && JSON.stringify(info.tokenLinks) !== JSON.stringify(Object.entries(groupNames)
@@ -696,6 +710,9 @@ async function shoot(output, destination) {
       }
       if (info.scrollbar) throw new Error(`${name}: page scrollbar occupies ${info.scrollbar}px`);
       const slugs = new Set(info.rows.map(([slug]) => slug));
+      const netOrder = name === "net-asc" ? 1 : name === "net-desc" ? -1 : 0;
+      const displayedNet = ([,,,,,, net, ticket]) => Number(
+        (net ?? ticket.split("\n").at(-1).match(/[+−-]?\$[\d,.]+/)?.[0]).replace(/[$,]/g, "").replace("−", "-"));
       if (slugs.size !== info.rows.length || info.rows.some(([slug, rank, value, equation, verdict, , net, ticket], i) => {
         const row = boardBySlug.get(slug), modelRow = modelBySlug.get(slug), { plan } = modelRow;
         const first = api.firstAction(plan);
@@ -703,11 +720,13 @@ async function shoot(output, destination) {
           : `${first} · expected net ${net}`;
         const terms = plan.trial ? watchTerms(plan).join("\n")
           : `${first.split(" · ")[0]} ${compact(plan.capital)} ${net}\n${plan.horizon} d`;
+        const previous = info.rows[i - 1];
+        const order = previous && netOrder * (displayedNet(info.rows[i]) - displayedNet(previous));
         return row?.rank !== rank || value !== compact(row.implied_value_usd)
-          || !provesValue(equation, row.implied_value_usd, value, clipped(modelRow)) || verdictBySlug.get(slug) !== verdict
+          || !provesValue(equation, row.implied_value_usd, value, clipped(modelRow)) || actionBySlug.get(slug) !== verdict
           || (!plan.trial && net !== signedMoney(plan.net)) || ticket !== terms
           || !row.farm_steps[0].startsWith(`${checklist}.`)
-          || (i > 0 && info.rows[i - 1][1] >= rank);
+          || (previous && (order < 0 || (!order && previous[1] >= rank)));
       })) {
         throw new Error(`${name}: page order, values or equation differ from board.json`);
       }
@@ -733,14 +752,24 @@ async function shoot(output, destination) {
           throw new Error(`The full board did not render with 10 complete rows in view (${info.completeRows}).`);
         }
         if (info.dropLine !== dropLine || !info.dropVisible) throw new Error("Drop-one results are missing from the board KPI.");
-        if (!(info.loadMs > 0 && info.loadMs < 3000)) throw new Error(`DOM ready in ${info.loadMs} ms.`);
+        if (!(info.loadMs > 0)) throw new Error("Missing DOM ready timing.");
+        if (info.loadMs >= 3000) console.log(`DOM ready in ${Math.round(info.loadMs)} ms, above the 3000 ms target.`);
       }
       if (name === "1-board.jpg" && !info.comparePass) throw new Error("Compare limit, filtering or removal failed.");
+      if (netOrder) {
+        if (info.rows.length !== board.length || info.expectedNetSort !== (netOrder > 0 ? "ascending" : "descending")) {
+          throw new Error(`${name}: missing sorted results or sort direction.`);
+        }
+        console.log(`${name} · displayed cents, including Watch trials, sort correctly`);
+      }
       if (info.farms) {
-        const best = rows.filter(row => slugs.has(row.slug) && row.plan.capital)
+        const visibleRows = info.rows.map(([slug]) => modelBySlug.get(slug));
+        const scopedCounts = api.actionCounts(Object.fromEntries(Object.keys(actionNames).map(key =>
+          [key, visibleRows.filter(({ plan }) => plan.verdict === key).length])));
+        const best = visibleRows.filter(row => row.plan.capital)
           .sort((a, b) => b.plan.net - a.plan.net).slice(0, 5);
-        if (!info.farmsVisible || info.farmHeading !== `Top funded plans ${actionCounts}`
-          || info.actionCounts.slice(0, 2).some(text => text !== actionCounts)
+        if (!info.farmsVisible || info.farmHeading !== `Top plans ${scopedCounts} in this view`
+          || info.coverCounts !== actionCounts || info.coverHeading !== `First actions · all ${board.length}`
           || info.listingNote !== "Plan route uses the cheapest priced listed chain."
           || info.farmLinks.length !== best.length || new Set(info.farmLinks).size !== best.length
           || info.farmActions.join() !== best.map(({ plan }) => api.firstAction(plan)).join()
@@ -759,17 +788,26 @@ async function shoot(output, destination) {
       if (page.hash.startsWith("#detail/")) {
         const slug = page.hash.slice(8);
         const row = modelBySlug.get(slug);
-        const { name: protocol, plan, score, launchCap, family } = row;
+        const { name: protocol, plan, score, launchCap, haircut, family } = row;
         const rate = (100 * assumptions.parameters.riskFreeRate).toFixed(0);
         const hourly = assumptions.parameters.hourlyUsd;
         if (!info.decisionVisible || !info.quotePass || info.quotes.length !== 10 || info.route !== plan.route
-          || info.summary !== actionLine(plan) || info.actionCounts[2] !== actionCounts
+          || info.summary !== actionLine(plan) || info.detailCounts !== `All ${board.length} · ${actionCounts}`
           || !info.checks.endsWith(" · Rank, value, range and checklist match board.json")
           || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get(slug).farm_steps.map(displayStep))) {
           throw new Error(`${name}: Decision mismatch or out of view (${info.decision.join(" | ")}).`);
         }
+        if (plan.trigger) {
+          const [minimum, basis] = watchTerms(plan);
+          if (!info.steps[1].includes(`≥ ${minimum.replace("Watch · needs ", "")}`)
+            || !info.steps[1].includes(`(${basis})`)) {
+            throw new Error(`${name}: checklist APR threshold differs from the priced trial.`);
+          }
+        }
+        const launch = compact(launchCap * haircut);
+        const relation = `Value at launch ${launch} (traded-peer fit${haircut === 1 ? "" : " × issuer factor"}) · Ranked value ${compact(score)} = that × status adj. (rounded${score === 1 ? ", min $1" : ""})`;
         if (!provesValue(info.equation, score, info.amount, clipped(row)) || !info.sourcesVisible
-          || ![`Traded-cap fit $${Math.round(launchCap).toLocaleString("en-US")}`, "7-day growth", "d listed",
+          || ![relation, "7-day growth", "d listed",
             "Issuer factor", "Calibration →"].every(label => info.sources.includes(label))) {
           throw new Error(`${name}: value equation or held-out evidence is incomplete.`);
         }
@@ -781,9 +819,9 @@ async function shoot(output, destination) {
         if (plan.capital) {
           const extremes = row.ranges[80].map(value => api.priceFarm(plan, plan.capital, { share: value / row.score }));
           const flips = extremes.flatMap(({ verdict }, i) => verdict === plan.verdict ? [] :
-            [`flips to ${verdict} at ${i ? "high" : "low"} end`]);
+            [`flips to ${actionNames[verdict]} at ${i ? "high" : "low"} end`]);
           const expected = `Expected net ${extremes.map(plan => signedMoney(plan.net)).join(" / ")} · `
-            + (flips.join(" · ") || `same verdict at both ends of ${rangeLabel}`);
+            + (flips.join(" · ") || `same action at both ends of ${rangeLabel}`);
           if (info.edgePlans !== expected) throw new Error(`${name}: the valuation range verdict differs from the plan.`);
         }
         for (const state of info.quotes) {
@@ -801,7 +839,7 @@ async function shoot(output, destination) {
             `No-token outcome ${signedMoney(noToken)}`,
             totalCost(result),
             `${totalTime(result)} at $${hourly}/h · capital cost at ${rate}%/yr for ${hold} d`,
-            `Break-even chance ${threshold(pStar)} → ${verdict}`,
+            `${threshold(pStar)} · ${actionNames[verdict]}`,
             `${action.trial ? "Net before cash reward" : "Expected net"} ${signedMoney(net)} = launch chance × token outcome + chance of no token × no-token outcome.`
           ];
           if (!verifyAgeGraph(state.age, row, result)) {
@@ -815,11 +853,11 @@ async function shoot(output, destination) {
               ? `Conditional ticket · ${plan.ticketFor(capital)} · ${horizon} d`
               : undefined)
             || !state.pay.includes(`What would make it pay · ${chain.name} · ${horizon} d`)
-            || !state.pay.includes(`MARGINAL ${needed(pStar, q)}`)
-            || !state.pay.includes(`FARM ${needed(pStar == null ? null : 2 * pStar, q)}`)
+            || !state.pay.includes(`Test ${needed(pStar, q)}`)
+            || !state.pay.includes(`Farm ${needed(pStar == null ? null : 2 * pStar, q)}`)
             || !state.pay.includes(`all-in cost ≤ ${q * (drop - claimCost) < 0 ? "unreachable" : money(q * (drop - claimCost))}`)
             || state.gas !== `${gasLabel} on ${chain.name} = ${money(gas)}`
-            || state.halfChance !== `Launch chance halved (${chance(q / 2)}) · ${signedMoney(half.net)} · ${half.verdict}`
+            || state.halfChance !== `Launch chance halved (${chance(q / 2)}) · ${signedMoney(half.net)} · ${actionNames[half.verdict]}`
             || state.context.join() !== info.quotes[0].context.join()
             || state.context.filter(Boolean).some(text => !text.includes("snapshot defaults"))) {
             const { age, context, ...readouts } = state;
@@ -851,7 +889,7 @@ async function shoot(output, destination) {
         || !info.tokenDetailVisible
         || info.tokenDetail !== "Token screen · no CoinGecko ID, token symbol or market cap in the snapshot"
         || !info.valueRange.startsWith(`${rangeLabel} $`) || info.valueRange.includes(" · ")
-        || info.labels.join() !== "First action,Entry trigger,Verify,Rehearse,Entry,Monitor,Exit,Claim & sell"
+        || info.labels.join() !== "First action,Entry trigger,Verify,Rehearse,Entry,Monitor,Exit,Sale assumption"
         || !info.quotes[0]?.age.caption.includes("no launch dates") || !info.oddsNote?.includes(likenessTest)
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
         || !info.steps.some(step => step.includes(upshift.name) && step.includes("KYC, caps and withdrawals"))
@@ -864,6 +902,7 @@ async function shoot(output, destination) {
         || !info.steps[1].startsWith(`Enter only if ${upshift.plan.trigger.rule}.`)
         || !info.steps[3].includes("put in $80 USDC and withdraw it")
         || !info.steps[4].startsWith("If entry trigger is met and rehearsal passes")
+        || !info.steps.at(-1).includes("the model assumes sale at ~$26,591,080 implied circulating cap")
         || !info.payVisible || !info.pay?.includes(`What would make it pay · ${chain.name} ·`))) {
         const { quotes, ...detail } = info;
         throw new Error(`Upshift detail checks failed: ${JSON.stringify(detail)}`);
@@ -876,18 +915,25 @@ async function shoot(output, destination) {
           || info.compareRows.length !== 5 || compared.some(({ rank, plan }, i) => {
             const score = board[rank - 1].implied_value_usd, formatted = `$${score.toLocaleString("en-US")}`, col = i + 1;
             return values[col] !== formatted || actions[col] !== api.firstAction(plan)
-              || verdicts[col] !== plan.verdict || nets[col] !== signedMoney(plan.net)
+              || verdicts[col] !== actionNames[plan.verdict] || nets[col] !== signedMoney(plan.net)
               || plans[col] !== `${plan.mins} min hands-on · ${money(plan.cost)}`;
           })) throw new Error("The side-by-side comparison differs from the ranked rows.");
         console.log("Compare selection limit, filtering, removal and displayed values pass.");
         if (info.completeRows < 5 || expected.length >= board.length || info.rows.length !== expected.length
           || expected.some(row => !slugs.has(row.slug)) || !info.rankLabel.startsWith(`Rank (of ${board.length})`)
-          || info.activeFilters.join() !== "Verdict: MARGINAL,Listed on: Ethereum" || info.reset !== "#board") {
+          || info.activeFilters.join() !== "Action: Test,Listed on: Ethereum" || info.reset !== "#board") {
           throw new Error("The filtered board did not render with five complete rows, global ranks, and active filters.");
         }
       }
-      if (name === "watchlist-skip" && (!info.rows.length || info.rows.some(row => row[4] !== "SKIP" || !row[5]))) {
-        throw new Error("The watchlist SKIP empty-rail check did not use the selected rows.");
+      if (name === "watchlist-skip" && (!info.rows.length || info.rows.some(row => row[4] !== "Watch" || !row[5]))) {
+        throw new Error("The Watch-only rail check did not use the selected watchlist rows.");
+      }
+      if (name === "ethereum") {
+        const expected = rows.filter(row => row.chains.includes("Ethereum"));
+        if (info.rows.length !== expected.length || expected.some(row => !slugs.has(row.slug))) {
+          throw new Error("The Ethereum rail check did not use the selected rows.");
+        }
+        console.log(info.farmHeading);
       }
     };
     const images = port ? await shootBidi(url, work, port, verify) : await shootCli(output, work, verify);

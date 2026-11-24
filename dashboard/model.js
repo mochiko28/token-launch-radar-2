@@ -127,7 +127,8 @@ const hasToken=p=>p.mcap_usd>0||!!(p.gecko_id||p.symbol),
 	costUsd=new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format,
 	integer=n=>round(n).toLocaleString("en-US"),whole=n=>"$"+integer(n)
 const pct=(n,d=2)=>(n*100).toFixed(d)+"%",
-	chance=n=>pct(n,1),breakEven=n=>n==null||n>1?"unreachable":chance(n),
+	chance=n=>pct(n,1),breakEven=(n,top=1)=>n==null||n>1?"No launch chance breaks even at this ticket":
+		`Break-even ${n>top?"↑ ":""}${chance(n)}`,
 	needs=(n,q)=>(n==null||n>1?"unreachable at ":`needs ${chance(n)} vs `)+chance(q),
 	wage=min=>min*A.hourlyUsd/60,
 	weeks=days=>floor(days/7),
@@ -138,12 +139,13 @@ function quant(values,fraction=.5){
 		index=(order.length-1)*fraction
 	return order[floor(index)]*(1-index%1)+order[ceil(index)]*(index%1)
 }
-const issuers=rs=>new Set(rs.filter(hasToken).map(p=>word1(p.name))),
-	flagsFor=(p,words)=>[words.has(word1(p.name))&&"Recorded issuer match",
+const issuers=rs=>new Set(rs.filter(hasToken).map(p=>p.firstWord)),
+	flagsFor=(p,words)=>[words.has(p.firstWord)&&"Recorded issuer match",
 		liquid.includes(p.category)&&"Liquid staking/restaking",version.test(p.name)&&"Versioned name"].filter(Boolean)
 function prepare(snap){
-	const asOf=Date.parse(snap.as_of),words=issuers(snap.protocols)
-	return snap.protocols.map(p=>{
+	const protocols=snap.protocols.map(p=>({...p,firstWord:word1(p.name)})),
+		asOf=Date.parse(snap.as_of),words=issuers(protocols)
+	return protocols.map(p=>{
 		const {category,name,tvl_usd:tvl,gecko_id}=p,
 			family=familyOf.get(category)||"Other",
 			isLiquid=liquid.includes(category),
@@ -192,9 +194,9 @@ const dot=(row,coef)=>row.reduce((sum,x,i)=>sum+x*coef[i],0),
 const normal=pen=>({target:zero(pen.length),matrix:pen.map((v,i)=>zero(pen.length).with(i,v))})
 function accum({matrix,target},x,residual,weight=1){
 	for(let i=0;i<x.length;i++){
-		target[i]+=x[i]*residual
-		if(x[i]===0) continue
-		for(let j=0;j<x.length;j++) matrix[i][j]+=x[i]*x[j]*weight
+		const xi=x[i],row=matrix[i]
+		target[i]+=xi*residual
+		if(xi!==0) for(let j=0;j<x.length;j++) row[j]+=xi*x[j]*weight
 	}
 }
 
@@ -365,7 +367,7 @@ const refM=A.refTvl/1e6,scoreEq=([base,tvl,slope,...terms])=>max(1,round(terms.r
 function equationFor(fit,p){
 	const [intercept,slope]=fit.coefs,terms=[
 		["growth",exp((p.size-p.rawSize)*slope)],
-		[fit.age?"age":"token-likeness",fit.age?exp(dot(capInputs(fit,p).slice(2),fit.coefs.slice(2))):p.valueAge],
+		fit.age?["age",exp(dot(capInputs(fit,p).slice(2),fit.coefs.slice(2)))]:["status adj.",p.valueAge],
 		["issuer",p.haircut]]
 	let shown
 	for(let digits=4;digits<=17;digits++){
@@ -444,11 +446,12 @@ const timeFee=(min,fees=0)=>`${costUsd(wage(min)+fees)} · ${min} min`,
 	farmTime=({mins,prepMins,exitMins,checkMins})=>
 		`${mins} min hands-on (${prepMins} setup + ${exitMins} exit + ${checkMins} weekly checks)`,
 	farmCost=({cost,gas,funding,slip,labor,carry})=>
-		`${costUsd(cost)} total (gas ${costUsd(gas)} + funding ${costUsd(funding)} + slippage ${costUsd(slip)} + time ${costUsd(labor)} + carry ${costUsd(carry)})`,
+		`${costUsd(cost)} total (gas ${costUsd(gas)} + funding ${costUsd(funding)} + slippage ${costUsd(slip)} + time ${costUsd(labor)} + capital cost ${costUsd(carry)})`,
 	farmNet=n=>(n<0?"−":n>0?"+":"")+costUsd(abs(n)),
 	entryApr=({capital,horizon,net})=>-net/(capital*horizon/A.year)*100,
-	aprLabel=apr=>apr.toFixed(1)+"% APR",
-	watchLines=(p,format=whole)=>[`Watch · needs ${aprLabel(entryApr(p))}`,`${farmNet(p.net)} at ${format(p.capital)}, ${p.horizon} d`],
+	aprCeil=apr=>ceil(apr*10)/10,aprLabel=apr=>aprCeil(apr).toFixed(1)+"% APR",
+	aprBasis=({q,drop,claimCost})=>q&&drop!==claimCost?"includes token "+(drop>claimCost?"upside":"costs"):"cash APR alone",
+	watchLines=(p,format=whole)=>[`Watch · needs ${aprLabel(entryApr(p))}`,aprBasis(p),`${farmNet(p.net)} at ${format(p.capital)}, ${p.horizon} d`],
 	actionTerms=p=>p.trial?watchLines(p.trial).join(" · "):
 		`${firstAction(p)} · expected net ${farmNet(p.net)}`
 function farmPlan(p,review,curve,exitGrowth){
@@ -468,7 +471,7 @@ function farmPlan(p,review,curve,exitGrowth){
 			prepMins:verify+prep+entryMins,exitMins,flagged:!!p.flags.length},
 		result=chooseFarm(fp),priced=result.trial??result,
 		{capital:cap,horizon:h}=priced,apr=result.trial?entryApr(priced):null,
-		trigger=apr===null?null:{apr,rule:`the venue quotes ≥ ${aprLabel(apr)} in net cash rewards on ${ticketFor(cap)} for ${h} d`},
+		trigger=apr===null?null:{apr,rule:`the venue quotes ≥ ${aprLabel(apr)} in net cash rewards on ${ticketFor(cap)} for ${h} d (${aprBasis(priced)})`},
 		route=`Plan route: ${name} (cheapest priced of ${chains.length} listed)`,
 		gate=trigger?"If entry trigger is met":"If eligible",
 		exits=[
@@ -476,7 +479,7 @@ function farmPlan(p,review,curve,exitGrowth){
 			`claim eligibility confirmed and tokens claimable, or day ${h}`],
 		probeFees=bridge+fp.probeGas+testUsd*slippage/100,
 		weekly=timeFee(weeklyMins)+"/check",site=website||url
-	if(exitGrowth!=null) exits.push(`7d TVL growth < ${exitGrowth.toFixed(2)}% (${category} p10) two weeks running`)
+	if(exitGrowth!=null) exits.push(`7d TVL growth < ${exitGrowth.toFixed(2)}% (${category}, bottom 10% cutoff) two weeks running`)
 	const steps=[
 		["First action",`${actionTerms(result)}. ${route}.`,
 			trigger?`${costUsd(0)} · 0 min to wait. Review ${review}.`:`${farmCost(priced)} · ${farmTime(priced)}`],
@@ -487,7 +490,7 @@ function farmPlan(p,review,curve,exitGrowth){
 			timeFee(entryMins,quote.entryGas+cap*slippage/100)],
 		["Monitor",`If position opens, log points, TVL, ${monitor} weekly.`,weekly],
 		["Exit",`If position opens on ${name}, exit on ${exits.join(", or ")}.`,timeFee(exitMins,gas)],
-		["Claim & sell",`If position qualifies, claim and sell at a price implying ${whole(p.launchCap)} in circulating market cap.`,
+		["Sale assumption",`If position qualifies, the model assumes sale at ~${whole(p.launchCap)} implied circulating cap${p.haircut===1?"":" before issuer adjustment"}.`,
 			timeFee(claimMins,priced.claimCost-wage(claimMins))]
 	]
 	if(trigger) steps.splice(1,0,["Entry trigger",
@@ -521,12 +524,12 @@ function boardChecks(board,{protocols,watchlist},bytes){
 			return known.has(slug)&&/^\S{1,128}$/u.test(slug)&&typeof name==="string"&&name.trim()
 				&&isInteger(rank)&&rank>0&&isInteger(v)&&v>0&&v<=1e14&&Array.isArray(farm_steps)
 		}),
-		sorted_by_value:unique(rs.map(p=>p?.implied_value_usd)).length>1&&inOrder(rs.toSorted((a,b)=>a?.rank-b?.rank))===n,
+		sorted_by_value:unique(rs.map(p=>p?.implied_value_usd)).length>1&&inOrder(rs.toSorted((a,b)=>a?.rank-b?.rank)),
 		coverage:watchlist.every(slug=>slugs.has(slug)),
 		farm_steps:rs.every(p=>validSteps(p?.farm_steps))
 	})
 }
-const inOrder=rs=>count(rs,(p,i)=>p?.rank===i+1&&(!i||p.implied_value_usd<=rs[i-1]?.implied_value_usd)),
+const inOrder=rs=>rs.every((p,i)=>p?.rank===i+1&&(!i||p.implied_value_usd<=rs[i-1]?.implied_value_usd)),
 	validSteps=steps=>Array.isArray(steps)&&steps.length>=3&&steps.length<=12
 		&&steps.every(s=>typeof s==="string"&&/^.{20,600}$/s.test(s.trim())&&/\$\d.*\d+ min/u.test(s))
 function selfChecks({rows:rs,board,counts,recs,verdicts,stress,calibration,value,odds},snap,expectedDigest){
@@ -588,7 +591,7 @@ function selfChecks({rows:rs,board,counts,recs,verdicts,stress,calibration,value
 		"Watch trigger replay":watch.every(p=>{
 			const {apr,rule}=p.trigger,{capital,horizon,net:before}=p.trial
 			const {net}=priceFarm(p,capital,{horizon,apr})
-			return p.steps[1][1].includes(rule)&&rule.includes(aprLabel(apr))&&before<0&&close(net,0)
+			return p.steps[1][1].includes(rule)&&rule.includes(aprLabel(apr))&&before<0&&close(net,0)&&aprCeil(apr)>=apr
 		}),
 		"hands-on total":[...priced,...plans.flatMap(p=>values(p.stress).filter(s=>s.capital))].every(p=>
 			p.mins===p.prepMins+p.exitMins+p.checkMins&&p.checkMins===weeks(p.horizon)*A.weeklyMins),
