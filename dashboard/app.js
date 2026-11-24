@@ -98,13 +98,12 @@ const option=(v,lbl,selected)=>`<option value="${esc(v)}"${selected?" selected":
 	filter=([lbl,k,opts,...names],st)=>`<label>${lbl}<select name=${k}>${html(opts,(v,i)=>option(v,filterName(k,v,names[i]),v===st[k]))}</select></label>`
 function plans(st,rows){
 	const best=rows.filter(({plan:p})=>p.verdict!=="SKIP").sort((a,b)=>b.plan.net-a.plan.net).slice(0,5)
-	return inset("Best plans that clear break-even",best.length?`<p>${grades.map(v=>count(rows,p=>p.plan.verdict===v)+" "+v).join(" · ")}
-${html(best,p=>{
+	return inset("Best plans that clear break-even",best.length?html(best,p=>{
 	const f=p.plan
 	return`<div><b class=pos>${net(f.net)} net</b>${pLink(p,st)} ${badge(f.verdict)}
 <small class=action>${esc(f.action)}</small><small>${usd(f.capital)} · ${f.handsOnMinutes} min hands-on<br>${launchLabel(f.horizon)} ${chance(f.q)} · Break-even chance ${breakEven(f.pStar)}</small>
 <small class=outcomes>Token ${decisionNet(f.withToken)} · No token ${decisionNet(f.noToken)}</small></div>`
-})}`:"<p>No visible row clears break-even."," plans")
+}):"<p>No visible row clears break-even."," plans")
 }
 const boardShell=st=>`${intro("Pre-token rankings","30–365 d farms")}
 <div class=integrity role=group aria-label=Integrity></div>
@@ -132,18 +131,21 @@ function filtered({scope,family,chain,verdict,flag,tvl,q,sort,dir}){
 }
 const range=r=>r.map(short).join("–"),
 	valueRange=r=>`80% ${range(r[80])} · 50% ${range(r[50])}`,
-	valueTitle=([score,base,s,factor],r)=>`${usd(score)} · 80% range ${range(r[80])} · ${short(base)} × ${pct(s,1)} × ${factor}`,
 	endpoints=rs.flatMap(({score,ranges})=>[score,...ranges[80]]),
 	logMin=log(min(...endpoints)),logSpan=log(max(...endpoints))-logMin||1,
 	barAt=n=>1+40*(log(n)-logMin)/logSpan
+function equation(r,format){
+	const [base,tvl,slope,...terms]=r.equation
+	return`<small class=equation>$${base}M × (${tvl}M/${tvlMillions}M)^${slope}${html(terms,([label,n])=>` × ${label} ${n}`)} = ${format(r.score)}</small>`
+}
 function tableRow(r,st){
-	const {slug,score,launchValue,tokenOdds,haircut,ranges,rank,plan:fp,watchlist,tvl_usd,change_7d}=r,
-		k=esc(slug),[lo,hi]=ranges[80].map(barAt),factors=[score,launchValue,tokenOdds,haircut]
-	return`<tr data-slug="${k}" data-factors=${factors}>
+	const {slug,score,tokenOdds,ranges,rank,plan:fp,watchlist,tvl_usd,change_7d}=r,
+		k=esc(slug),[lo,hi]=ranges[80].map(barAt)
+	return`<tr data-slug="${k}">
 <td class=rank>${rank}
 <th scope=row>${pLink(r,st)}${r.flags.length?" <span title='Issuer flag'>!</span>":""}
 <small>${rowName(r)}${watchlist?" <span class=watch title=Watchlist>◆</span>":""}
-<td class=value title="${valueTitle(factors,ranges)}"><b>${short(score)}</b><svg class=range aria-hidden=true><path d="M${lo} 4H${hi}"/><path d="M${barAt(score)} 0v8"/></svg>
+<td class=value title="80% range ${range(ranges[80])}"><b>${short(score)}</b><svg class=range aria-hidden=true><path d="M${lo} 4H${hi}"/><path d="M${barAt(score)} 0v8"/></svg>${equation(r,short)}
 <td>${pct(tokenOdds,1)}<td>${short(tvl_usd)}
 <td>${pill(change_7d)}
 <td>${days(r)}
@@ -152,7 +154,7 @@ function tableRow(r,st){
 }
 function compare(st){
 	const picks=st.compare.map(slug=>bySlug.get(slug))
-	if(!picks.length) return "<p class=hint>Compare up to 3."
+	if(!picks.length) return ""
 	const update=(compare,lbl,title=lbl)=>`<a class=btn href="${href("board",{...st,compare})}" title="${esc(title)}">${lbl}</a>`,
 		heads=picks.map(p=>pLink(p,st)+" "+update(st.compare.filter(s=>s!==p.slug),"×",`Remove ${p.name}`)),
 		stats=[["Value",p=>short(p.score)],["TVL",p=>short(p.tvl_usd)],
@@ -172,7 +174,7 @@ function verifyRows(rows,st){
 			&&trs.every((tr,i)=>tr.dataset.slug===rows[i].slug)
 	const matched=count(trs,tr=>{
 		const [rank,,value,odds]=tr.cells,n=Number(rank.textContent)
-		return matchesExport(n,tr.dataset.slug,value.textContent.trim(),tr.querySelector(".badge")?.textContent,short)
+		return matchesExport(n,tr.dataset.slug,value.firstElementChild.textContent,tr.querySelector(".badge")?.textContent,short)
 			&&odds.textContent===pct(board[n-1].token_odds,1)
 	})
 	const pass=!!(sameHash&&sorted&&matched===total)
@@ -229,16 +231,20 @@ ${text(166,167,"middle","Days pre-token")}
 </svg><p>${n} plotted${rs.length>n?` · ${rs.length-n} undated`:""}`
 }
 
-const stats=(items,kind="")=>`<dl class="${kind}">${html(items,([lbl,val,style=""])=>
-	`<div><dt>${lbl}<dd class="${style}">${val}</div>`)}</dl>`,
-	table=(kind,heads,body,attrs="")=>`<div class=scroll tabindex=0${attrs}><table class=${kind}><thead><tr>${heads}<tbody>${body}</table></div>`,
+const table=(kind,heads,body,attrs="")=>`<div class=scroll tabindex=0${attrs}><table class=${kind}><thead><tr>${heads}<tbody>${body}</table></div>`,
 	facts=(heads,rs)=>table("facts","<th>"+(typeof heads==="string"?heads.split("|"):heads).join("<th>"),
 		html(rs,([first,...cells])=>`<tr><th scope=row>${first}<td>${cells.join("<td>")}`))
-function drivers(r){
-	const {rank,name,score}=model.reference,factors=values(r.attribution)
-	return`<div class=drivers><p><b>${mult(r.score/score,3)}</b> vs median #${rank} ${esc(name)} (${usd(score)})
-${stats(["TVL size","7d carry","Listing age","Issuer","Family","Rounding"]
-	.map((lbl,i)=>[lbl,mult(factors[i],3)]).filter(([,x],i)=>i<4||x!=="1.000×"))}</div>`
+function valueSources(r){
+	const miss=(rows,label)=>{
+		const test=rows.find(e=>e.term===label)
+		return test?` · ${mult(test.withTerm.walk.miss,3)} vs ${mult(test.without.walk.miss,3)}`:""
+	}
+	return`<div class=sources><p>Base and power fit to traded caps.
+<p>Walk-forward median miss · with vs without
+<p>TVL from snapshot ${usd(r.tvl_usd)}${miss(evidence,"TVL exponent")}
+<p>7-day TVL change from snapshot ${chg(r.change_7d)}${r.growth!==r.change_7d?` (uses ${chg(r.growth)})`:""}${miss(evidence,"7d carry")}
+<p>Token-likeness uses TVL and days listed without a token (${r.ageDays==null?"median used":days(r)+" d"}). TVL${miss(odds.evidence,"TVL in token-likeness")}. Age${miss(odds.evidence,"Age in token-likeness")}.
+<p>Issuer factor · ${r.flags.length?r.flags.map(esc).join(" · ")+" · MARGINAL cap":"No flags"} · ${flagNote}</div>`
 }
 const quoteFields=[
 	["entryGas","Entry gas $"],["exitGas","Exit gas $"],["slippage","Slippage %",100],
@@ -259,7 +265,7 @@ function cashFlows(fp,quote,result){
 <p>+ Capital carry ${money(capitalCharge)} at a ${pct(riskFreeRate,0)}/yr stablecoin base rate for ${holding} d
 <p>Break-even chance ${breakEven(pStar)} → ${badge(verdict)}
 <p><b>Expected net ${decisionNet(gain)}</b> = launch chance × token outcome + chance of no token × no-token outcome. Displayed figures rounded.</div>
-<p>${usd(capital)} · ${horizon} d window · time at ${usd(hourlyUsd)}/h
+<p>Time at ${usd(hourlyUsd)}/h
 <p class=gas>${gasBasis} on ${esc(chain.name)} = ${money(gas)}
 <p>Drop ${money(drop)} − claim &amp; sell ${money(claimSell)}
 <p class=half-q>Launch chance halved (${chance(q/2)}) · ${net(half.net)} · ${badge(half.verdict)}
@@ -283,7 +289,7 @@ const labels="1 Verify|2a Wait|2b Stop|2c Test withdrawal|3a Stop|3b Entry|4 Mon
 function detail(st,r){
 	const back=`<a class=back href="${href("board",st)}">← Rankings</a>`
 	if(!r) return back+intro("Unavailable")
-	const {plan:fp,flags,band,ranges,rangeFarm:[low,high]}=r,
+	const {plan:fp,ranges,rangeFarm:[low,high]}=r,
 		tokenLine=r.reason==="watch"?`watchlist exception — kept despite ${r.nameRule||r.category}`:
 			`pre-token — no gecko_id, no symbol, no ${r.mcap_usd==null?"":"positive "}market cap recorded in the snapshot`,
 		summary=`${rowName(r)} · ${short(r.tvl_usd)} TVL · ${chg(r.change_7d)} 7d · ${days(r)} d listed<br><span id=token-reason>Token screen: ${esc(tokenLine)}</span>`,
@@ -293,19 +299,15 @@ function detail(st,r){
 		const p=fp.stress[k]??fp,{all=verdicts,farm}=stress[k]??{}
 		return[lbl,usd(p.capital),badge(p.verdict),net(p.net),grades.map(v=>farm?`${all[v]} (${farm[v]})`:all[v]).join(" / ")]
 	}),
-		flips=[low,high].flatMap(({verdict},i)=>verdict===fp.verdict?[]:[`flips to ${verdict} at ${i?"high":"low"} end`]),
-		factors=[[usd(r.launchValue),"Launch value"],[pct(r.tokenOdds),oddsLabel],[r.haircut.toFixed(2),"Issuer factor"]]
+		flips=[low,high].flatMap(({verdict},i)=>verdict===fp.verdict?[]:[`flips to ${verdict} at ${i?"high":"low"} end`])
 	return`${back}${intro(esc(r.name),summary,lead,lbl)}
 <div class=detail><div>
 ${quotePanel(r)}
 <section class="panel inset valuation">
 <h2>Implied token value</h2><div class=amount>${usd(r.score)}</div>
 <small class=value-range>${valueRange(ranges)}</small>
-<div class=equation>${factors.map(([n,lbl])=>`<div><b>${n}</b><small>${lbl}</small></div>`).join("×")}</div>
-${drivers(r)}
-${stats([["Launch p10–p90",range([band.low,band.high])],
-		["Token-likeness weighted band",range([band.weightedLow,band.weightedHigh])]],"band")}
-<p>${flags.length?flags.map(esc).join(" · ")+" · MARGINAL cap":"No flags"}
+${equation(r,usd)}
+${valueSources(r)}
 </section>
 ${inset("Nearest traded peers",facts("Protocol|TVL|Cap",
 		r.peers.map(p=>[esc(p.name),short(p.tvl_usd),short(p.mcap_usd)]))," peers")}

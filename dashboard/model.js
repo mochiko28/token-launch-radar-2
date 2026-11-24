@@ -352,16 +352,23 @@ const tokenOdds=(fit,p)=>sigmoid(dot(oddsFeatures(p,fit.age),fit.beta))
 
 const launchOdds=(fit,p)=>record(A.horizons,h=>max(0,
 	(tokenOdds(fit,{...p,ageDays:(p.ageDays??fit.age)+h})-p.tokenOdds)/(1-p.tokenOdds)))
-function attribution(p,ref,fit,odds){
-	const sized={...ref,rawSize:p.rawSize,size:p.rawSize+(ref.size-ref.rawSize)},
-		carried={...sized,size:p.size,growth:p.growth},
-		aged={...carried,ageDays:p.ageDays},
-		[size,carry,age,family]=[sized,carried,aged,p].map((row,i,path) =>
-		exp(capLog(fit,row)-capLog(fit,path[i-1]??ref))),
-		midOdds=tokenOdds(odds,sized)
-	return{size:size*midOdds/ref.tokenOdds,carry,age:age*p.tokenOdds/midOdds,
-		issuer:p.haircut/ref.haircut,family,
-		rounding:(p.score/rawScore(p))/(ref.score/rawScore(ref))}
+const tvlMillions=A.tvlReference/1e6,
+	equationScore=([base,tvl,slope,...terms])=>max(1,round(terms.reduce((v,[,n])=>v*n,
+		base*1e6*(tvl/tvlMillions)**slope)))
+function valueEquation(fit,p){
+	const [intercept,slope,...weights]=fit.coefficients,[,size,...inputs]=capInputs(p,fit),
+		terms=[["growth",exp((size-p.rawSize)*slope)],
+			...fit.features.flatMap(([label],i)=>inputs[i]&&weights[i]?[[label,exp(inputs[i]*weights[i])]]:[]),
+			...(fit.group?[[fit.candidate,exp(fit.offsets.get(fit.group(p))??0)]]:[]),
+			["token-likeness",p.tokenOdds],["issuer",p.haircut]]
+	let shown
+	for(let digits=4;digits<=17;digits++){
+		const print=n=>+n.toPrecision(digits)
+		shown=[print(exp(intercept)/1e6),print(p.tvl_usd/1e6),print(slope),
+			...terms.map(([label,n])=>[label,print(n)])]
+		if(equationScore(shown)===p.score) break
+	}
+	return shown
 }
 function oddsTest(splits,omit){
 	const scored=splits.flatMap(([train,test])=>{
@@ -509,7 +516,7 @@ function boardChecks(board,{protocols,watchlist},bytes){
 const orderedRows=rs=>count(rs,(p,i)=>p?.rank===i+1&&(!i||p.implied_value_usd<=rs[i-1]?.implied_value_usd)),
 	validSteps=steps=>Array.isArray(steps)&&steps.length>=3&&steps.length<=12
 		&&steps.every(s=>typeof s==="string"&&/^.{20,600}$/s.test(s.trim())&&/^(If|Revisit if) .+\$\d.*\d+ min/u.test(s))
-function selfChecks({rows:rs,board,counts,recs,stress,reference,calibration,value,odds},snap,expectedDigest){
+function selfChecks({rows:rs,board,counts,recs,stress,calibration,value,odds},snap,expectedDigest){
 	const {evidence,search,deployed,selected:winner}=value.validation,
 		plans=rs.map(p=>p.plan),samples=plans.filter(p=>p.pStar!==null&&p.q>0&&p.drop>0),close=(a,b)=>abs(a-b)<1e-8
 	return[...boardChecks(board,snap),...checks({
@@ -519,7 +526,7 @@ function selfChecks({rows:rs,board,counts,recs,stress,reference,calibration,valu
 			&&recs.every((p,i)=>p.slug===snap.protocols[i].slug&&reasons[p.reason]?.[0]===p.status)
 			&&statuses.every(k=>count(recs,p=>reasons[p.reason]?.[0]===k)===counts[k]),
 		"value factors":rs.every(p=>scoreOf(p)===p.score),
-		"attribution":rs.every(p=>abs(values(p.attribution).reduce((a,b)=>a*b,1)*reference.score/p.score-1)<1e-10),
+		"displayed value equation":rs.every(p=>equationScore(p.equation)===p.score),
 		"bootstrap bands":rs.every(p=>p.band.low>0&&p.band.low<=p.band.high&&p.tokenOdds>0&&p.tokenOdds<1),
 		"80% LOO coverage":abs(value.ranges.loo80-.8)<=.02,
 		"flagged plans":rs.every(p=>p.flags.length?p.haircut===A.haircut&&p.plan.verdict!=="FARM":p.haircut===1),
@@ -567,16 +574,14 @@ function buildModel(snap){
 			s=tokenOdds(oddsFit,p),
 			haircut=p.flags.length?A.haircut:1,
 			[low,high]=band(resamples.map(fit=>exp(capLog(fit,p)))),
-			row={...p,launchValue,tokenOdds:s,haircut,band:{low,high,weightedLow:low*s*haircut,weightedHigh:high*s*haircut},
+			row={...p,launchValue,tokenOdds:s,haircut,band:{low,high},
 			peers:peersFor(p,pts)}
 		row.score=scoreOf(row)
+		row.equation=valueEquation(fit,row)
 		const growth=p.category?quant(categories.get(p.category).map(r=>r.change_7d).filter(finite),A.exitGrowthQuantile):null
 		return{...row,plan:farmPlan(row,review,oddsFit,growth)}
-	}).sort(rankBy("score"))
-		.map((p,i)=>({...p,rank:i+1})),
-		reference=rs[floor(rs.length/2)]
+	}).sort(rankBy("score")).map((p,i)=>({...p,rank:i+1}))
 	for(const p of rs){
-		p.attribution=attribution(p,reference,fit,oddsFit)
 		p.ranges=record(coverage,k=>quantiles[k].map(q=>p.score*exp(q)))
 		const fp=p.plan
 		p.rangeFarm=p.ranges[80].map(v=>evaluateFarm(fp,fp.capital,{share:v/p.score}))
@@ -588,7 +593,7 @@ function buildModel(snap){
 		stress=record(["doubleCost","halfShare"],k=>({all:tally(rs,p=>p.plan.stress[k].verdict),
 			farm:tally(farms,p=>p.plan.stress[k].verdict)})),
 		calibration=pts.map(p=>({...p,launchValue:exp(capLog(fit,p))}))
-	return{rows:rs,recs,reference,board:{rows:boardRows(rs)},counts,verdicts,stress,
+	return{rows:rs,recs,board:{rows:boardRows(rs)},counts,verdicts,stress,
 		value,odds,calibration,assumptions:settings}
 }
 const statuses=["traded","recorded","setAside","ranked"],band=xs=>A.bandQuantiles.map(q=>quant(xs,q)),

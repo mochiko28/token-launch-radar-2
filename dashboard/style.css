@@ -5,7 +5,7 @@ font:15px/1.5 Adwaita Sans,FreeSans,sans-serif;
 font-variant-numeric:tabular-nums;color:var(--ink);background:#f2eade
 }
 *{box-sizing:border-box}
-body,h1,h2,h3,p,dl,dd{margin:0}
+body,h1,h2,h3,p{margin:0}
 a{color:inherit;text-decoration:none}
 a:hover{text-decoration:underline}
 button,select,input{font:inherit;color:inherit}
@@ -13,11 +13,11 @@ button,select,summary{cursor:pointer}
 :focus-visible{outline:2px solid}
 h1{font:700 clamp(2.4rem,4vw,3.9rem)/1 FreeSerif,serif;letter-spacing:-.035em}
 h2{font-size:1.14rem;line-height:1.25}
-.frame{width:min(1328px,95%);margin:auto}
+.frame{width:min(1376px,95%);margin:auto}
 body>header{background:var(--ink);color:var(--sheet);border-bottom:2px solid var(--signal)}
 .chip,.panel,dialog,.dialog-top{background:var(--sheet)}
-.brand,.mast,.bar,.dialog-top,.equation{display:flex;align-items:center}
-.intro,.readings,.legend,.integrity,dl,nav{display:flex}
+.brand,.mast,.bar,.dialog-top{display:flex;align-items:center}
+.intro,.readings,.legend,.integrity,nav{display:flex}
 .mast{min-height:56px;gap:32px}
 .brand{gap:8px;font-weight:700}
 .brand span,[aria-current]{color:var(--signal)}
@@ -27,9 +27,9 @@ nav{gap:24px;margin-right:auto}
 .btn,.chip{border:0}
 .btn{padding:4px 12px;background:var(--signal);color:var(--ink)}
 #checks,.rank,.kicker{font:.76rem monospace}
-small,dt,.curve{color:var(--dim)}
+small,.curve{color:var(--dim)}
 .intro,.bar,.dialog-top{justify-content:space-between}
-.integrity,.readings,.drivers dl{flex-wrap:wrap}
+.integrity,.readings{flex-wrap:wrap}
 .intro{align-items:end;margin:12px 0 24px}
 .integrity{gap:2px;margin:-17px 0 8px}
 .chip{padding:2px 1px;white-space:nowrap;font-size:.68rem}
@@ -42,14 +42,14 @@ small,dt,.curve{color:var(--dim)}
 .groups{grid:auto/1fr 1fr}
 #token-groups a{text-decoration:underline}
 #token-groups [aria-current]{color:inherit;font-weight:700}
-.readings,.band,.board,.detail,.research,.drivers dl{gap:1rem}
+.readings,.board,.detail,.research{gap:1rem}
 :not(strong)>small,.readings span,svg,.back{display:block}
 .misses strong{font-size:1.4rem}
-small,dt,.curve,.drivers,.rail,.hint,.back,.kpi{font-size:.8rem}
+small,.curve,.sources,.rail,.back,.kpi{font-size:.8rem}
 .valuation,.decision,.steps small,thead,.rank{background:var(--wash)}
 .board,.detail,.research{align-items:start}
-.board{grid:auto/1fr 310px}
-.rail,.detail>div,.legend,.equation{gap:12px}
+.board{grid:auto/1fr 290px}
+.rail,.detail>div,.legend{gap:12px}
 .bar{padding:12px 16px 8px}
 .filters{grid:auto/1.4fr repeat(6,1fr);padding:0 16px 8px}
 :is(.filters,.quotes){
@@ -59,16 +59,19 @@ small,dt,.curve,.drivers,.rail,.hint,.back,.kpi{font-size:.8rem}
 .scroll{overflow:auto}
 #active-filters:not(:empty){display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0 16px 8px}
 #active-filters .chip{padding:2px 8px;background:var(--wash);font-size:.8rem;white-space:normal}
-#results .scroll{max-height:511px}
+#results .scroll{max-height:675px}
 table{width:100%;border-collapse:collapse}
 th{text-align:left}
 thead{font-size:.75rem}
-.ranks{min-width:880px;font-size:.88rem;line-height:1.15}
+.ranks{min-width:1020px;font-size:.88rem;line-height:1.15}
 .ranks :is(td,th){padding:2px 4px}
+.ranks tbody :is(td,th){vertical-align:top;padding-bottom:17px}
 .ranks :is(td,small){white-space:nowrap}
-.ranks tr>:nth-child(8){box-shadow:inset 2px 0 var(--ink);padding-left:8px}
+.ranks tr>:nth-child(8){padding-left:8px}
 .ranks td:nth-child(9) small{white-space:normal}
+.value{position:relative}
 .value b{font-size:1rem}
+.value .equation{position:absolute;left:4px;bottom:2px;font-size:.75rem}
 .range{width:42px;height:8px;margin-left:4px;vertical-align:middle;background:var(--wash)}
 .range path{stroke:var(--ink);stroke-width:2}
 .range path:first-child{stroke:var(--signal);stroke-width:4}
@@ -79,9 +82,9 @@ thead{font-size:.75rem}
 .ranks .badge{min-width:9ch;border:1px solid var(--mark);border-radius:2px;font-size:11px}
 .ranks .skip{--mark:var(--ink);--tint:transparent}
 .rank,.ranks th:first-child{text-align:center}
-.hint,.compare{margin:0 16px 8px}
+.compare{margin:0 16px 8px}
 tbody tr{border-bottom:var(--line)}
-.protocol,dd,.amount{font-weight:750}
+.protocol,.amount{font-weight:750}
 .pos,.chip[data-pass=true]{color:var(--gain)}
 .neg,.chip[data-pass=false]{color:var(--loss)}
 .badge{padding:3px 6px;font:700 .7rem/1.15 monospace;color:var(--mark);background:var(--tint)}
@@ -97,7 +100,7 @@ circle{fill:var(--mark)}
 .plot g text{fill:var(--ink);font-weight:700;paint-order:stroke;stroke:var(--sheet);stroke-width:3px;stroke-linejoin:round}
 .legend{font:.7rem monospace}
 .legend span::before{content:"● ";color:var(--mark)}
-.plans div,.pay,.steps li,.drivers,.band{border-top:var(--line)}
+.plans div,.pay,.steps li,.sources{border-top:var(--line)}
 .plans{line-height:1.2}
 .plans b{float:right}
 .pay{padding-top:8px}
@@ -111,10 +114,10 @@ circle{fill:var(--mark)}
 .detail h3,.steps p,.quote p,.facts,.kpi h2,.exits,.range-net{font-size:.85rem}
 .quote .decision p{font-size:1rem}
 .exits{margin:0;padding-left:1.25em}
-.half-q,.quotes,.pay,.equation{margin-block:8px}
+.half-q,.quotes,.pay,.valuation .equation{margin-block:8px}
 .quotes{grid:auto/repeat(auto-fit,minmax(80px,1fr));gap:6px}
 .amount{font-size:2.8rem}
-.drivers,.band,.steps li{padding:4px 0}
+.sources,.steps li{padding:4px 0}
 .facts :is(td,th){padding:7px}
 .research{grid:auto/7fr 5fr}
 dialog{margin:0 0 0 auto;height:100%;max-height:none;width:min(640px,100%);border:0}

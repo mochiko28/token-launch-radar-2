@@ -93,6 +93,15 @@ const fits = bytes => bytes.length >= minimum && bytes.length < maximum;
 const sizeMiss = bytes => Math.abs(bytes.length - targetSize);
 const displaySigns = text => text.replace(/(^|[\s$(,])-(?=\$?\d)/g, "$1−");
 
+function provesValue(line, score, displayed) {
+  const [product, result] = line.split(" = ");
+  const [base, scale, ...factors] = product.split(" × ");
+  const [, tvl, reference, exponent] = /^\((.+)M\/(.+)M\)\^(.+)$/.exec(scale) ?? [];
+  const initial = Number(base.slice(1, -1)) * 1e6 * (Number(tvl) / Number(reference)) ** Number(exponent);
+  const total = factors.reduce((value, factor) => value * Number(factor.split(" ").at(-1)), initial);
+  return Math.max(1, Math.round(total)) === score && result === displayed;
+}
+
 async function captureJpeg(call, context, work) {
   const capture = async format => {
     const { data } = await call("browsingContext.captureScreenshot", { context, origin: "viewport", format });
@@ -132,7 +141,7 @@ function encodeJpeg(png, work, candidates = []) {
     return best && sizeMiss(best.bytes) <= 3000;
   };
   for (const mode of [[], ["-optimize"]]) {
-    let low = 85;
+    let low = 1;
     let high = 100;
     while (low <= high) {
       const quality = Math.ceil((low + high) / 2);
@@ -193,6 +202,17 @@ function readPage() {
     const range = row.cells[2].querySelector(".range")?.getBoundingClientRect();
     return value && range && range.left >= value.right && range.top >= value.top && range.bottom <= value.bottom;
   });
+  const equationOverflow = rows.flatMap(row => {
+    const cell = row.cells[2];
+    const value = cell.querySelector("b").getBoundingClientRect();
+    const line = cell.querySelector(".equation");
+    const box = line.getBoundingClientRect(), bounds = row.getBoundingClientRect();
+    const fontSize = parseFloat(getComputedStyle(line).fontSize);
+    return box.top >= value.bottom && box.bottom <= bounds.bottom && box.right <= bounds.right && fontSize >= 11.25
+      ? [] : [{ slug: row.dataset.slug, gap: box.top - value.bottom, right: bounds.right - box.right,
+        bottom: bounds.bottom - box.bottom, left: box.left - bounds.left, width: box.width,
+        row: bounds.width, height: bounds.height, fontSize }];
+  }).slice(0, 3);
   const completeRows = rows.filter(row => {
     const box = row.getBoundingClientRect();
     return box.top >= 0 && box.bottom <= Math.min(tableBottom, innerHeight);
@@ -317,7 +337,8 @@ function readPage() {
     exitsVisible: visible(".exits"),
     planVisible: visible(".steps"),
     quoteVisible: visible(".quote"), quotePass, quotes,
-    attribution: read(".drivers"), attributionVisible: visible(".drivers"),
+    equation: read(".valuation .equation"), amount: read(".amount"),
+    sources: read(".sources"), sourcesVisible: visible(".sources"),
     peersVisible: visible(".peers"),
     curve: read(".curve"), heldOut: read(".misses"), timing: read(".research") && read("#view .inset p"),
     capMisses: [...document.querySelectorAll(".misses strong")].map(node => node.textContent),
@@ -333,10 +354,11 @@ function readPage() {
     chartNames: names.map(name => name.textContent),
     chartAxes: [...(plot?.children ?? [])].filter(node => node.localName === "text").map(axis => axis.textContent),
     rows: rows.map(row => {
-      const { slug, factors } = row.dataset;
-      return [slug, Number(row.cells[0].textContent), ...factors.split(",").map(Number), row.querySelector(".badge").textContent, watchlist.has(slug)];
+      const value = row.cells[2];
+      return [row.dataset.slug, Number(row.cells[0].textContent), value.querySelector("b").textContent,
+        value.querySelector(".equation").textContent, row.querySelector(".badge").textContent, watchlist.has(row.dataset.slug)];
     }),
-    completeRows, rangesInline, width: innerWidth, height: innerHeight, dpr: devicePixelRatio,
+    completeRows, rangesInline, equationOverflow, width: innerWidth, height: innerHeight, dpr: devicePixelRatio,
     scrollbar: innerWidth - document.documentElement.clientWidth
   };
 }
@@ -565,19 +587,20 @@ async function shoot(output, destination) {
       }
       if (info.scrollbar) throw new Error(`${name}: page scrollbar occupies ${info.scrollbar}px`);
       const slugs = new Set(info.rows.map(([slug]) => slug));
-      if (slugs.size !== info.rows.length || info.rows.some(([slug, rank, value, launch, odds, issuer, verdict], i) => {
+      if (slugs.size !== info.rows.length || info.rows.some(([slug, rank, value, equation, verdict], i) => {
         const row = boardBySlug.get(slug);
-        return row?.rank !== rank || row.implied_value_usd !== value || row.launch_value_usd !== launch
-          || row.token_odds !== odds || row.issuer_factor !== issuer || verdictBySlug.get(slug) !== verdict
+        return row?.rank !== rank || !provesValue(equation, row.implied_value_usd, value) || verdictBySlug.get(slug) !== verdict
           || (i > 0 && info.rows[i - 1][1] >= rank);
       })) {
-        throw new Error(`${name}: page order or values differ from board.json`);
+        throw new Error(`${name}: page order, values or equation differ from board.json`);
       }
       if (info.rows.length && (info.rowPass !== "true" || info.rowCheck !== `✓ ${rowProof} · ${info.rows.length}/${info.rows.length}`)) {
         throw new Error(`${name}: ${info.rowCheck}`);
       }
       if (info.rows.length) {
         if (!info.rangesInline) throw new Error(`${name}: implied-value range moved off the figure's line`);
+        if (info.equationOverflow.length) throw new Error(`${name}: board equation layout ${JSON.stringify(info.equationOverflow)}`);
+        console.log(`${name} · ${info.rowCheck} · equations pass`);
         const top = [...slugs].map(slug => modelBySlug.get(slug))
           .filter(row => row.ageDays != null && Number.isFinite(row.plan.expectedYield))
           .sort((a, b) => b.plan.expectedYield - a.plan.expectedYield || a.rank - b.rank)
@@ -616,12 +639,19 @@ async function shoot(output, destination) {
       }
       if (page.hash.startsWith("#detail/")) {
         const slug = page.hash.slice(8);
-        const { name: protocol, plan } = modelBySlug.get(slug);
+        const { name: protocol, plan, score } = modelBySlug.get(slug);
         const rate = (100 * assumptions.parameters.riskFreeRate).toFixed(0);
         if (!info.decisionVisible || !info.quotePass || info.quotes.length !== 10
           || !info.checks.endsWith(` · ${rowProof} · 1/1`)
           || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get(slug).farm_steps.map(displaySigns))) {
           throw new Error(`${name}: Decision mismatch or out of view (${info.decision.join(" | ")}).`);
+        }
+        if (!provesValue(info.equation, score, info.amount) || !info.sourcesVisible
+          || !["fit to traded caps", "TVL from snapshot", "7-day TVL change from snapshot", "days listed without a token", "Issuer factor"]
+            .every(label => info.sources.includes(label))
+          || [...evidence.slice(0, 2), ...odds.evidence].some(({ withTerm, without }) => !info.sources.includes(
+            `${withTerm.walk.miss.toFixed(3)}× vs ${without.walk.miss.toFixed(3)}×`))) {
+          throw new Error(`${name}: value equation or held-out evidence is incomplete.`);
         }
         for (const state of info.quotes) {
           const quote = { ...plan.quote, ...state.overrides };
@@ -686,8 +716,7 @@ async function shoot(output, destination) {
         || !info.gasVisible || info.gas !== gasLine || !info.exitsVisible
         || JSON.stringify(info.exits) !== JSON.stringify(exits) || !info.steps.some(step => step.startsWith("If " + exits[0]))
         || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps.map(displaySigns))
-        || !info.attributionVisible || !info.planVisible || !info.quoteVisible || !info.quotePass || !info.peersVisible
-        || !["TVL size", "7d carry", "Listing age", "Issuer"].every(label => info.attribution?.includes(label))
+        || !info.planVisible || !info.quoteVisible || !info.quotePass || !info.peersVisible
         || !info.steps.some(step => step.includes("break-even chance") && /Gas \+ slip cap \$[\d.]+/.test(step))
         || !info.steps.some(step => step.includes("deposit $80 USDC and withdraw it"))
         || !info.payVisible || !info.pay?.includes(`What would make it pay · ${chain.name} ·`)
@@ -703,7 +732,7 @@ async function shoot(output, destination) {
           throw new Error("The filtered board did not render with five complete rows, global ranks, and active filters.");
         }
       }
-      if (name === "watchlist-skip" && (!info.rows.length || info.rows.some(row => row[6] !== "SKIP" || !row[7]))) {
+      if (name === "watchlist-skip" && (!info.rows.length || info.rows.some(row => row[4] !== "SKIP" || !row[5]))) {
         throw new Error("The watchlist SKIP empty-rail check did not use the selected rows.");
       }
     };
@@ -715,14 +744,14 @@ async function shoot(output, destination) {
       writeFileSync(join(destination, name), bytes);
       const content = [info.title, info.count, info.rowCheck, info.first, info.chart, info.summary, info.defaultHalfOdds, ...info.activeFilters].filter(Boolean).join(" · ");
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
-      if (name === "1-board.jpg") console.log(`  ${info.completeRows} complete rows in view · DOM ready in ${info.loadMs} ms · ${info.coverage} · ${info.nested}`);
+      if (name === "1-board.jpg") console.log(`  ${info.completeRows} complete rows in view · DOM ready in ${info.loadMs} ms · ${info.coverage} · ${info.nested}\n  ${info.rows[0][3]}`);
       if (name === "3-filtered.jpg") console.log(`  ${info.completeRows} complete rows in view`);
-      if (name === "2-detail.jpg") console.log(`  ${info.tokenDetail}\n  ${info.gas}\n  ${info.exits.join("\n  ")}`);
+      if (name === "2-detail.jpg") console.log(`  ${info.tokenDetail}\n  ${info.equation}\n  ${info.gas}\n  ${info.exits.join("\n  ")}`);
       if (info.valueRange) console.log(`  ${info.valueRange} · ${info.rangeFarm}`);
       if (info.integrity.length) console.log(`  ${info.integrityLines} integrity line · ${info.integrity.join(" · ")}`);
     }
     console.log("Firefox reported no console errors or uncaught exceptions.");
-    console.log("Calibration, detail attribution, board-matched checklist, live quote edits and reset, and filtered rail pass.");
+    console.log("Calibration, value equations, board-matched checklist, live quote edits and reset, and filtered rail pass.");
   } finally {
     spawnSync("find", [work, "-mindepth", "1", "-delete"]);
     rmdirSync(work);
