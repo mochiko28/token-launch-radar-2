@@ -123,7 +123,7 @@ const byText=(a,b)=>(a>b)-(a<b),bySlug=(a,b)=>byText(a.slug,b.slug),
 	tally=(rs,get)=>record(["FARM","MARGINAL","SKIP"],v=>count(rs,p=>get(p)===v)),
 	word1=name=>name.toLowerCase().match(/[\p{L}\p{N}]+/u)?.[0]
 const hasToken=p=>p.mcap_usd>0||!!(p.gecko_id||p.symbol),
-	rawScore=({launchValue,tokenOdds,haircut})=>launchValue*tokenOdds*haircut,
+	rawScore=({launchValue,tokenOdds,scoreOdds=tokenOdds,haircut})=>launchValue*scoreOdds*haircut,
 	scoreOf=p=>max(1,round(rawScore(p))),
 	costUsd=new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format,
 	integer=n=>round(n).toLocaleString("en-US"),whole=n=>"$"+integer(n)
@@ -140,8 +140,11 @@ function quant(values,fraction=.5){
 		index=(order.length-1)*fraction
 	return order[floor(index)]*(1-index%1)+order[ceil(index)]*(index%1)
 }
+const issuerWords=rs=>new Set(rs.filter(hasToken).map(p=>word1(p.name))),
+	issuerFlags=(p,words)=>[words.has(word1(p.name))&&"Recorded issuer match",
+		liquid.includes(p.category)&&"Liquid staking/restaking",version.test(p.name)&&"Versioned name"].filter(Boolean)
 function prepare(snap){
-	const asOf=Date.parse(snap.as_of),issuerWords=new Set(snap.protocols.filter(hasToken).map(p=>word1(p.name)))
+	const asOf=Date.parse(snap.as_of),words=issuerWords(snap.protocols)
 	return snap.protocols.map(p=>{
 		const {category,name,tvl_usd:tvl,gecko_id}=p,
 			family=familyOf.get(category)||"Other",
@@ -156,12 +159,11 @@ function prepare(snap){
 			product=wrapper||category==="CEX"||!!venue,
 			recorded=hasToken(p),
 			watchlist=snap.watchlist.includes(p.slug),
-			flags=recorded?[]:[issuerWords.has(word1(name))&&"Recorded issuer match",
-				isLiquid&&"Liquid staking/restaking",version.test(name)&&"Versioned name"].filter(Boolean),
+			flags=recorded?[]:issuerFlags(p,words),
 			status=p.mcap_usd>0?"traded":recorded?"recorded":product&&!watchlist?"setAside":"ranked",
 			reason=status==="traded"?"cap":status==="recorded"?"id":status==="setAside"?(wrapper?"product":"exchange"):product?"watch":"pre",
 			nameRule=[venue,receipt,...flags.filter(f=>f!=="Liquid staking/restaking")].filter(Boolean).join(" · ")
-		return{...p,family,date,ageDays,growth,carriedTvl,flags,
+		return{...p,family,date,ageDays,growth,flags,
 			product,productPeer:product||isLiquid||receiptId.test(gecko_id),watchlist,recorded,status,reason,nameRule,
 			size:log(carriedTvl/A.tvlReference),rawSize:log(tvl/A.tvlReference)}
 	})
@@ -198,64 +200,20 @@ function accum({matrix,target},x,residual,weight=1){
 	}
 }
 
-const shrinkage="TVL slope shrinkage",valueTerms=[
+const valueTerms=[
 	["age","logAge",logAge],["growth","clippedGrowth",p=>p.growth/100],
 	...keys(families).concat("Other").map(f=>["family",f,p=>+(f===p.family)])
 ]
-const candidates={
-	"Family shrinkage":["group",p=>p.family],
-	"Category shrinkage":["group",p=>p.category],
-	"Single-chain shrinkage":["group",p=>p.chains.length===1?p.chains[0]:null],
-	"Chain breadth":["feature",p=>log(new Set(p.chains).size)],
-	"Squared log TVL":["feature",p=>p.rawSize**2],
-	"Log TVL hinge":["feature",p=>max(0,p.rawSize)],
-	"TVL × age":["feature",(p,age)=>p.rawSize*logAge(p,age)],
-	"Downside growth":["feature",p=>min(0,p.growth)/100],
-	"Continuous carry":["carry",p=>p.rawSize+p.growth/100],
-	"Huber fit":["huber"],"Median intercept":["median"],
-	"Theil–Sen TVL fit":["theilSen"],[shrinkage]:["ridge"]
-},
-	capInputs=(p,{features,medianDays,omit,carry})=>[
-	1,omit==="scale"?0:omit==="carry"?p.rawSize:carry?.(p)??p.size,
-	...features.map(([,,read])=>read(p,medianDays))]
-function fitValue(pts,terms,omit,alt){
-	const [kind,read]=candidates[alt]??[],features=valueTerms.filter(([term])=>terms.includes(term)),
-		fit={terms,features,medianDays:medianAge(pts),omit,carry:kind==="carry"?read:null,candidate:alt}
-	if(kind==="feature") features.push([alt,alt,read])
-	const inputs=pts.map(p=>capInputs(p,fit)),eps=1e-8,
-		pen=[eps,eps+(kind==="ridge"?sqrt(pts.length):0),...features.map(([t])=>t==="family"?A.familyPenalty:eps)]
-	const regress=weights=>{
-		const eq=normal(pen)
-		inputs.forEach((x,i)=>{
-			const w=weights?.[i]??1
-			accum(eq,x,pts[i].response*w,w)
-		})
-		return solve(eq.matrix,eq.target)
-	}
-	let coef=regress()
-	const errors=()=>inputs.map((x,i)=>pts[i].response-dot(x,coef))
-	if(kind==="huber"){
-		const first=errors(),center=quant(first),cutoff=max(eps,1.345*1.4826*quant(first.map(e=>abs(e-center))))
-		for(let i=0;i<20;i++) coef=regress(errors().map(e=>min(1,cutoff/abs(e))))
-	}
-	if(kind==="theilSen"){
-		const es=errors(),slopes=[]
-		inputs.forEach(([,x],i)=>{
-			for(let j=0;j<i;j++){
-				const dx=x-inputs[j][1]
-				if(dx) slopes.push((es[i]-es[j])/dx)
-			}
-		})
-		coef[1]+=quant(slopes)??0
-	}
-	if(kind==="median"||kind==="theilSen") coef[0]+=quant(errors())
-	const group=kind==="group"?read:null,offsets=new Map()
-	if(group) for(const [k,es] of Map.groupBy(errors(),(_,i)=>group(pts[i])))
-		if(k!=null) offsets.set(k,sum(es)/(es.length+A.familyPenalty))
-	return{...fit,coefficients:coef,group,offsets}
+const capInputs=(p,{features,medianDays,omit})=>[
+	1,omit==="growth"?p.rawSize:p.size,...features.map(([,,read])=>read(p,medianDays))]
+function fitValue(pts,terms,omit,ridge){
+	const features=valueTerms.filter(([term])=>terms.includes(term)),
+		fit={terms,features,medianDays:terms.includes("age")?medianAge(pts):null,omit,ridge},eps=1e-8,
+		eq=normal([eps,eps+(ridge?sqrt(pts.length):0),...features.map(([t])=>t==="family"?A.familyPenalty:eps)])
+	for(const p of pts) accum(eq,capInputs(p,fit),p.response)
+	return{...fit,coefficients:solve(eq.matrix,eq.target)}
 }
-const capLog=(fit,p)=>dot(capInputs(p,fit),fit.coefficients)+(fit.offsets.get(fit.group?.(p))??0),
-	capRatio=p=>p.mcap_usd/p.carriedTvl
+const capLog=(fit,p)=>dot(capInputs(p,fit),fit.coefficients)
 const leaveOut=(pts,group)=>[...Map.groupBy(pts,group).values()]
 	.map(test=>[pts.filter(p=>!test.includes(p)),test]).filter(([train])=>train.length)
 function folds(pts,walk,warmup=A.valueWarmup){
@@ -270,68 +228,70 @@ function folds(pts,walk,warmup=A.valueWarmup){
 	return splits
 }
 
-const sum=ns=>ns.reduce((a,b)=>a+b,0),blindTests=["loo","walk"],
-	flagNote="untested assumption (no traded rows carry the flag)"
-const missStats=(es,n=es.length)=>({miss:n?exp(quant(es)):null,n,hits:[2,3].map(x=>n?inside(es,[0,log(x)])/n:null)})
-function termTest(term,withTerm,without){
-	const deltas=blindTests.map(k=>withTerm[k].n?without[k].miss-withTerm[k].miss:0)
-	return{term,withTerm,without,verdict:deltas.every(d=>d<0)?"fails both":"kept · "+
-		["no measured effect","helps one","helps both tests"][count(deltas,d=>d>0)]}
-}
-function residuals(splits,terms,omit,alt){
-	return splits.flatMap(([train,test])=>{
-		const fit=terms&&fitValue(train,terms,omit,alt),ratio=fit?0:log(quant(train.map(capRatio)))
-		return test.map(p=>p.response-(fit?capLog(fit,p):log(p.carriedTvl)+ratio))
-	})
-}
-
-const lowerMiss=(a,b,k)=>a[k].n&&a[k].miss<b[k].miss,
-	passes=({withTerm:a,without:b})=>blindTests.every(k=>lowerMiss(a,b,k))
-	&&a.family.n&&a.family.miss<=b.family.miss+.1
-function selectFit(pts,inner){
+const blindTests=["loo","walk"],
+	flagNote="assumption, not supported by the test"
+const medianMiss=es=>es.length?exp(quant(es.map(abs))):null
+function selectFit(pts){
 	const splits={loo:folds(pts),walk:folds(pts,true),family:leaveOut(pts,p=>p.family)},tests=keys(splits),
-		assess=(terms,candidate,omit)=>({terms,candidate,...record(tests,k=>missStats(residuals(splits[k],terms,omit,candidate).map(abs)))}),
+		assess=(terms,ridge=false)=>({terms,ridge,...record(tests,k=>medianMiss(splits[k].flatMap(([train,test])=>{
+			const fit=fitValue(train,terms,null,ridge)
+			return test.map(p=>p.response-capLog(fit,p))
+		})))}),
 		terms=["age","family","growth"],
 		trials=Array.from({length:2**terms.length},(_,mask)=>assess(terms.filter((_,i)=>mask&(1<<i)))),
-		mass=trial=>tests.reduce((n,k)=>n*(trial[k].miss??1),1),
-		better=(a,b)=>tests.every(k=>lowerMiss(a,b,k)),
+		mass=trial=>tests.reduce((n,k)=>n*(trial[k]??1),1),
+		lower=(a,b,k)=>a[k]!==null&&a[k]<b[k],
+		better=(a,b)=>tests.every(k=>lower(a,b,k)),
 		deployed=trials.filter((trial,mask)=>terms.every((_,i)=>!(mask&(1<<i))||better(trial,trials[mask^(1<<i)])))
 			.sort((a,b)=>mass(a)-mass(b))[0],
-		search=keys(candidates).map(term=>({term,withTerm:assess(deployed.terms,term),without:deployed})),
-		chosen=search.filter(passes).sort((a,b)=>mass(a.withTerm)-mass(b.withTerm))[0],
-		winner=chosen?.withTerm??deployed
-	if(inner) return winner
-	for(const row of search) row.verdict=row===chosen?"Adopted":passes(row)?"Eligible":"Rejected"
-	const labels={scale:"TVL exponent",carry:"7d carry",age:"Age in cap",family:"Family in cap"},
-		evidence=entries(labels).filter(([t])=>t==="scale"||t==="carry"||winner.terms.includes(t))
-			.map(([omit,label])=>termTest(label,winner,
-				assess(winner.terms.filter(t=>t!==(omit==="carry"?"growth":omit)),winner.candidate,omit)))
-	evidence.push({term:"Issuer haircut",withTerm:winner,without:winner,verdict:flagNote})
-	return{fit:fitValue(pts,winner.terms,null,winner.candidate),
-		validation:{baseline:assess(null),deployed,selected:winner,evidence,search},
-		ranges:rangeTest(splits,winner),nested:nestedTest(splits.walk)}
+		ridge=assess(deployed.terms,true)
+	return blindTests.every(k=>lower(ridge,deployed,k))&&ridge.family!==null&&ridge.family<=deployed.family+.1?ridge:deployed
 }
 const levels={80:[.1,.9],50:[.25,.75]},coverage=keys(levels),
-	bounds=errors=>record(coverage,k=>levels[k].map(q=>quant(errors,q))),
 	inside=(errors,[lo,hi])=>count(errors,e=>lo<=e&&e<=hi)
-function rangeTest({loo,walk},{terms,candidate}){
-	const errors=splits=>residuals(splits,terms,null,candidate),leftOut=errors(loo),quantiles=bounds(leftOut),
-		scores=walk.map(split=>[errors([split]),bounds(errors(folds(split[0])))]),n=scores.flatMap(([es])=>es).length,
-		heldOut=record(coverage,k=>n?scores.reduce((sum,[es,range])=>sum+inside(es,range[k]),0)/n:null)
-	return{quantiles,heldOut,n,loo80:inside(leftOut,quantiles[80])/leftOut.length}
+const outerTerms={growth:"7-day growth",age:"Age / token-likeness",issuer:"Issuer factor"},
+	variants=["full",...keys(outerTerms)],outerTests={walk:"Walk-forward",family:"Leave-one-family-out"}
+const variantFit=(train,{terms,ridge},omit)=>fitValue(train,terms.filter(t=>t!==omit),omit,ridge)
+function outerFolds(pts,recs){
+	const splits={walk:folds(pts,true),family:leaveOut(pts,p=>p.family)}
+	return record(keys(outerTests),k=>splits[k].map(([train,test])=>{
+		// Keep aliases of held-out tokens out of the status model and issuer lookup too.
+		const held=new Set(test.map(tokenId)),eligible=recs.filter(p=>!held.has(tokenId(p))&&
+			(k==="walk"?p.date!==null&&p.date<test[0].date:p.family!==test[0].family)),
+			choice=selectFit(train),fits=record(["full","growth","age"],omit=>variantFit(train,choice,omit)),
+			odds=fitOdds(eligible.filter(p=>!p.product)),words=issuerWords(eligible),
+			ratio=quant(train.map(p=>p.mcap_usd/p.tvl_usd))
+		return test.map(p=>{
+			const likeness=tokenOdds(odds,p),issuer=issuerFlags(p,words).length?A.haircut:1,
+				error=(fit,s,h)=>p.response-log(scoreOf({launchValue:exp(capLog(fit,p)),tokenOdds:s,haircut:h})),
+				full=error(fits.full,likeness,issuer)
+			return {full,growth:error(fits.growth,likeness,issuer),
+				age:error(fits.age,1,issuer),issuer:error(fits.full,likeness,1),
+				flat:p.response-log(p.tvl_usd*ratio),flagged:issuer!==1}
+		})
+	}))
 }
-function nestedTest(walk){
-	const later=walk.slice(floor(walk.length/2))
-	if(!later.length) return{miss:null,shrinkage:0,folds:0}
-	const [train]=later[0],test=later.flatMap(([,rows])=>rows),
-		{terms,candidate}=selectFit(train,true)
-	return{miss:exp(quant(residuals([[train,test]],terms,null,candidate).map(abs))),shrinkage:+(candidate===shrinkage),folds:1}
+const outerMiss=(rows,kind)=>medianMiss(rows.map(row=>row[kind]))
+function valueTest(pts,recs){
+	const tests=outerFolds(pts,recs),errors=record(keys(tests),k=>tests[k].flat()),pooled=values(errors).flat(),
+		misses=record(variants,k=>({pooled:outerMiss(pooled,k),...record(keys(tests),s=>outerMiss(errors[s],k))})),
+		chosen=variants.reduce((a,b)=>misses[b].pooled<misses[a].pooled?b:a),
+		headline=record(keys(tests),k=>({miss:misses.full[k],flat:outerMiss(errors[k],"flat"),n:errors[k].length})),
+		issuerNote=misses.issuer.pooled>misses.full.pooled?"Lower pooled miss with the factor":flagNote,
+		ablation=entries(outerTerms).map(([k,term])=>({term,withTerm:misses.full,without:misses[k],
+			reason:k===chosen?"Dropped · lowest pooled miss":k==="issuer"?issuerNote:
+			misses[k].pooled<misses.full.pooled?"Kept · another single omission helped more":"Kept · removal did not lower pooled miss"})),
+		source=errors.walk.length?"walk":"family",bandErrors=errors[source].map(r=>r[chosen]),n=bandErrors.length,
+		quantiles=record(coverage,k=>levels[k].map(q=>quant(bandErrors,q)??0)),
+		hits=record(coverage,k=>inside(bandErrors,quantiles[k])),
+		labels=record(coverage,k=>n?round(100*hits[k]/n):null)
+	return{tests,misses,chosen,headline,ablation,issuerNote,flagged:count(pooled,r=>r.flagged),ranges:{quantiles,hits,labels,n,source}}
 }
 const sigmoid=x=>1/(1+exp(-limit(x,-35,35))),
 	oddsFeatures=(p,age)=>[1,p.rawSize,logAge(p,age)]
-function fitOdds(pts,omit){
+function fitOdds(pts){
 	const age=medianAge(pts),
-		inputs=pts.map(p=>oddsFeatures(p,age).map((x,i)=>i===omit?0:x)),
+		inputs=pts.map(p=>oddsFeatures(p,age)),
 		pen=[1e-6,A.oddsPenalty,A.oddsPenalty]
 	let beta=zero(3)
 	for(let i=0;i<20;i++){
@@ -357,10 +317,9 @@ const tvlMillions=A.tvlReference/1e6,
 		base*1e6*(tvl/tvlMillions)**slope)))
 function valueEquation(fit,p){
 	const [intercept,slope,...weights]=fit.coefficients,[,size,...inputs]=capInputs(p,fit),
-		terms=[["growth",exp((size-p.rawSize)*slope)],
+		terms=[...(fit.omit==="growth"?[]:[["growth",exp((size-p.rawSize)*slope)]]),
 			...fit.features.flatMap(([label],i)=>inputs[i]&&weights[i]?[[label,exp(inputs[i]*weights[i])]]:[]),
-			...(fit.group?[[fit.candidate,exp(fit.offsets.get(fit.group(p))??0)]]:[]),
-			["token-likeness",p.tokenOdds],["issuer",p.haircut]]
+			...(p.scoreOdds===1?[]:[["token-likeness",p.tokenOdds]]),["issuer",p.haircut]]
 	let shown
 	for(let digits=4;digits<=17;digits++){
 		const print=n=>+n.toPrecision(digits)
@@ -370,25 +329,24 @@ function valueEquation(fit,p){
 	}
 	return shown
 }
-function oddsTest(splits,omit){
+function oddsTest(splits){
 	const scored=splits.flatMap(([train,test])=>{
-		const fit=fitOdds(train,omit)
+		const fit=fitOdds(train)
 		return test.map(p=>[p.recorded,tokenOdds(fit,p)])
 	}),{true:positive=[],false:negative=[]}=groupBy(scored,p=>p[0])
 	let wins=0
 	for(const [,p] of positive) for(const [,n] of negative) wins+=p>n?1:p===n?.5:0
 	const pairs=positive.length*negative.length
-	return{auc:pairs?wins/pairs:null,
-		...missStats(scored.map(([recorded,score])=>-log(recorded?score:1-score)))}
+	return{auc:pairs?wins/pairs:null,n:scored.length}
 }
-function bootstrap(pts,{terms,candidate:alt}){
+function bootstrap(pts,{terms,ridge,omit}){
 	let seed=A.bootstrapSeed
 	return Array.from({length:A.bootstrapDraws},()=>{
 		const sample=pts.map(()=>{
 			seed=(Math.imul(seed,1664525)+1013904223)>>>0
 			return pts[floor(seed*pts.length/2**32)]
 		})
-		return fitValue(sample,terms,null,alt)
+		return fitValue(sample,terms,omit,ridge)
 	})
 }
 function peersFor({rawSize,category,family},pts){
@@ -447,11 +405,7 @@ const costTime=(min,fees=0)=>`${costUsd(wage(min)+fees)} · ${min} min`,
 	farmNet=n=>(n<0?"−":n>0?"+":"")+costUsd(abs(n))
 function entryTrigger(p,quote,scale=false){
 	const q=p.q||1,{odds,drop}=targetsFor({...p,q},quote).targets[+scale]
-	if(odds!==null&&odds<=1){
-		const precision=p.drop>1e6?7:4,unit=10**precision,
-			level=(ceil(odds*100*unit)/unit).toFixed(precision)
-		return{rule:`${p.horizon} d launch chance reaches ${level}%`,q:Number(level)/100}
-	}
+	if(odds!==null&&odds<=1) return{rule:`${p.horizon} d launch chance reaches ${chance(odds)}`,q:odds}
 	const reward=ceil(drop*100)/100
 	return{rule:`${p.q?"":"launch is certain and "}the gross reward quote reaches ${costUsd(reward)} at ${p.q?"the modeled launch chance":"100% launch chance"}`,
 		q,share:reward/p.drop}
@@ -542,8 +496,9 @@ function boardChecks(board,{protocols,watchlist},bytes){
 const orderedRows=rs=>count(rs,(p,i)=>p?.rank===i+1&&(!i||p.implied_value_usd<=rs[i-1]?.implied_value_usd)),
 	validSteps=steps=>Array.isArray(steps)&&steps.length>=3&&steps.length<=12
 		&&steps.every(s=>typeof s==="string"&&/^.{20,600}$/s.test(s.trim())&&/\$\d.*\d+ min/u.test(s))
-function selfChecks({rows:rs,board,counts,recs,stress,calibration,value,odds},snap,expectedDigest){
-	const {evidence,search,deployed,selected:winner}=value.validation,
+function selfChecks({rows:rs,board,counts,recs,stress,calibration,value},snap,expectedDigest){
+	const {headline,tests,chosen,ranges:{quantiles,hits,labels,n,source}}=value,
+		bandErrors=tests[source].flat().map(r=>r[chosen]),
 		plans=rs.map(p=>p.plan),samples=plans.filter(p=>p.pStar!==null&&p.q>0&&p.drop>0),close=(a,b)=>abs(a-b)<1e-8
 	return[...boardChecks(board,snap),...checks({
 		"calibration caps":calibration.every(p=>p.mcap_usd>0&&!p.productPeer),
@@ -554,8 +509,15 @@ function selfChecks({rows:rs,board,counts,recs,stress,calibration,value,odds},sn
 		"value factors":rs.every(p=>scoreOf(p)===p.score),
 		"displayed value equation":rs.every(p=>equationScore(p.equation)===p.score),
 		"bootstrap bands":rs.every(p=>p.band.low>0&&p.band.low<=p.band.high&&p.tokenOdds>0&&p.tokenOdds<1),
-		"80% LOO coverage":abs(value.ranges.loo80-.8)<=.02,
-		"flagged plans":rs.every(p=>p.flags.length?p.haircut===A.haircut&&p.plan.verdict!=="FARM":p.haircut===1),
+		"outer headline replay":entries(headline).every(([k,{miss,flat,n}])=>{
+			const heldOut=tests[k].flat()
+			return n===heldOut.length&&miss===outerMiss(heldOut,"full")&&flat===outerMiss(heldOut,"flat")
+				&&value.misses[chosen][k]===outerMiss(heldOut,chosen)
+		}),
+		"outer band coverage label":n===bandErrors.length&&coverage.every(k=>hits[k]===inside(bandErrors,quantiles[k])
+			&&(n?abs(labels[k]-100*hits[k]/n)<=5:labels[k]===null)),
+		"flagged plans":rs.every(p=>p.haircut===(p.flags.length&&chosen!=="issuer"?A.haircut:1)
+			&&(!p.flags.length||p.plan.verdict!=="FARM")),
 		"launch chance":plans.every(p=>values(p.launchOdds).every((q,i,curve)=>q>=(curve[i-1]??0)&&q<=1)),
 		"farm outcomes":plans.every(fp=>{
 			const {horizon:h,q,capital:cap,noToken,withToken,pStar,gas,funding,slip,timeCost,capitalCharge,drop,claimSell}=fp,
@@ -584,9 +546,8 @@ function selfChecks({rows:rs,board,counts,recs,stress,calibration,value,odds},sn
 			const matches=rs.filter(p=>p.plan.stress[k].verdict===v)
 			return all[v]===matches.length&&farm[v]===count(matches,isFarm)
 		})),
-		"term table":[[evidence,winner],[odds.evidence,odds.validation]].every(([rs,fit])=>rs.length&&rs.every(r=>r.withTerm===fit)),
-		"value search":search.every(row=>row.without===deployed&&passes(row)===(row.verdict!=="Rejected")
-			&&(row.withTerm===winner)===(row.verdict==="Adopted")),
+		"value term choice":variants.every(k=>value.misses[k].pooled===outerMiss(values(tests).flat(2),k)
+			&&value.misses[chosen].pooled<=value.misses[k].pooled),
 		"board digest":digest(boardRows(rs))===expectedDigest
 	})]
 }
@@ -595,20 +556,18 @@ function buildModel(snap){
 		categories=Map.groupBy(recs,p=>p.category),
 		review=new Date(Date.parse(snap.as_of)+A.reviewDays*DAY).toISOString().slice(0,10)
 	if(pts.length<3) throw new Error("Need 3 screened caps.")
-	const value=selectFit(pts),{fit,ranges:{quantiles}}=value,
+	const tested=valueTest(pts,recs),{chosen,ranges:{quantiles}}=tested,
+		fit=variantFit(pts,selectFit(pts),chosen),value={...tested,fit},
 		resamples=bootstrap(pts,fit),
 		oddsPts=recs.filter(p=>!p.product),
 		oddsFit=fitOdds(oddsPts),oddsFolds=record(blindTests,k=>folds(oddsPts,k==="walk",A.oddsWarmup)),
-		assess=omit=>record(blindTests,k=>oddsTest(oddsFolds[k],omit)),
-		validation=assess(),
-		odds={validation,evidence:[[2,"Age in token-likeness"],[1,"TVL in token-likeness"]]
-			.map(([omit,label])=>termTest(label,validation,assess(omit)))}
+		odds={validation:record(blindTests,k=>oddsTest(oddsFolds[k]))}
 	const rs=(groups.ranked??[]).map(p=>{
 		const launchValue=exp(capLog(fit,p)),
 			s=tokenOdds(oddsFit,p),
-			haircut=p.flags.length?A.haircut:1,
+			haircut=p.flags.length&&chosen!=="issuer"?A.haircut:1,
 			[low,high]=band(resamples.map(fit=>exp(capLog(fit,p)))),
-			row={...p,launchValue,tokenOdds:s,haircut,band:{low,high},
+			row={...p,launchValue,tokenOdds:s,scoreOdds:chosen==="age"?1:s,haircut,band:{low,high},
 			peers:peersFor(p,pts)}
 		row.score=scoreOf(row)
 		row.equation=valueEquation(fit,row)
@@ -625,10 +584,9 @@ function buildModel(snap){
 		watchlistTotal:snap.watchlist.length,valueFit:pts.length,oddsFit:oddsPts.length},
 		verdicts=tally(rs,p=>p.plan.verdict),farms=rs.filter(isFarm),
 		stress=record(["doubleCost","halfShare"],k=>({all:tally(rs,p=>p.plan.stress[k].verdict),
-			farm:tally(farms,p=>p.plan.stress[k].verdict)})),
-		calibration=pts.map(p=>({...p,launchValue:exp(capLog(fit,p))}))
+			farm:tally(farms,p=>p.plan.stress[k].verdict)}))
 	return{rows:rs,recs,board:{rows:boardRows(rs)},counts,verdicts,stress,
-		value,odds,calibration,assumptions:settings}
+		value,odds,calibration:pts,assumptions:settings}
 }
 const statuses=["traded","recorded","setAside","ranked"],band=xs=>A.bandQuantiles.map(q=>quant(xs,q)),
 	reasons={cap:["traded","Positive market cap"],id:["recorded","Token ID or symbol recorded"],
@@ -637,7 +595,7 @@ const statuses=["traded","recorded","setAside","ranked"],band=xs=>A.bandQuantile
 	likeness="Token-likeness is a snapshot score based on how closely a protocol’s TVL and listing age match those of protocols whose tokens already trade.",
 	timing="For protocols where the snapshot records no token, we hold TVL fixed and use the rise in token-likeness with listing age to estimate launch chance. The snapshot has no launch dates."
 const settings={parameters:A,chainQuotes,fallbackChain,timing,
-	notes:[likeness,timing,"Issuer haircut · "+flagNote,"Missing listing age uses the median.",
+	notes:[likeness,timing,"Missing listing age uses the median.",
 		`Rewards assume ${pct(A.depositorShare,0)} for depositors; ${pct(A.competingTvlShare,0)} of TVL competes.`,
 		"Excludes yield/tax/price moves. Requote borrow/mint/trade."]}
 if(typeof module==="object") module.exports={buildModel,boardChecks,selfChecks,boardRows,digest,exportManifest,

@@ -8,8 +8,7 @@ const html=(items,draw)=>items.map(draw).join(""),view=$("#view"),check=$("#chec
 	signed=s=>s.replace(/(^|[\s$(,])-(?=\$?\d)/g,"$1−"),
 	dollars=opts=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",...opts}).format,
 	cents=dollars(),money=n=>signed(cents(n)),short=dollars({notation:"compact",maximumFractionDigits:2}),usd=whole
-const dash="—",hit=n=>n==null?dash:pct(n,0),
-	mult=(n,dp=2)=>n==null?dash:signed(n.toFixed(dp))+"×",
+const dash="—",mult=n=>n==null?dash:signed(n.toFixed(3))+"×",
 	sign=n=>n>0?"+":"",
 	chg=n=>n==null?dash:sign(n)+signed(n.toFixed(2))+"%",
 	pill=n=>n==null?dash:`<b class="change ${tone(n)}"><span aria-hidden=true>${n>0?"↑ ":n<0?"↓ ":""}</span>${chg(n)}</b>`,
@@ -18,13 +17,14 @@ const dash="—",hit=n=>n==null?dash:pct(n,0),
 	esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c])
 const {rows:rs,recs,counts:ns,verdicts,stress,value,odds,assumptions:setup,board:{rows:board}}=model,
 	sameHash=digest(board)===boardDigest&&digest(manifest)===digest(exportManifest(board)),
-	{parameters:{horizons,tvlReference,riskFreeRate,hourlyUsd}}=setup,
-	auc=odds.validation,{loo,walk}=auc,
+	{parameters:{horizons,riskFreeRate,hourlyUsd}}=setup,
+	auc=odds.validation,
 	showAuc=fold=>fold.auc?.toFixed(3)??dash
-const likenessTest=`Token-likeness test: AUC ${showAuc(walk)} walk-forward`,
-	valTests=entries({loo:"Leave-one-out",walk:"Walk-forward",family:"Family hold-out"}),
-	{baseline,selected,evidence,search}=value.validation,
-	{ranges:{heldOut,n:rangeN},nested}=value,
+const aucLabel="Token-screen ranking accuracy (AUC)",
+	likenessTest=`${aucLabel} ${showAuc(auc.walk)} walk-forward`,
+	{headline,chosen,misses,ablation,issuerNote,ranges:{labels,hits,n:rangeN,source}}=value,
+	levelsShown=[80,50],rangeLabel=k=>labels[k]==null?"Uncalibrated range":`${labels[k]}% range`,
+	chosenNote=chosen==="full"?"All value terms retained":`${outerTerms[chosen]} dropped from value`,
 	groups=[["traded","traded"],["setAside","set aside"],["recorded","token, no cap"],["ranked","ranked"]],
 	choices=items=>["",...unique(items).sort()]
 const grades=keys(verdicts),
@@ -69,18 +69,17 @@ const badge=v=>`<span class="badge ${v.toLowerCase()}">${v}</span>`,
 	days=r=>r.ageDays==null?dash:integer(r.ageDays),
 	rowName=r=>esc(r.category||r.family)
 const intro=(title,copy="",lead="",lbl="")=>`<header class=intro><div>${lbl}<h1>${title}</h1>${lead}<p>${copy}</div><small>DefiLlama<br>${esc(snap.as_of)} UTC</small></header>`,
-	missTitle="Held-out miss vs flat ratio",
+	missTitle="Full model median miss vs flat ratio",
 	panel=(kind,title,body)=>`<section class="panel ${kind}">${title?`<h2>${title}</h2>`:""}${body}</section>`,
 	card=(title,body)=>panel("kpi",title,body),inset=(title,body,kind="")=>panel("inset"+kind,title,body)
 
-const [intercept,slope]=value.fit.coefficients,
-	valueStats=`<div class="readings misses">${html(valTests,([k,lbl])=>{
-		const {miss,hits:[two,three]}=selected[k]
-		return`<div><span>${lbl}</span><strong>${mult(miss,3)}</strong> / ${mult(baseline[k].miss)}<small>3× ${hit(three)} · 2× ${hit(two)}</small></div>`
+const valueStats=`<p class=nested>Outer test, selection inside training only</p>
+<div class="readings misses">${html(entries(outerTests),([k,lbl])=>{
+		const {miss,flat,n}=headline[k]
+		return`<div><span>${lbl} · n=${n}</span><strong>${mult(miss)}</strong> / ${mult(flat)}</div>`
 	})}</div>
-<p class=curve>${short(exp(intercept))} × (carried TVL / ${short(tvlReference)})<sup>${signed(slope.toFixed(3))}</sup> · n=${ns.valueFit}
-<p class=nested>Nested walk-forward ${mult(nested.miss)} · shrinkage ${nested.shrinkage}/${nested.folds}
-<p class=coverage>WF coverage (n=${rangeN}) · 80% range ${hit(heldOut[80])} · 50% range ${hit(heldOut[50])}`
+${chosen==="full"?"":`<p class=deployed>With ${outerTerms[chosen].toLowerCase()} removed · ${mult(misses[chosen].walk)} walk-forward · ${mult(misses[chosen].family)} family</p>`}
+<p class=coverage>${rangeN?`${outerTests[source]} coverage · ${levelsShown.map(k=>`${rangeLabel(k)} (${hits[k]}/${rangeN})`).join(" · ")}`:"No outer residuals for range coverage"}</p>`
 const tokenLinks=(st,separator="")=>groups.map(([k,lbl])=>
 	`<a href="${href("tokens",st,k)}"${st.route==="tokens"&&st.slug===k?' aria-current="page"':""}><b>${ns[k]}</b> ${lbl}</a>`).join(separator),
 	searchBox=st=>`<label>Search<input id=search type=search value="${esc(st.q)}" autocomplete=off></label>`,
@@ -88,8 +87,8 @@ const tokenLinks=(st,separator="")=>groups.map(([k,lbl])=>
 const kpis=st=>`<section class=kpis>
 ${card("Snapshot",`<strong>${ns.total}</strong>
 <div class=groups id=token-groups>${tokenLinks(st)}</div>`)}
-${card(missTitle,valueStats)}
-${card(`${oddsLabel} · held-out AUC`,`<div class=readings>${html(valTests.slice(0,2),([k,lbl])=>
+${card(missTitle,valueStats+`<a class=evidence href="${href("calibration",st)}">${chosenNote} · term tests →</a>`)}
+${card(aucLabel,`<div class=readings>${html([["loo","Leave-one-out"],["walk","Walk-forward"]],([k,lbl])=>
 	`<div><strong>${showAuc(auc[k])}</strong><span>${lbl}</span></div>`)}</div><p>Snapshot score from TVL and listing age compared with traded-token peers`)}
 ${card("Watchlist",`<strong>${ns.watchlistCovered}<small> / ${ns.watchlistTotal}</small></strong>
 <p>Floor ${short(snap.floor_usd)}`)}</section>`
@@ -130,7 +129,7 @@ function filtered({scope,family,chain,verdict,flag,tvl,q,sort,dir}){
 	})
 }
 const range=r=>r.map(short).join("–"),
-	valueRange=r=>`80% ${range(r[80])} · 50% ${range(r[50])}`,
+	valueRange=r=>levelsShown.map(k=>`${rangeLabel(k)} ${range(r[k])}`).join(" · "),
 	endpoints=rs.flatMap(({score,ranges})=>[score,...ranges[80]]),
 	logMin=log(min(...endpoints)),logSpan=log(max(...endpoints))-logMin||1,
 	barAt=n=>1+40*(log(n)-logMin)/logSpan
@@ -145,7 +144,7 @@ function tableRow(r,st){
 <td class=rank>${rank}
 <th scope=row>${pLink(r,st)}${r.flags.length?" <span title='Issuer flag'>!</span>":""}
 <small>${rowName(r)}${watchlist?" <span class=watch title=Watchlist>◆</span>":""}
-<td class=value title="80% range ${range(ranges[80])}"><b>${short(score)}</b><svg class=range aria-hidden=true><path d="M${lo} 4H${hi}"/><path d="M${barAt(score)} 0v8"/></svg>${equation(r,short)}
+<td class=value title="${rangeLabel(80)} ${range(ranges[80])}"><b>${short(score)}</b><svg class=range aria-hidden=true><path d="M${lo} 4H${hi}"/><path d="M${barAt(score)} 0v8"/></svg>${equation(r,short)}
 <td>${pct(tokenOdds,1)}<td>${short(tvl_usd)}
 <td>${pill(change_7d)}
 <td>${days(r)}
@@ -207,17 +206,13 @@ function drawBoard(st){
 const table=(kind,heads,body,attrs="")=>`<div class=scroll tabindex=0${attrs}><table class=${kind}><thead><tr>${heads}<tbody>${body}</table></div>`,
 	facts=(heads,rs)=>table("facts","<th>"+(typeof heads==="string"?heads.split("|"):heads).join("<th>"),
 		html(rs,([first,...cells])=>`<tr><th scope=row>${first}<td>${cells.join("<td>")}`))
-function valueSources(r){
-	const miss=(rows,label)=>{
-		const test=rows.find(e=>e.term===label)
-		return test?` · ${mult(test.withTerm.walk.miss,3)} vs ${mult(test.without.walk.miss,3)}`:""
-	}
+function valueSources(r,st){
 	return`<div class=sources><p>Base and power fit to traded caps.
-<p>Walk-forward median miss · with vs without
-<p>TVL from snapshot ${usd(r.tvl_usd)}${miss(evidence,"TVL exponent")}
-<p>7-day TVL change from snapshot ${chg(r.change_7d)}${r.growth!==r.change_7d?` (uses ${chg(r.growth)})`:""}${miss(evidence,"7d carry")}
-<p>Token-likeness uses TVL and days listed without a token (${r.ageDays==null?"median used":days(r)+" d"}). TVL${miss(odds.evidence,"TVL in token-likeness")}. Age${miss(odds.evidence,"Age in token-likeness")}.
-<p>Issuer factor · ${r.flags.length?r.flags.map(esc).join(" · ")+" · MARGINAL cap":"No flags"} · ${flagNote}</div>`
+<p>Estimated cap if a token trades ${usd(r.launchValue)} · snapshot TVL ${usd(r.tvl_usd)}
+<p>7-day TVL change ${chg(r.change_7d)}${chosen==="growth"?" · excluded from value":r.growth!==r.change_7d?` (uses ${chg(r.growth)})`:""}
+<p>Token-likeness uses TVL and days since listing (${r.ageDays==null?"median used":days(r)+" d"}).
+<p>Issuer factor · ${r.flags.length?r.flags.map(esc).join(" · "):"No flags"} · ${issuerNote}
+<p><a class=evidence href="${href("calibration",st)}">Outer test and term ablation →</a></div>`
 }
 const quoteFields=[
 	["entryGas","Entry gas $"],["exitGas","Exit gas $"],["slippage","Slippage %",100],
@@ -277,30 +272,26 @@ ${quotePanel(r)}
 <h2>Implied token value</h2><div class=amount>${usd(r.score)}</div>
 <small class=value-range>${valueRange(ranges)}</small>
 ${equation(r,usd)}
-${valueSources(r)}
+${valueSources(r,st)}
 </section>
 ${inset("Nearest traded peers",facts("Protocol|TVL|Cap",
 		r.peers.map(p=>[esc(p.name),short(p.tvl_usd),short(p.mcap_usd)]))," peers")}
 </div><div>
-${inset("Farm checklist · snapshot defaults",`<p class=range-net>Expected net ${net(low.net)} / ${net(high.net)} · ${flips.join(" · ")||"robust across 80% range"}
+${inset("Farm checklist · snapshot defaults",`<p class=range-net>Expected net ${net(low.net)} / ${net(high.net)} · ${flips.join(" · ")||`same verdict at both ends of ${rangeLabel(80)}`}
 <h3>Exit triggers</h3><ul class=exits>${html(fp.exits,s=>`<li>${esc(signed(s))}`)}</ul>${tree(fp.steps)}`)}
 ${inset(`Stress · snapshot defaults (${fp.horizon} d)`,facts("Scenario|Capital|Verdict|Net|Board F/M/S",stressRows)+"<small>(Default FARM)</small>"," stress")}
 </div></div>`
 }
 function calibration(){
-	const terms=[...evidence,...odds.evidence,{term:"Flat cap / TVL ratio",withTerm:selected,without:baseline,verdict:"Baseline"},...search],
-		ablation=facts(["Term",...["LOO","Walk-forward","Family"].flatMap(s=>[s+" with",s+" without"]),"Verdict"],
-			terms.map(({term,withTerm,without,verdict})=>[term,...valTests.flatMap(([k])=>
-				[withTerm[k],without[k]].map(f=>f?.n?`${mult(f.miss,withTerm.family?3:2)} / ${hit(f.hits[1])}`:dash)),verdict]))
+	const table=facts(["Term","Pooled",...values(outerTests),"Kept because / decision"],
+		ablation.map(({term,withTerm,without,reason})=>[term,...["pooled",...keys(outerTests)]
+			.map(k=>`${mult(withTerm[k])} / ${mult(without[k])}`),reason]))
 	return`${intro("Trading-token calibration")}
-${inset(oddsLabel,`<p>${likenessTest}<p class=odds-misses>Median miss · LOO/WF · ${mult(loo.miss)} / ${mult(walk.miss)}`)}
-${inset("Terms · miss / within 3×",`<p>Token-likeness miss uses the inverse score for the observed status. Adopt: better LOO/WF, family miss rises ≤0.1×.${ablation}`)}
-<div class=research>
-${inset(`${ns.valueFit} screened tokens`,facts("Protocol|Family|Carried TVL|Cap|Fit",
-	model.calibration.toSorted((a,b)=>b.mcap_usd-a.mcap_usd)
-		.map(p=>[esc(p.name),p.family,short(p.carriedTvl),short(p.mcap_usd),short(p.launchValue)])))}
-${inset(missTitle,valueStats+"<p>Flat ratio: fold median cap/carried TVL.")}
-</div>`
+${inset(missTitle,valueStats+`<p>Flat ratio multiplies held-out TVL by the median cap-to-TVL ratio in training.
+<p>We score the rank value against known traded caps from one snapshot, pooled across dated and family holdouts. Walk-forward orders listings by date and uses snapshot TVL, growth and caps.</p>`)}
+${inset("Value terms · median miss with / without",`<p>We refit with one term removed at a time and use the lowest pooled outer miss across ${headline.walk.n+headline.family.n} predictions to set the ranking. Range coverage is measured on the residuals used to set the bounds.</p>${table}
+<p>The issuer rule fired on ${value.flagged} held-out predictions using only training issuer names.</p>`," ablation")}
+${inset(oddsLabel,`<p class=likeness>${likenessTest}. ${setup.timing}`)}`
 }
 const tokens=st=>`${intro("Token screen","Pre-token means the snapshot records no token.")}
 <section class=panel><div class=bar><div id=token-groups></div><small id=shown role=status></small></div>
@@ -316,7 +307,7 @@ function drawTokens(st){
 }
 function drawer(){
 	const {chainQuotes,fallbackChain,notes}=setup
-	return`<ul>${html(notes,s=>`<li>${esc(s)}`)}</ul>
+	return`<ul><li>Issuer factor · ${issuerNote}${html(notes,s=>`<li>${esc(s)}`)}</ul>
 ${facts("Chain|Gas/tx|Funding|Time",entries({...chainQuotes,"Other chains":fallbackChain})
 	.map(([k,[g,f,m]])=>[k,money(g),money(f),m+" min"]))}`
 }

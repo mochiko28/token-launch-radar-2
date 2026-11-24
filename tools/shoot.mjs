@@ -308,7 +308,7 @@ function readPage() {
       .match(/\bp\*|\bx\d+(?:\.\d+)?\s+q\b|\bq\s*(?:=|\(|≥|\d)|½\s*q\b|F walk-forward/gu) ?? []),
     summary: read(".route"), route: read(".plan-route"), defaultHalfOdds,
     decision: decision(), decisionVisible: visible(".decision"),
-    coverage: read(".coverage"), nested: read(".nested"),
+    coverage: read(".coverage"), nested: read(".nested"), deployed: read(".deployed"),
     valueRange: read(".value-range"), rangeFarm: read(".range-net"),
     oddsNote: read(".timing"), pay: read(".pay"), payVisible: visible(".pay"),
     farms: read(".plans"), farmsVisible: visible(".plans"), farmBounds: document.querySelector(".plans")?.getBoundingClientRect().toJSON(),
@@ -329,10 +329,8 @@ function readPage() {
     equation: read(".valuation .equation"), amount: read(".amount"),
     sources: read(".sources"), sourcesVisible: visible(".sources"),
     peersVisible: visible(".peers"), peersBounds: document.querySelector(".peers")?.getBoundingClientRect().toJSON(),
-    curve: read(".curve"), heldOut: read(".misses"), timing: read(".research") && read("#view .inset p"),
-    capMisses: [...document.querySelectorAll(".misses strong")].map(node => node.textContent),
-    oddsMisses: read(".odds-misses")?.match(/[\d.]+×/g),
-    termRows: [...(document.querySelector(".research") ? document.querySelector(".facts").tBodies[0].rows : [])]
+    heldOut: read(".misses"), likeness: read(".likeness"),
+    termRows: [...document.querySelectorAll(".ablation tbody tr")]
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     assumptions: read("#assumptions .drawer ul"),
     assumptionTables: [...document.querySelectorAll("#assumptions table")].map(table => table.textContent),
@@ -512,13 +510,14 @@ async function shoot(output, destination) {
   const threshold = value => value == null || value > 1 ? "unreachable" : chance(value);
   const needed = (value, q) => value == null || value > 1 ? `unreachable at ${chance(q)}` : `needs ${chance(value)} vs ${chance(q)}`;
   const gasLine = `${transactions} tx × ${money(chain.gas)} on ${chain.name} = ${money(gas)}`;
-  const likenessTest = `Token-likeness test: AUC ${odds.validation.walk.auc.toFixed(3)} walk-forward`;
-  const { selected, baseline, evidence, search } = value.validation;
-  const termRows = [...evidence, ...odds.evidence,
-    { term: "Flat cap / TVL ratio", withTerm: selected, without: baseline, verdict: "Baseline" }, ...search
-  ].map(({ term, withTerm, without, verdict }) => [term,
-    ...["loo", "walk", "family"].flatMap(key => [withTerm[key], without[key]].map(sample => sample?.n
-      ? `${sample.miss.toFixed(withTerm.family ? 3 : 2)}× / ${(sample.hits[1] * 100).toFixed(0)}%` : "—")), verdict]);
+  const likenessTest = `Token-screen ranking accuracy (AUC) ${odds.validation.walk.auc.toFixed(3)} walk-forward`;
+  const mult = miss => miss == null ? "—" : `${miss.toFixed(3)}×`;
+  const { headline, chosen, misses, ranges } = value;
+  const scheme = { walk: "Walk-forward", family: "Leave-one-family-out" };
+  const levels = [80, 50];
+  const rangeLabels = levels.map(level => `${ranges.labels[level]}% range`);
+  const termRows = value.ablation.map(({ term, withTerm, without, reason }) => [term,
+    ...["pooled", ...Object.keys(scheme)].map(key => `${mult(withTerm[key])} / ${mult(without[key])}`), reason]);
   const work = mkdtempSync("/work/.tmp/rw-firefox-");
   try {
     let port;
@@ -586,10 +585,15 @@ async function shoot(output, destination) {
         if (info.equationOverflow.length) throw new Error(`${name}: board equation layout ${JSON.stringify(info.equationOverflow)}`);
         console.log(`${name} · ${info.rowCheck} · equations pass`);
       }
-      if (["1-board.jpg", "calibration"].includes(name) && (!/carried TVL.*n=\d+/.test(info.curve)
-        || !["Leave-one-out", "Walk-forward", "Family hold-out"].every(label => info.heldOut?.includes(label))
-        || ![80, 50].every(level => info.coverage?.includes(`${level}% range ${(value.ranges.heldOut[level] * 100).toFixed(0)}%`))
-        || !info.nested?.includes(`Nested walk-forward ${value.nested.miss.toFixed(2)}×`))) {
+      if (["1-board.jpg", "calibration"].includes(name) && (
+        !Object.entries(scheme).every(([key, label]) => {
+          const { miss, flat, n } = headline[key];
+          return info.heldOut?.includes(`${label} · n=${n}${mult(miss)} / ${mult(flat)}`);
+        })
+        || info.coverage !== `${scheme[ranges.source]} coverage · ${levels.map((level, i) =>
+          `${rangeLabels[i]} (${ranges.hits[level]}/${ranges.n})`).join(" · ")}`
+        || info.nested !== "Outer test, selection inside training only"
+        || (chosen !== "full" && !info.deployed?.endsWith(`${mult(misses[chosen].walk)} walk-forward · ${mult(misses[chosen].family)} family`)))) {
         throw new Error(`${name}: calibration summary is incomplete.`);
       }
       if (name === "1-board.jpg" && (info.rows.length !== board.length || info.completeRows < 10)) {
@@ -630,10 +634,8 @@ async function shoot(output, destination) {
           throw new Error(`${name}: Decision mismatch or out of view (${info.decision.join(" | ")}).`);
         }
         if (!provesValue(info.equation, score, info.amount) || !info.sourcesVisible
-          || !["fit to traded caps", "TVL from snapshot", "7-day TVL change from snapshot", "days listed without a token", "Issuer factor"]
-            .every(label => info.sources.includes(label))
-          || [...evidence.slice(0, 2), ...odds.evidence].some(({ withTerm, without }) => !info.sources.includes(
-            `${withTerm.walk.miss.toFixed(3)}× vs ${without.walk.miss.toFixed(3)}×`))) {
+          || !["fit to traded caps", "snapshot TVL", "7-day TVL change", "days since listing", "Issuer factor",
+            value.issuerNote, "Outer test and term ablation"].every(label => info.sources.includes(label))) {
           throw new Error(`${name}: value equation or held-out evidence is incomplete.`);
         }
         for (const state of info.quotes) {
@@ -668,27 +670,20 @@ async function shoot(output, destination) {
         console.log(`${protocol} · ${info.checks}\nDecision\n${info.decision.join("\n")}`);
       }
       if (name === "calibration") {
-        if (!info.timing?.includes(likenessTest)) throw new Error("Missing token-likeness test.");
-        const cap = ["loo", "walk", "family"].map(key => `${selected[key].miss.toFixed(3)}×`);
-        const oddsMiss = ["loo", "walk"].map(key => `${odds.validation[key].miss.toFixed(2)}×`);
-        if (info.capMisses.join() !== cap.join() || info.oddsMisses?.join() !== oddsMiss.join()) {
-          throw new Error("Headline misses differ from the fitted model.");
-        }
-        if (JSON.stringify(info.termRows) !== JSON.stringify(termRows)) throw new Error("Calibration rows differ from the fitted model.");
-        if (!info.assumptions?.includes("untested assumption (no traded rows carry the flag)")) {
-          throw new Error("Missing issuer haircut note in Assumptions.");
-        }
+        if (!info.likeness?.includes(likenessTest)) throw new Error("Missing token-screen ranking accuracy.");
+        if (JSON.stringify(info.termRows) !== JSON.stringify(termRows)) throw new Error("Ablation rows differ from the outer tests.");
+        if (!info.assumptions?.includes(value.issuerNote)) throw new Error("Missing issuer factor evidence in Assumptions.");
         if (!info.assumptionTables.some(table => table.includes("Gas/tx") && /Other chains\$1\.50/.test(table))) {
           throw new Error("Missing chain gas assumptions or fallback.");
         }
-        console.log("Calibration terms (median miss / within 3×):");
+        console.log("Value terms (median miss with / without):");
         for (const row of info.termRows) console.log(`  ${row.join(" | ")}`);
       }
       if (name === "2-detail.jpg" && (info.steps.length < 3
         || !info.tokenDetailVisible
         || info.tokenDetail !== "Token screen: pre-token — no gecko_id, no symbol, no market cap recorded in the snapshot"
-        || !/^80% \$.*–\$.* · 50% \$.*–\$/u.test(info.valueRange)
-        || !/Expected net.*(robust across 80% range|flips to .+ at (low|high) end)/iu.test(info.rangeFarm)
+        || !info.valueRange.startsWith(`${rangeLabels[0]} $`) || !info.valueRange.includes(` · ${rangeLabels[1]} $`)
+        || !(info.rangeFarm.endsWith(`same verdict at both ends of ${rangeLabels[0]}`) || /flips to .+ at (low|high) end/u.test(info.rangeFarm))
         || info.labels.join() !== "Watch,Entry trigger,Verify,Rehearse,Entry,Monitor,Exit,Claim & sell"
         || info.summary !== `Decision scenario · ${upshift.plan.quoteTicket(upshift.plan.capital)} · ${upshift.plan.horizon} d`
         || !info.oddsNote?.includes("no launch dates") || !info.oddsNote.includes(likenessTest)

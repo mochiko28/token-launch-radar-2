@@ -4,7 +4,7 @@
 [![rank](https://make.fun/badge/token-radar-01/mochiko28/token-launch-radar-2/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 [![reward](https://make.fun/badge/token-radar-01/mochiko28/token-launch-radar-2/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 
-Launch Radar ranks DeFi protocols for which the snapshot records no token by the value a launch could carry. The value curve is fitted on the snapshot's own traded peers using TVL, seven-day growth and listing age, and tested on held-out protocols. Each ranked protocol gets a costed farm plan with token and no-token outcomes, break-even token odds, a verify / wait / stop decision tree, a small withdrawal rehearsal before the deposit, and an editable quote panel.
+Launch Radar ranks DeFi protocols for which the snapshot records no token by the value a launch could carry. It fits market cap to TVL on the snapshot's traded peers and uses listing age in the token-likeness factor. The value test holds out later listings and whole protocol families. Removing seven-day growth lowered the pooled median miss for this snapshot. Each ranked protocol gets a costed farm plan with token and no-token outcomes, break-even token odds, a verify / wait / stop decision tree, a small withdrawal rehearsal before the deposit, and an editable quote panel.
 
 ## Run it
 

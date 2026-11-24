@@ -27,14 +27,14 @@ nav{gap:24px;margin-right:auto}
 .btn,.chip{border:0}
 .btn{padding:4px 12px;background:var(--signal);color:var(--ink)}
 #checks,.rank,.kicker{font:.76rem monospace}
-small,.curve{color:var(--dim)}
+small{color:var(--dim)}
 .intro,.bar,.dialog-top{justify-content:space-between}
 .integrity,.readings{flex-wrap:wrap}
 .intro{align-items:end;margin:12px 0 24px}
 .integrity{gap:2px;margin:-17px 0 8px}
 .chip{padding:2px 1px;white-space:nowrap;font-size:.68rem}
 .back{margin-top:16px}
-.kpis,.groups,.board,.detail,.research,.rail,.detail>div,.filters,.steps li,.quotes{display:grid}
+.kpis,.groups,.board,.detail,.rail,.detail>div,.filters,.steps li,.quotes{display:grid}
 .kpis{grid:auto/1.25fr 1.55fr 1fr .68fr;gap:12px;margin-bottom:8px}
 .kpi{padding:4px 12px;line-height:1.25}
 .kpi h2,.filters label,.kicker{text-transform:uppercase}
@@ -42,12 +42,13 @@ small,.curve{color:var(--dim)}
 .groups{grid:auto/1fr 1fr}
 #token-groups a{text-decoration:underline}
 #token-groups [aria-current]{color:inherit;font-weight:700}
-.readings,.board,.detail,.research{gap:1rem}
+.readings,.board,.detail{gap:1rem}
 :not(strong)>small,.readings span,svg,.back{display:block}
 .misses strong{font-size:1.4rem}
-small,.curve,.sources,.rail,.back,.kpi{font-size:.8rem}
+small,.sources,.rail,.back,.kpi{font-size:.8rem}
+.evidence{text-decoration:underline}
 .valuation,.decision,.steps small,thead,.rank{background:var(--wash)}
-.board,.detail,.research{align-items:start}
+.board,.detail{align-items:start}
 .board{grid:auto/1fr 290px}
 .detail>div{gap:12px}
 .bar{padding:12px 16px 8px}
@@ -112,7 +113,6 @@ tbody tr{border-bottom:var(--line)}
 .amount{font-size:2.8rem}
 .sources,.steps li{padding:4px 0}
 .facts :is(td,th){padding:7px}
-.research{grid:auto/7fr 5fr}
 dialog{margin:0 0 0 auto;height:100%;max-height:none;width:min(640px,100%);border:0}
 .dialog-top,.drawer{padding:12px}
 .dialog-top,#results thead{position:sticky;top:0;z-index:1}
@@ -123,6 +123,6 @@ dialog{margin:0 0 0 auto;height:100%;max-height:none;width:min(640px,100%);borde
 	.intro{align-items:start;flex-direction:column}
 	.kpis,.filters{grid:auto/1fr 1fr}
 	.filters label:first-child{grid-column:span 2}
-	.detail,.research{grid:auto/1fr}
+	.detail{grid:auto/1fr}
 }
 @media(max-width:500px){.kpis,.rail,.steps li{grid:auto/1fr}}
