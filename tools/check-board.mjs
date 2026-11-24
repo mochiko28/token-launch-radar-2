@@ -156,11 +156,11 @@ function report(output, input) {
   const self = api.selfChecks(model, snapshot, api.digest(actualRows));
   const passed = self.filter(check => check.pass).length;
   console.log(`${passed}/${self.length} model self-checks pass (including board digest)`);
-  const { traded, recorded, setAside, ranked, watchlistCovered, watchlistTotal, total, valueFit, oddsFit } = model.counts;
-  console.log(`${traded} traded with cap + ${recorded} token recorded without cap + ${setAside} set aside + ${ranked} pre-token ranked = ${total} | watchlist ${watchlistCovered}/${watchlistTotal}`);
+  const { traded, recorded, setAside, ranked, watchCovered, watchTotal, total, valueFit, oddsFit } = model.counts;
+  console.log(`${traded} traded with cap + ${recorded} token recorded without cap + ${setAside} set aside + ${ranked} pre-token ranked = ${total} | watchlist ${watchCovered}/${watchTotal}`);
   const { fit, headline, tests, ablation, ranges, form, winner, weight, candidates } = model.value;
   const names = ["intercept", "logGrowthAdjustedTvl"];
-  const curve = names.map((name, i) => `${name}=${fit.coefficients[i].toFixed(6)}`).join(", ");
+  const curve = names.map((name, i) => `${name}=${fit.coefs[i].toFixed(6)}`).join(", ");
   console.log(`Log market-cap fit (${valueFit} tokens, TVL divided by $100M): ${curve}`);
   const show = miss => miss == null ? "unavailable" : `${miss.toFixed(3)}x`;
   console.table(Object.entries(candidates).map(([key, { walk, family, pooled }]) => ({
