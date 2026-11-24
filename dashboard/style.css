@@ -35,7 +35,7 @@ small{color:#4f5e66}
 .chip{padding:2px 1px;white-space:nowrap;font-size:.68rem}
 .back{margin-top:16px}
 .kpis,.groups,.board,.detail,.detail>div,.filters,.steps li,.quotes,.age{display:grid}
-.kpis{grid:auto/1.25fr 1.55fr 1fr .68fr;gap:12px;margin-bottom:8px}
+.kpis{grid:auto/1fr 1.9fr 1fr .68fr;gap:12px;margin-bottom:8px}
 .kpi{padding:4px 12px;line-height:1.25}
 .kpi h2,.filters label,.kicker{text-transform:uppercase}
 .kpi strong{font-size:1.94rem}

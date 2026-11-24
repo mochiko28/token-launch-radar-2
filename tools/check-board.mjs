@@ -175,10 +175,11 @@ function report(output, input) {
     const outcome = miss !== null && miss >= flat ? " · Flat ratio ties or wins." : "";
     console.log(`${label} median miss ${show(miss)} vs ${show(flat)} flat (n=${n} across ${tests[key].length} folds)${outcome}`);
   }
-  for (const { term, withTerm, without } of ablation) {
-    console.log(`${term} (with / without) · ${["walk", "family", "pooled"].map(key =>
-      `${key} ${show(withTerm[key])} / ${show(without[key])}`).join(" · ")}`);
-  }
+  console.table([["Full model", headline], ...Object.entries(api.outerTerms).map(([key, label]) =>
+    [`Without ${label}`, ablation[key]])].map(([model, result]) => ({
+      model, ...Object.fromEntries(Object.entries(result).map(([scheme, { miss, n }]) =>
+        [scheme, `${show(miss)} (n=${n})`]))
+    })));
   console.log(ranges.n ? `Family holdout coverage ${ranges.label}% (${ranges.hits}/${ranges.n})` : "Range coverage unavailable");
   for (const [key, label] of [["loo", "Leave-one-out"], ["walk", "Walk-forward"]]) {
     const { auc, n } = model.odds.validation[key];

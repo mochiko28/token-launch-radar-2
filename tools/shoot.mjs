@@ -253,6 +253,7 @@ function readPage() {
   };
   const form = document.querySelector("#quote");
   const graph = document.querySelector(".age");
+  const drop = document.querySelector(".drop");
   const decision = () => [...document.querySelectorAll(".decision p")].map(p => p.textContent.trim());
   const halfOdds = () => read(".half-q");
   let quotePass, defaultHalfOdds;
@@ -370,11 +371,12 @@ function readPage() {
     equation: read(".valuation .equation"), amount: read(".amount"),
     sources: read(".sources"), sourcesVisible: visible(".sources"),
     peersVisible: visible(".peers"), peersBounds: document.querySelector(".peers")?.getBoundingClientRect().toJSON(),
-    heldOut: read(".misses"), likeness: read(".likeness"),
+    heldOut: read(".misses"), dropLine: read(".drop"), likeness: read(".likeness"),
+    dropVisible: visible(".drop") && drop.offsetHeight <= Math.ceil(parseFloat(getComputedStyle(drop).lineHeight)),
     candidateHeading: read(".candidates h2"),
     candidateRows: [...document.querySelectorAll(".candidates tbody tr")]
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
-    termRows: [...document.querySelectorAll(".ablation tbody tr")]
+    termRows: [...document.querySelectorAll(".ablation tr")]
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     comparePass, compareVisible: visible("#compare"), compareRanks: picked().map(input => Number(input.value)),
     compareRows: [...document.querySelectorAll("#compare tbody tr")]
@@ -614,9 +616,15 @@ async function shoot(output, destination) {
   const candidateRows = Object.entries(api.forms).map(([key, label]) => [
     label + (key === form ? " · deployed" : ""), ...comparisons.map(test => mult(candidates[key][test]))
   ]);
-  const termRows = value.ablation.map(({ term, withTerm, without }) => [
-    term, ...comparisons.map(key => `${mult(withTerm[key])} / ${mult(without[key])}`)
-  ]);
+  const tests = Object.keys(scheme);
+  const dropPairs = Object.entries(api.outerTerms).map(([term, label]) =>
+    [label, ...tests.map(key => mult(value.ablation[term][key].miss))]);
+  const dropLine = "Held out without · " + dropPairs.map(([label, ...miss]) => `${label} ${miss.join("/")}`).join(" · ");
+  const termRows = [
+    ["Model", ...tests.map(key => `${scheme[key]} · n=${headline[key].n}`)],
+    ["Full model", ...tests.map(key => mult(headline[key].miss))],
+    ...dropPairs.map(([label, ...miss]) => [`Without ${label === "TVL" ? "TVL exponent" : label}`, ...miss])
+  ];
   const work = mkdtempSync("/work/.tmp/rw-firefox-");
   try {
     let port;
@@ -703,8 +711,12 @@ async function shoot(output, destination) {
         || info.coverage !== coverage || info.nested !== "Form chosen inside training only")) {
         throw new Error(`${name}: calibration summary is incomplete.`);
       }
-      if (name === "1-board.jpg" && (info.rows.length !== board.length || info.completeRows < 10)) {
-        throw new Error(`The full board did not render with 10 complete rows in view (${info.completeRows}).`);
+      if (name === "1-board.jpg") {
+        if (info.rows.length !== board.length || info.completeRows < 10) {
+          throw new Error(`The full board did not render with 10 complete rows in view (${info.completeRows}).`);
+        }
+        if (info.dropLine !== dropLine || !info.dropVisible) throw new Error("Drop-one results are missing from the board KPI.");
+        if (!(info.loadMs > 0 && info.loadMs < 3000)) throw new Error(`DOM ready in ${info.loadMs} ms.`);
       }
       if (name === "1-board.jpg" && !info.comparePass) throw new Error("Compare limit, filtering or removal failed.");
       if (info.farms) {
@@ -809,13 +821,13 @@ async function shoot(output, destination) {
           throw new Error("Reference candidate rows differ from the outer tests.");
         }
         if (JSON.stringify(info.termRows) !== JSON.stringify(termRows)) throw new Error("Ablation rows differ from the outer tests.");
-        if (!info.assumptions?.includes(value.issuerNote)) throw new Error("Missing issuer factor evidence in Assumptions.");
+        if (!info.assumptions?.includes("Issuer haircut is fixed.")) throw new Error("Missing issuer rule in Assumptions.");
         if (info.assumptionTables.length) {
           throw new Error("Assumptions unexpectedly include a quote table.");
         }
         console.log(info.candidateHeading);
         for (const row of info.candidateRows) console.log(`  ${row.join(" | ")}`);
-        console.log("Value terms (median miss with / without):");
+        console.log("Held-out median miss by omitted term:");
         for (const row of info.termRows) console.log(`  ${row.join(" | ")}`);
       }
       if (name === "2-detail.jpg" && (info.steps.length < 3

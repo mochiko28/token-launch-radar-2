@@ -20,7 +20,7 @@ const {rows:rs,recs,counts:ns,verdicts,value,odds,assumptions:setup,board:{rows:
 	auc=k=>odds.validation[k].auc?.toFixed(3)??dash
 const aucLabel="Token-screen ranking accuracy (AUC)",
 	aucLine=`${aucLabel} ${auc("walk")} walk-forward`,
-	{headline,ablation,issuerNote,candidates,form,weight,ranges:{label,hits,n:bandN,coverage}}=value,
+	{headline,ablation,candidates,form,weight,ranges:{label,hits,n:bandN,coverage}}=value,
 	bandName=label==null?"Uncalibrated range":`${bandPct}% range`,
 	groups=[["traded","traded"],["setAside","set aside"],["recorded","token, no cap"],["ranked","ranked"]],
 	choices=items=>["",...unique(items).sort()]
@@ -66,7 +66,7 @@ const badge=v=>`<span class="badge ${v.toLowerCase()}">${v}</span>`,
 	rowName=r=>esc(r.category||r.family),
 	watch=p=>watchLines(p,short).join("<small>")+"</small>"
 const intro=(title,copy="",lead="",lbl="")=>`<header class=intro><div>${lbl}<h1>${title}</h1>${lead}<p>${copy}</div><small>DefiLlama<br>${esc(snap.as_of)} UTC</small></header>`,
-	missTitle="Median miss vs flat ratio",
+	missTitle="Median miss · full model vs flat ratio",
 	panel=(kind,title,body)=>`<section class="panel ${kind}"><h2>${title}</h2>${body}</section>`,
 	card=(title,body)=>panel("kpi",title,body),inset=(title,body,kind="")=>panel("inset"+kind,title,body)
 
@@ -76,6 +76,8 @@ const valueStats=`<p class=nested>Form chosen inside training only</p>
 		return`<div><span>${lbl} · n=${n}</span><strong>${mult(miss)}</strong> / ${mult(flat)}${miss!==null&&miss>=flat?"<small>Flat ratio ties or wins.</small>":""}</div>`
 	})}</div>
 <p class=coverage>${bandN?`${bandName} · Family holdout coverage ${label}% (${hits}/${bandN})`:"Range coverage unavailable"}</p>`
+const dropPairs=entries(outerTerms).map(([k,label])=>[label,...schemes.map(s=>mult(ablation[k][s].miss))]),
+	dropLine=`<p class=drop>Held out without · ${dropPairs.map(([label,...miss])=>label+" "+miss.join("/")).join(" · ")}</p>`
 const tokenLinks=(st,separator="")=>groups.map(([k,lbl])=>
 	`<a href="${href("tokens",st,k)}"${st.route==="tokens"&&st.slug===k?' aria-current="page"':""}><b>${ns[k]}</b> ${lbl}</a>`).join(separator),
 	searchBox=st=>`<label>Search<input id=search type=search value="${esc(st.q)}" autocomplete=off></label>`,
@@ -83,7 +85,7 @@ const tokenLinks=(st,separator="")=>groups.map(([k,lbl])=>
 const kpis=st=>`<section class=kpis>
 ${card("Snapshot",`<strong>${ns.total}</strong>
 <div class=groups id=token-groups></div>`)}
-${card(missTitle,valueStats+calLink(st))}
+${card(missTitle,valueStats+dropLine+calLink(st))}
 ${card(aucLabel,`<div class=readings>${html([["loo","Leave-one-out"],["walk",outerTests.walk]],([k,lbl])=>
 	`<div><strong>${auc(k)}</strong><span>${lbl}</span></div>`)}</div><p>TVL and listing age vs traded peers`)}
 ${card("First actions",`<b id=cover-counts>${actions}</b><p>Floor ${short(snap.floor_usd)}`)}</section>`
@@ -301,15 +303,16 @@ ${fp.capital?inset("Same ticket · snapshot defaults",facts("Scenario|Verdict|Ne
 </div></div>`
 }
 function calibration(){
-	const axes=[...values(outerTests),"Pooled"],tests=[...keys(outerTests),"pooled"],
-		scores=facts(["Value form",...axes],entries(forms).map(([f,label])=>
+	const tests=[...schemes,"pooled"],
+		scores=facts(["Value form",...values(outerTests),"Pooled"],entries(forms).map(([f,label])=>
 			[label+(f===form?" · deployed":""),...tests.map(k=>mult(candidates[f][k]))])),
-		table=facts(["Term",...axes],ablation.map(({term,withTerm,without})=>
-			[term,...tests.map(k=>`${mult(withTerm[k])} / ${mult(without[k])}`)]))
+		table=facts(["Model",...schemes.map(k=>`${outerTests[k]} · n=${headline[k].n}`)],[
+			["Full model",...schemes.map(k=>mult(headline[k].miss))],
+			...dropPairs.map(([label,...miss])=>["Without "+label+(label==="TVL"?" exponent":""),...miss])])
 	return`${intro("Trading-token calibration")}
 ${inset(missTitle,valueStats+`<p>Flat uses median training cap/TVL. Ranges use leave-one-out cap residuals.`)}
 ${inset("Candidates scored on outer folds, for reference",scores," candidates")}
-${inset("Deployed terms · median miss with / without",table," ablation")}
+${inset("Held-out median miss by omitted term",table," ablation")}
 ${inset(oddsTitle,`<p class=likeness>${aucLine}. ${setup.timing}`)}`
 }
 const tokens=st=>`${intro("Token screen","Pre-token means the snapshot records no token.")}
@@ -354,7 +357,7 @@ function render(){
 }
 
 check.title=results.map(({name,pass})=>`${name}: ${pass?"pass":"fail"}`).join("\n")
-put(".drawer",`<ul><li>Issuer factor · ${issuerNote}${html(setup.notes,s=>`<li>${esc(s)}`)}</ul>`)
+put(".drawer",`<ul>${html(setup.notes,s=>`<li>${esc(s)}`)}</ul>`)
 $("#open").onclick=()=>$("#assumptions").showModal()
 view.oninput=({target:el})=>{
 	if(el.id==="search"){

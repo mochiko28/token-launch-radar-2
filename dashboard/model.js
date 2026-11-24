@@ -76,7 +76,7 @@ Mezo|.34|2.6|17`),
 		claimMins:8,claimTx:2,
 		peerCount:3,categoryGap:1,familyGap:.45
 	}
-const {entries,fromEntries:object,groupBy,hasOwn,keys,values,assign}=Object,{isFinite:finite,isInteger}=Number,
+const {entries,fromEntries:object,groupBy,hasOwn,keys,values}=Object,{isFinite:finite,isInteger}=Number,
 	mechanisms=tableData(3,`
 Lending|3|4|9|supply|to deepest stablecoin market. Borrow <30% LTV if needed|utilization, LTV
 Vault|3|12|12|deposit|in liquid yield vault. Hold shares|share price, exits
@@ -198,16 +198,16 @@ function accum({matrix,target},x,residual,weight=1){
 	}
 }
 
-function fitValue(pts,form="current",omitGrowth=false){
+function fitValue(pts,form="current",omit){
 	const age=form==="direct"||form==="pooled"?medianAge(pts):0,
 		families=form==="pooled"?unique(pts.map(p=>p.family)):[],
-		shrink=sqrt(pts.length),fit={age,families,omitGrowth},
+		shrink=sqrt(pts.length),fit={age,families,omit},
 		eq=normal([1e-8,1e-8+shrink,...(age?[shrink,...families.map(()=>4*shrink)]:[])])
 	for(const p of pts) accum(eq,capInputs(fit,p),p.response)
 	return{...fit,coefs:solve(eq.matrix,eq.target)}
 }
-function capInputs({age,families,omitGrowth},p){
-	const x=[1,omitGrowth?p.rawSize:p.size]
+function capInputs({age,families,omit},p){
+	const x=[1,omit==="tvl"?log(1+p.growth/100):omit==="growth"?p.rawSize:p.size]
 	if(age){
 		const a=logAge(p,age)
 		x.push(a,...families.map(f=>p.family===f?a:0))
@@ -241,83 +241,80 @@ function fitBand(pts,form,levels=band){
 	return errors.length?levels.map(q=>quant(errors,q)):null
 }
 const forms={current:"Full token-likeness",direct:"Age power on cap",pooled:"Family-pooled age power",shrink:"Shrunk token-likeness"},
-	outerTerms={growth:"7-day growth",age:"Listing age",issuer:"Issuer factor"},
+	outerTerms={tvl:"TVL",growth:"7d growth",age:"Age"},
 	outerTests={walk:"Walk-forward",family:"Leave-one-family-out"},
+	schemes=keys(outerTests),
 	weights=[.125,.25,.5,.75,1],
 	splitsFor=(pts,k,warmup)=>k==="walk"?folds(pts,true,warmup):leaveOut(pts,p=>p.family),
 	mixFor=(form,w)=>form==="current"?1:form==="shrink"?w:0,
 	ageMul=(s,w)=>1-w*(1-s),
-	errorOf=(p,cap,age,issuer)=>p.response-log(score(cap,age,issuer)),
-	errFor=(fit,[p,s,h],w)=>errorOf(p,exp(capLog(fit,p)),ageMul(s,w),h)
+	errFor=(fit,[p,s,h],w)=>p.response-log(score(exp(capLog(fit,p)),ageMul(s,w),h))
 function training(test,recs,k){
 	const held=new Set(test.map(tokenKey))
 	return recs.filter(p=>!held.has(tokenKey(p))&&
 		(k==="walk"?p.date!==null&&p.date<test[0].date:p.family!==test[0].family))
 }
-function inputsFor(test,recs){
-	const odds=fitOdds(recs.filter(p=>!p.product)),words=issuers(recs)
-	return test.map(p=>[p,tokenOdds(odds,p),flagsFor(p,words).length?A.haircut:1])
-}
-function tuneWeight(pts,recs,schemes){
-	const errors=schemes.flatMap(k=>splitsFor(pts,k,12).flatMap(([train,test])=>{
-		const fit=fitValue(train)
-		return inputsFor(test,training(test,recs,k)).map(([p,s,h])=>[p,exp(capLog(fit,p)),s,h])
+function valueFolds(pts,recs,cache,warmup){
+	return record(schemes,k=>splitsFor(pts,k,warmup).map(([train,test])=>{
+		const eligible=training(test,recs,k),ratio=quant(train.map(p=>p.mcap_usd/p.tvl_usd)),
+			screen=eligible.filter(p=>!p.product),key=screen.map(p=>p.slug).join("\n"),
+			odds=cache.get(key)??fitOdds(screen),words=issuers(eligible)
+		cache.set(key,odds)
+		return{family:test[0].family,train,eligible,
+			inputs:test.map(p=>[p,tokenOdds(odds,p),flagsFor(p,words).length?A.haircut:1]),
+			rows:test.map(p=>({slug:p.slug,flat:p.response-log(p.tvl_usd*ratio)}))}
 	}))
-	return errors.length?weights.map(w=>[w,medianMiss(errors.map(([p,cap,s,h])=>errorOf(p,cap,ageMul(s,w),h)))])
-		.sort((a,b)=>a[1]-b[1])[0][0]:.5
 }
-function outer(pts,recs,inner=false){
-	return record(keys(outerTests),k=>splitsFor(pts,k,inner?12:undefined).map(([train,test])=>{
-		const eligible=training(test,recs,k),w=inner?0:tuneWeight(train,eligible,[k]),
-			fits=record(keys(forms),f=>fitValue(train,f)),
-			ratio=quant(train.map(p=>p.mcap_usd/p.tvl_usd)),
-			inputs=inputsFor(test,eligible),rows=inputs.map(input=>{
-			const [p]=input,errors=record(keys(forms),f=>errFor(fits[f],input,mixFor(f,w)))
-			if(inner) for(const w of weights) errors[w]=errFor(fits.current,input,w)
-			return{slug:p.slug,...errors,flat:p.response-log(p.tvl_usd*ratio)}
-		})
-		return{family:test[0].family,rows,train,inputs,w,fits,eligible}
-	}))
+const capForms=["current","direct","pooled"]
+function scoreFold({train,inputs,rows},kinds,omit){
+	const current=fitValue(train,"current",omit)
+	for(const k of kinds){
+		const fit=k==="direct"||k==="pooled"?fitValue(train,k,omit):current,
+			w=omit==="age"?0:k==="current"?1:+k||0
+		inputs.forEach((input,i)=>rows[i][k]=errFor(fit,input,w))
+	}
 }
 const foldRows=fs=>fs.flatMap(f=>f.rows),
 	missOf=(rows,kind)=>medianMiss(rows.map(row=>row[kind])),
 	missStats=(rows,form)=>({miss:missOf(rows,form),flat:missOf(rows,"flat"),n:rows.length}),
 	scoresFor=(tests,kinds)=>{
-		const ks=keys(tests),errors=record(ks,k=>foldRows(tests[k])),pooled=values(errors).flat()
-		return record(kinds,f=>({...record(ks,k=>missOf(errors[k],f)),pooled:missOf(pooled,f)}))
+		const errors=record(schemes,k=>foldRows(tests[k])),pooled=values(errors).flat()
+		return record(kinds,f=>({...record(schemes,k=>missOf(errors[k],f)),pooled:missOf(pooled,f)}))
 	},
-	chooseForm=({flat,...scores})=>keys(scores).filter(f=>keys(outerTests).every(k=>scores[f][k]!=null&&scores[f][k]<flat[k]))
+	chooseForm=({flat,...scores})=>keys(scores).filter(f=>schemes.every(k=>scores[f]?.[k]!=null&&scores[f][k]<flat[k]))
 		.sort((a,b)=>scores[a].pooled-scores[b].pooled)[0]
-function confirm({train,eligible,fits,inputs,rows}){
-	const inner=scoresFor(outer(train,eligible,true),[...keys(forms),"flat",...weights]),
-		w=weights.reduce((a,b)=>inner[b].pooled<inner[a].pooled?b:a),
-		{current,direct,pooled,flat}=inner,
-		form=chooseForm({current,direct,pooled,shrink:inner[w],flat})??"current",
-		weight=mixFor(form,w)
-	inputs.forEach((input,i)=>rows[i].confirmed=errFor(fits[form],input,weight))
+function innerScores(folds,omit){
+	const kinds=omit==="age"?["current"]:[...capForms,...weights]
+	for(const fold of values(folds).flat()) scoreFold(fold,kinds,omit)
+	return scoresFor(folds,["flat",...kinds])
+}
+const bestWeight=(scores,k)=>scores[weights[0]]?.[k]==null?.5:
+	weights.reduce((a,b)=>scores[b][k]<scores[a][k]?b:a)
+function confirm({train,inputs,rows},scores,omit){
+	const w=bestWeight(scores,"pooled"),{current,direct,pooled,flat}=scores,
+		form=chooseForm({current,direct,pooled,shrink:scores[w],flat})??"current",
+		fit=fitValue(train,form,omit),
+		weight=omit==="age"?0:mixFor(form,w)
+	inputs.forEach((input,i)=>rows[i][omit??"confirmed"]=errFor(fit,input,weight))
 }
 function valueTest(pts,recs){
-	const tests=outer(pts,recs),candidates=scoresFor(tests,[...keys(forms),"flat"]),
+	const cache=new Map,tests=valueFolds(pts,recs,cache)
+	for(const [k,folds] of entries(tests)) for(const fold of folds){
+		const inner=valueFolds(fold.train,fold.eligible,cache,12),scores=innerScores(inner),w=bestWeight(scores,k)
+		scoreFold(fold,[...capForms,w])
+		for(const row of fold.rows) row.shrink=row[w]
+		confirm(fold,scores)
+		for(const omit of keys(outerTerms)) confirm(fold,innerScores(inner,omit),omit)
+	}
+	const candidates=scoresFor(tests,[...keys(forms),"flat"]),
 		winner=chooseForm(candidates),form=winner??"current",
-		weight=mixFor(form,form==="shrink"?tuneWeight(pts,recs,keys(tests)):0),
-		fit=fitValue(pts,form)
-	for(const [k,folds] of entries(tests)) tests[k]=folds.map(fold=>{
-		confirm(fold)
-		const {family,rows,train,inputs,w,fits}=fold,noGrowth=fitValue(train,form,true),amount=mixFor(form,w)
-		inputs.forEach((input,i)=>{
-			const [p,s]=input
-			assign(rows[i],{growth:errFor(noGrowth,input,amount),age:errFor(fits.current,input,0),
-				issuer:errFor(fits[form],[p,s,1],amount)})
-		})
-		return{family,rows,train,bounds:k==="family"?fitBand(train,form):null}
-	})
-	const misses=scoresFor(tests,keys(outerTerms)),
-		headline=confirmation(tests),
-		issuerNote=misses.issuer.pooled>candidates[form].pooled?"Lower pooled miss with the factor":"Issuer assumption raised or tied pooled miss",
-		ablation=entries(outerTerms).map(([k,term])=>({term,withTerm:candidates[form],without:misses[k]})),
+		weight=form==="shrink"?bestWeight(innerScores(valueFolds(pts,recs,cache,12)),"pooled"):mixFor(form,0),
+		fit=fitValue(pts,form),headline=confirmation(tests),
+		ablation=record(keys(outerTerms),k=>confirmation(tests,k)),
 		coverage={}
 	let n=0,hits=0
-	for(const {family,rows,bounds} of tests.family){
+	for(const fold of tests.family){
+		const {family,rows,train}=fold,bounds=fold.bounds=fitBand(train,form)
 		if(!bounds) continue
 		const size=rows.length,b=coverage[size<8?"Other":family]??={n:0,hits:0},
 			h=count(rows,r=>inside(r[form],bounds))
@@ -328,10 +325,10 @@ function valueTest(pts,recs){
 	}
 	const label=n?round(100*hits/n):null,
 		[lo,hi,midLo,midHi]=fitBand(pts,form,[...band,.25,.75])
-	return{tests,candidates,form,winner,weight,fit,headline,ablation,issuerNote,
+	return{tests,candidates,form,winner,weight,fit,headline,ablation,
 		ranges:{bounds:{[bandPct]:[lo,hi],50:[midLo,midHi]},hits,label,n,coverage}}
 }
-const confirmation=tests=>record(keys(tests),k=>missStats(foldRows(tests[k]),"confirmed"))
+const confirmation=(tests,term="confirmed")=>record(schemes,k=>missStats(foldRows(tests[k]),term))
 const sigmoid=x=>1/(1+exp(-limit(x,-35,35))),
 	oddsInputs=(p,age)=>[1,p.rawSize,logAge(p,age)]
 function fitOdds(pts){
@@ -604,11 +601,9 @@ function selfChecks({rows:rs,board,counts,recs,verdicts,stress,calibration,value
 			const matches=plans.filter(p=>p.stress[k].verdict===v)
 			return all[v]===matches.length&&farm[v]===count(matches,isFarm)
 		})),
-		"value term replay":value.ablation.every((a,i)=>{
-			const [k,label]=entries(outerTerms)[i]
-			return a.term===label&&a.withTerm===candidates[form]
-				&&same(a.without,scoresFor(tests,[k])[k])
-		}),
+		"drop-one folds and counts":keys(outerTerms).every(t=>same(value.ablation[t],confirmation(tests,t))
+			&&schemes.every(k=>value.ablation[t][k].n===headline[k].n
+				&&tests[k].every(f=>f.rows.every(r=>finite(r[t]))))),
 		"board digest":digest(boardRows(rs))===expectedDigest
 	})]
 }
@@ -655,6 +650,6 @@ const statuses=["traded","recorded","setAside","ranked"],
 const settings={parameters:A,timing,
 	notes:[`Test cap ${whole(A.tickets.at(-2))}. Farm requires ${A.farmRatio}× cost in expected proceeds and no flags.`,
 		`Depositors get ${pct(A.depositorShare,0)} of rewards. ${pct(A.tvlShare,0)} of TVL competes.`,
-		"Excludes yield, taxes and price moves."]}
+		"Issuer haircut is fixed. Excludes yield, taxes and price moves."]}
 if(typeof module==="object") module.exports={buildModel,boardChecks,selfChecks,boardRows,digest,exportManifest,
-	priceFarm,chooseFarm,firstAction,actionCounts,forms}
+	priceFarm,chooseFarm,firstAction,actionCounts,forms,outerTerms}
