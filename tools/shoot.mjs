@@ -204,6 +204,8 @@ function readPage() {
     inputs.slice(0, 4).forEach(input => input.click());
     comparePass = read("#compare-count") === "Compare 3/3" && picked().map(input => input.value).join() === "1,2,3"
       && inputs[3].disabled && !inputs[3].checked;
+    const comparedNets = [...document.querySelectorAll("#compare tr:nth-child(4) td")];
+    comparePass &&= comparedNets.length === 3 && comparedNets.every((cell, i) => cell.innerText === inputs[i].closest("tr").lastElementChild.innerText);
     const search = document.querySelector("#search");
     const searchFor = value => {
       search.value = value;
@@ -264,6 +266,7 @@ function readPage() {
       decision: decision(),
       headline: read(".route"),
       editedAction: read(".quote-action"),
+      watchTerms: document.querySelector(".watch-terms")?.innerText,
       conditional: read(".conditional"),
       pay: read(".pay"),
       gas: read(".gas"),
@@ -375,7 +378,7 @@ function readPage() {
       const value = row.cells[2];
       return [row.dataset.slug, Number(row.cells[0].textContent), value.querySelector("b").textContent,
         value.querySelector(".equation").textContent, row.querySelector(".badge").textContent, watchlist.has(row.dataset.slug),
-        row.querySelector(".first-net").textContent, row.lastElementChild.textContent];
+        row.lastElementChild.querySelector("b")?.textContent, row.lastElementChild.innerText];
     }),
     completeRows, rangesInline, equationOverflow, width: innerWidth, height: innerHeight, dpr: devicePixelRatio,
     scrollbar: innerWidth - document.documentElement.clientWidth
@@ -544,7 +547,12 @@ async function shoot(output, destination) {
   };
   const totalTime = p => `${p.handsOnMinutes} min hands-on (${p.setupMinutes} setup + ${p.exitMinutes} exit + ${p.checkMinutes} weekly checks)`;
   const totalCost = p => `${money(p.cost)} total (gas ${money(p.gas)} + funding ${money(p.funding)} + slippage ${money(p.slip)} + time ${money(p.timeCost)} + carry ${money(p.capitalCharge)})`;
-  const actionLine = p => `${api.firstAction(p)} · Expected net ${signedMoney(p.net)}`;
+  const actionLine = p => api.firstAction(p) + (p.candidate ? "" : ` · Expected net ${signedMoney(p.net)}`);
+  const watchTerms = (p, format = compact) => {
+    const { capital, horizon, net } = p.candidate;
+    const apr = (-net * assumptions.parameters.year / (capital * horizon) * 100).toFixed(1);
+    return [`Watch · needs ${apr}% APR`, `${signedMoney(net)} at ${format(capital)}, ${horizon} d`];
+  };
   const actionCounts = api.actionCounts(verdicts);
   const chance = value => `${(100 * value).toFixed(1)}%`;
   const threshold = value => value == null || value > 1 ? "unreachable" : chance(value);
@@ -554,8 +562,8 @@ async function shoot(output, destination) {
   const mult = miss => miss == null ? "—" : `${miss.toFixed(3)}×`;
   const { headline, ranges, candidates, form } = value;
   const scheme = { walk: "Walk-forward", family: "Leave-one-family-out" };
-  const rangeLabel = ranges.n ? `${ranges.label}% range` : "Uncalibrated range";
-  const coverage = ranges.n ? `Family holdout coverage · ${rangeLabel} (${ranges.hits}/${ranges.n})` : "Range coverage unavailable";
+  const rangeLabel = ranges.n ? "80% range" : "Uncalibrated range";
+  const coverage = ranges.n ? `${rangeLabel} · Family holdout coverage ${ranges.label}% (${ranges.hits}/${ranges.n})` : "Range coverage unavailable";
   const comparisons = ["walk", "family", "pooled"];
   const candidateRows = Object.entries(api.forms).map(([key, label]) => [
     label + (key === form ? " · deployed" : ""), ...comparisons.map(test => mult(candidates[key][test]))
@@ -617,10 +625,14 @@ async function shoot(output, destination) {
       const slugs = new Set(info.rows.map(([slug]) => slug));
       if (slugs.size !== info.rows.length || info.rows.some(([slug, rank, value, equation, verdict, , net, ticket], i) => {
         const row = boardBySlug.get(slug), plan = modelBySlug.get(slug).plan;
+        const first = api.firstAction(plan);
+        const checklist = plan.candidate ? watchTerms(plan, capital => `$${capital.toLocaleString("en-US")}`).join(" · ")
+          : `${first} · expected net ${net}`;
+        const terms = plan.candidate ? watchTerms(plan).join("\n")
+          : `${first.split(" · ")[0]} ${compact(plan.capital)} ${net}\n${plan.horizon} d`;
         return row?.rank !== rank || !provesValue(equation, row.implied_value_usd, value) || verdictBySlug.get(slug) !== verdict
-          || net !== signedMoney(plan.net)
-          || ticket !== `${api.firstAction(plan, compact, " ")} ${net}${plan.capital ? `${plan.horizon} d` : ""}`
-          || !row.farm_steps[0].startsWith(`${api.firstAction(plan)} · expected net ${net}.`)
+          || (!plan.candidate && net !== signedMoney(plan.net)) || ticket !== terms
+          || !row.farm_steps[0].startsWith(`${checklist}.`)
           || (i > 0 && info.rows[i - 1][1] >= rank);
       })) {
         throw new Error(`${name}: page order, values or equation differ from board.json`);
@@ -698,11 +710,12 @@ async function shoot(output, destination) {
             totalCost(result),
             `${totalTime(result)} at $${hourly}/h · carry at ${rate}%/yr for ${holding} d`,
             `Break-even chance ${threshold(pStar)} → ${verdict}`,
-            `${action.candidate ? "Net before cash reward" : "Expected net"} ${signedMoney(net)} = launch chance × token outcome + chance of no token × no-token outcome. Displayed figures rounded.`
+            `${action.candidate ? "Net before cash reward" : "Expected net"} ${signedMoney(net)} = launch chance × token outcome + chance of no token × no-token outcome.`
           ];
           if (state.decision.join("\n") !== expected.join("\n")
             || state.headline !== actionLine(plan)
             || state.editedAction !== (edited ? `With edited inputs · ${actionLine(action)}` : undefined)
+            || state.watchTerms !== (action.candidate ? watchTerms(action).join("\n") : undefined)
             || state.conditional !== (action.candidate
               ? `Conditional ticket · ${plan.quoteTicket(capital)} · ${horizon} d`
               : undefined)

@@ -43,7 +43,7 @@ small{color:#4f5e66}
 #token-groups a,.evidence{text-decoration:underline}
 #token-groups [aria-current]{font-weight:700}
 .readings,.board,.detail{gap:1rem}
-:not(strong)>small,.readings span,svg,.back{display:block}
+:not(strong)>small,.readings span,.back{display:block}
 .misses strong{font-size:1.4rem}
 small,.sources,.rail,.back,.kpi{font-size:.8rem}
 .valuation,.decision,.steps small,thead,.rank{background:var(--wash)}
@@ -77,11 +77,10 @@ thead{font-size:.75rem}
 .value{position:relative}
 .value b{font-size:1rem}
 .value .equation{position:absolute;left:4px;bottom:2px;font-size:.75rem}
-.range{width:42px;height:8px;margin-left:4px;vertical-align:middle;background:var(--wash)}
+.range{display:inline-block;width:42px;height:8px;margin-left:4px;vertical-align:middle;background:var(--wash)}
 .range path{stroke:var(--ink);stroke-width:2}
 .range path:first-child{stroke:var(--signal);stroke-width:4}
-.range{display:inline-block}
-.first-net{font-weight:700;padding-left:2px}
+.ranks td:last-child b{padding-left:2px}
 input[name=compare]{vertical-align:middle;margin:0 0 0 4px}
 tbody tr{border-bottom:var(--line)}
 .protocol,.amount{font-weight:750}

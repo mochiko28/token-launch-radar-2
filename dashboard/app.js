@@ -9,19 +9,17 @@ const html=(items,draw)=>items.map(draw).join(""),view=$("#view"),check=$("#chec
 	money=n=>signed(costUsd(n)),short=new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",
 		notation:"compact",maximumFractionDigits:2}).format,usd=whole
 const dash="—",mult=n=>n==null?dash:n.toFixed(3)+"×",
-	sign=n=>n>0?"+":"",
-	chg=n=>n==null?dash:sign(n)+signed(n.toFixed(2))+"%",
+	chg=n=>n==null?dash:(n>0?"+":"")+signed(n.toFixed(2))+"%",
 	net=farmNet,decisionNet=n=>net(decisionUsd(n)),
 	esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c])
 const {rows:rs,recs,counts:ns,verdicts,value,odds,assumptions:setup,board:{rows:board}}=model,
 	sameHash=digest(board)===boardDigest&&digest(manifest)===digest(exportManifest(board)),
 	{parameters:{horizons,riskFreeRate,hourlyUsd}}=setup,
-	auc=odds.validation,
-	showAuc=k=>auc[k].auc?.toFixed(3)??dash
+	showAuc=k=>odds.validation[k].auc?.toFixed(3)??dash
 const aucLabel="Token-screen ranking accuracy (AUC)",
 	likenessTest=`${aucLabel} ${showAuc("walk")} walk-forward`,
 	{headline,ablation,issuerNote,candidates,form,weight,ranges:{label,hits,n:rangeN}}=value,
-	rangeLabel=label==null?"Uncalibrated range":`${label}% range`,
+	rangeLabel=label==null?"Uncalibrated range":`${bandPercent}% range`,
 	groups=[["traded","traded"],["setAside","set aside"],["recorded","token, no cap"],["ranked","ranked"]],
 	choices=items=>["",...unique(items).sort()]
 const grades=keys(verdicts),boardCounts=actionCounts(verdicts),
@@ -63,7 +61,8 @@ const badge=v=>`<span class="badge ${v.toLowerCase()}">${v}</span>`,
 	pLink=(p,st)=>`<a class=protocol href="${href("detail",st,encodeURIComponent(p.slug))}">${esc(p.name)}</a>`,
 	calLink=st=>`<a class=evidence href="${href("calibration",st)}">Calibration →</a>`,
 	days=r=>r.ageDays==null?dash:integer(r.ageDays),
-	rowName=r=>esc(r.category||r.family)
+	rowName=r=>esc(r.category||r.family),
+	watchTerms=p=>watchTermsFor(p,short).join("<small>")+"</small>"
 const intro=(title,copy="",lead="",lbl="")=>`<header class=intro><div>${lbl}<h1>${title}</h1>${lead}<p>${copy}</div><small>DefiLlama<br>${esc(snap.as_of)} UTC</small></header>`,
 	missTitle="Median miss vs flat ratio",
 	panel=(kind,title,body)=>`<section class="panel ${kind}">${title?`<h2>${title}</h2>`:""}${body}</section>`,
@@ -74,7 +73,7 @@ const valueStats=`<p class=nested>Form chosen inside training only</p>
 		const {miss,flat,n}=headline[k]
 		return`<div><span>${lbl} · n=${n}</span><strong>${mult(miss)}</strong> / ${mult(flat)}${miss!==null&&miss>=flat?"<small>Flat ratio ties or wins.</small>":""}</div>`
 	})}</div>
-<p class=coverage>${rangeN?`Family holdout coverage · ${rangeLabel} (${hits}/${rangeN})`:"Range coverage unavailable"}</p>`
+<p class=coverage>${rangeN?`${rangeLabel} · Family holdout coverage ${label}% (${hits}/${rangeN})`:"Range coverage unavailable"}</p>`
 const tokenLinks=(st,separator="")=>groups.map(([k,lbl])=>
 	`<a href="${href("tokens",st,k)}"${st.route==="tokens"&&st.slug===k?' aria-current="page"':""}><b>${ns[k]}</b> ${lbl}</a>`).join(separator),
 	searchBox=st=>`<label>Search<input id=search type=search value="${esc(st.q)}" autocomplete=off></label>`,
@@ -121,8 +120,8 @@ function filtered({scope,family,chain,verdict,flag,tvl,q,sort,dir}){
 	})
 }
 const range=r=>r.map(short).join("–"),
-	valueRange=r=>`${rangeLabel} ${range(r[80])}`,
-	endpoints=rs.flatMap(({score,ranges})=>[score,...ranges[80]]),
+	valueRange=r=>`${rangeLabel} ${range(r[bandPercent])}`,
+	endpoints=rs.flatMap(({score,ranges})=>[score,...ranges[bandPercent]]),
 	logMin=log(min(...endpoints)),logSpan=log(max(...endpoints))-logMin||1,
 	barAt=n=>1+40*(log(n)-logMin)/logSpan
 function equation(r,format){
@@ -131,7 +130,7 @@ function equation(r,format){
 }
 function tableRow(r,st){
 	const {slug,score,tokenOdds,ranges,rank,plan:fp,watchlist,tvl_usd,change_7d}=r,
-		[lo,hi]=ranges[80].map(barAt)
+		[lo,hi]=ranges[bandPercent].map(barAt)
 	return`<tr data-slug="${esc(slug)}">
 <td class=rank>${rank} ${pick(r)}
 <th scope=row>${pLink(r,st)}${r.flags.length?" <span title='Issuer flag'>!</span>":""}
@@ -140,7 +139,7 @@ function tableRow(r,st){
 <td>${pct(tokenOdds,1)}<td>${short(tvl_usd)}
 <td><b class="${change_7d>0?"pos":change_7d<0?"neg":""}">${chg(change_7d)}</b>
 <td>${days(r)}
-<td>${badge(fp.verdict)}<td>${firstAction(fp,short," ")} <span class=first-net>${net(fp.net)}</span>${fp.capital?`<small>${fp.horizon} d</small>`:""}`
+<td>${badge(fp.verdict)}<td>${fp.candidate?watchTerms(fp.candidate):`${stages[fp.verdict]} ${short(fp.capital)} <b>${net(fp.net)}</b><small>${fp.horizon} d</small>`}`
 }
 function matchesExport(rank,slug,value,verdict,format){
 	const row=manifest?.[rank-1]
@@ -153,10 +152,10 @@ function verifyRows(rows,st){
 		total=rows.length,sorted=trs.length===total&&$(`[aria-sort=${ariaSort(st)}] #sort-${st.sort}`)
 			&&trs.every((tr,i)=>tr.dataset.slug===rows[i].slug)
 	const matched=count(trs,tr=>{
-		const [rank,,value,odds]=tr.cells,n=Number(rank.textContent)
+		const [rank,,value,odds]=tr.cells,n=Number(rank.textContent),{plan:p}=rs[n-1],cell=tr.lastElementChild
 		return matchesExport(n,tr.dataset.slug,value.firstElementChild.textContent,tr.querySelector(".badge")?.textContent,short)
 			&&odds.textContent===pct(board[n-1].token_odds,1)
-			&&tr.querySelector(".first-net").textContent===net(rs[n-1].plan.net)
+			&&(p.candidate?cell.innerHTML===watchTerms(p.candidate):cell.querySelector("b").textContent===net(p.net))
 	})
 	const pass=!!(sameHash&&sorted&&matched===total
 		&&$("#cover-counts").textContent===$("#rail-counts").textContent)
@@ -197,8 +196,8 @@ function drawCompare(st){
 		[cols.value[0],...rows.map(r=>usd(r.score))],
 		["First action",...rows.map(r=>firstAction(r.plan))],
 		[cols.verdict[0],...rows.map(r=>badge(r.plan.verdict))],
-		[netLabel,...rows.map(r=>net(r.plan.net))],
-		["Time / cost",...rows.map(({plan:p})=>`${p.handsOnMinutes??0} min hands-on · ${money(p.cost)}`)]
+		[netLabel,...rows.map(({plan:p})=>p.candidate?watchTerms(p.candidate):net(p.net))],
+		["Time / cost",...rows.map(({plan:p})=>p.candidate?dash:`${p.handsOnMinutes} min hands-on · ${money(p.cost)}`)]
 	]):""
 	for(const box of $$("input[name=compare]")){
 		box.checked=compared.has(+box.value)
@@ -217,7 +216,7 @@ const quoteFields=[
 	["delay","Exit delay (d)",36500],["lockup","Lockup days",36500]
 ],
 	maybeMoney=n=>n==null?"unreachable":money(n),
-	actionLine=p=>`${firstAction(p)} · ${netLabel} ${net(p.net)}`
+	actionLine=p=>firstAction(p)+(p.candidate?"":` · ${netLabel} ${net(p.net)}`)
 function cashFlows(fp,quote,action,edited=false){
 	const result=action.candidate??action
 	const {horizon,q,capital,noToken,withToken,pStar,gas,holding,drop,claimSell,verdict,net:gain}=result,
@@ -228,12 +227,13 @@ function cashFlows(fp,quote,action,edited=false){
 	return`${edited?`<p class=quote-action>With edited inputs · ${actionLine(action)}`:""}
 ${action.candidate?`<p class=conditional>Conditional ticket · ${esc(fp.quoteTicket(capital))} · ${horizon} d`:""}
 <div class=decision>
+${action.candidate?`<div class=watch-terms>${watchTerms(result)}</div>`:""}
 <p><b>Launch chance (${horizon} d) ${chance(q)} · Token outcome ${decisionNet(withToken)}</b>
 <p><b>No-token outcome ${decisionNet(noToken)}</b>
 <p>${farmCost(result)}
 <p>${farmTime(result)} at ${usd(hourlyUsd)}/h · carry at ${pct(riskFreeRate,0)}/yr for ${holding} d
 <p>Break-even chance ${breakEven(pStar)} → ${badge(verdict)}
-<p><b>${action.candidate?"Net before cash reward":netLabel} ${decisionNet(gain)}</b> = launch chance × token outcome + chance of no token × no-token outcome. Displayed figures rounded.</div>
+<p><b>${action.candidate?"Net before cash reward":netLabel} ${decisionNet(gain)}</b> = launch chance × token outcome + chance of no token × no-token outcome.</div>
 <p class=gas>${gasBasis} on ${esc(chain.name)} = ${money(gas)}
 <p>Drop ${money(drop)} − claim &amp; sell ${money(claimSell)}
 <p class=half-q>Launch chance halved (${chance(q/2)}) · ${net(half.net)} · ${badge(half.verdict)}
@@ -288,11 +288,9 @@ function calibration(){
 		table=facts(["Term",...axes],ablation.map(({term,withTerm,without})=>
 			[term,...tests.map(k=>`${mult(withTerm[k])} / ${mult(without[k])}`)]))
 	return`${intro("Trading-token calibration")}
-${inset(missTitle,valueStats+`<p>Inner splits select the form and weight.
-<p>Walk-forward by listing date. Flat uses median training cap/TVL.
-<p>Ranges use leave-one-out training cap residuals.`)}
+${inset(missTitle,valueStats+`<p>Flat uses median training cap/TVL. Ranges use leave-one-out cap residuals.`)}
 ${inset("Candidates scored on outer folds, for reference",scores," candidates")}
-${inset("Deployed terms · median miss with / without",`<p>Raw TVL for growth. Age factor omitted for age.</p>${table}`," ablation")}
+${inset("Deployed terms · median miss with / without",table," ablation")}
 ${inset(oddsLabel,`<p class=likeness>${likenessTest}. ${setup.timing}`)}`
 }
 const tokens=st=>`${intro("Token screen","Pre-token means the snapshot records no token.")}
@@ -306,9 +304,6 @@ function drawTokens(st){
 	$("#results").innerHTML=rows.length?facts("Protocol|Reason|Market cap ($)|gecko_id|Symbol|Category|Name rule hit",
 		rows.map(p=>[bySlug.has(p.slug)?pLink(p,st):esc(p.name),reasons[p.reason][1],esc(p.mcap_usd??dash),
 			field(p.gecko_id),field(p.symbol),field(p.category),field(p.nameRule)])):empty
-}
-function drawer(){
-	return`<ul><li>Issuer factor · ${issuerNote}${html(setup.notes,s=>`<li>${esc(s)}`)}</ul>`
 }
 function verifyDetail(){
 	const rank=Number($(".kicker").textContent.split("/")[0].slice(1)),saved=board[rank-1],
@@ -340,10 +335,15 @@ function render(){
 }
 
 check.title=results.map(({name,pass})=>`${name}: ${pass?"pass":"fail"}`).join("\n")
-$(".drawer").innerHTML=drawer()
+$(".drawer").innerHTML=`<ul><li>Issuer factor · ${issuerNote}${html(setup.notes,s=>`<li>${esc(s)}`)}</ul>`
 $("#open").onclick=()=>$("#assumptions").showModal()
 view.oninput=({target:el})=>{
-	if(el.id==="search") updateBoard({...readRoute(),q:el.value})
+	if(el.id==="search"){
+		const st={...readRoute(),q:el.value}
+		history.replaceState(null,"",link(st.route,st,st.route==="tokens"?st.slug:""))
+		nav(st)
+		return (st.route==="tokens"?drawTokens:drawBoard)(st)
+	}
 	const form=el.form
 	if(form?.id!=="quote") return
 	const fp=bySlug.get(form.dataset.slug).plan,quote={...fp.quote}
@@ -364,13 +364,6 @@ function nav(st){
 		a.ariaCurrent=route===current?"page":null
 	}
 }
-function updateBoard(st){
-	history.replaceState(null,"",link(st.route,st,st.route==="tokens"?st.slug:""))
-	nav(st)
-	if(st.route==="tokens") drawTokens(st)
-	else drawBoard(st)
-}
-
 view.onchange=({target:el})=>{
 	if(el.matches(".filters select")) location.hash=link("board",{...readRoute(),[el.name]:el.value})
 	if(el.name==="compare"){

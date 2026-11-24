@@ -179,7 +179,7 @@ function report(output, input) {
     console.log(`${term} (with / without) · ${["walk", "family", "pooled"].map(key =>
       `${key} ${show(withTerm[key])} / ${show(without[key])}`).join(" · ")}`);
   }
-  console.log(ranges.n ? `Family holdout coverage · ${ranges.label}% range covers ${ranges.hits}/${ranges.n}` : "Range coverage unavailable");
+  console.log(ranges.n ? `Family holdout coverage ${ranges.label}% (${ranges.hits}/${ranges.n})` : "Range coverage unavailable");
   for (const [key, label] of [["loo", "Leave-one-out"], ["walk", "Walk-forward"]]) {
     const { auc, n } = model.odds.validation[key];
     console.log(`${label} token-screen ranking accuracy (AUC) ${auc?.toFixed(3) ?? "unavailable"} (n=${n} of ${oddsFit})`);
