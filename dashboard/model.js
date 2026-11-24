@@ -125,7 +125,7 @@ const byText=(a,b)=>(a>b)-(a<b),bySlug=(a,b)=>byText(a.slug,b.slug),
 const hasToken=p=>p.mcap_usd>0||!!(p.gecko_id||p.symbol),
 	rawScore=({launchValue,tokenOdds,haircut})=>launchValue*tokenOdds*haircut,
 	scoreOf=p=>max(1,round(rawScore(p))),
-	costUsd=n=>"$"+n.toFixed(2),
+	costUsd=new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format,
 	integer=n=>round(n).toLocaleString("en-US"),whole=n=>"$"+integer(n)
 const pct=(n,places=2)=>(n*100).toFixed(places)+"%",
 	chance=n=>pct(n,1),breakEven=n=>n==null||n>1?"unreachable":chance(n),
@@ -402,13 +402,15 @@ const routeFor=(chains,tx)=>chains.map(name=>{
 function evaluateFarm(fp,cap,{horizon:h=fp.horizon,quote=fp.quote,cost=1,share=1,
 	q=fp.launchOdds[h]}={}){
 	const {entryGas,exitGas,slippage,delay,lockup}=quote,
+		{setupMinutes,exitMinutes}=fp,
+		checkMinutes=weeks(h)*A.weeklyMinutes,handsOnMinutes=setupMinutes+exitMinutes+checkMinutes,
 		holding=max(h,lockup)+delay,
 		{bridge,gas:gasPerTx}=fp.chain,
 		gas=(fp.testGas+entryGas+exitGas)*cost,
-		fees=(bridge+(cap+A.testUsd)*slippage/100)*cost,
-		timeCost=wage(fp.handsOnMinutes+weeks(h)*A.weeklyMinutes)*cost,
+		funding=bridge*cost,slip=(cap+A.testUsd)*slippage/100*cost,
+		timeCost=wage(handsOnMinutes)*cost,
 		capitalCharge=cap*(A.riskFreeRate*holding/A.year)*cost,
-		loss=gas+fees+timeCost+capitalCharge,
+		loss=gas+funding+slip+timeCost+capitalCharge,
 		drop=fp.conditionalValue*(cap/(fp.competingTvl+cap))*A.depositorShare*share,
 		claimSell=(gasPerTx*A.claimActions+wage(A.claimMinutes)+drop*slippage/100)*cost,
 		payoff=drop-claimSell,
@@ -416,12 +418,13 @@ function evaluateFarm(fp,cap,{horizon:h=fp.horizon,quote=fp.quote,cost=1,share=1
 		multiple=q*payoff/loss,
 		verdict=multiple<1?"SKIP":multiple>=A.farmMultiple&&!fp.capped?"FARM":"MARGINAL",
 		net=q*payoff-loss,withToken=payoff-loss
-	return{capital:cap,horizon:h,q,cost:loss,gas,fees,timeCost,capitalCharge,holding,drop,claimSell,pStar,
-		noToken:-loss,withToken,net,multiple,verdict,expectedYield:net/cap}
+	return{capital:cap,horizon:h,q,cost:loss,gas,funding,slip,timeCost,capitalCharge,holding,drop,claimSell,pStar,
+		setupMinutes,exitMinutes,checkMinutes,handsOnMinutes,noToken:-loss,withToken,net,multiple,verdict}
 }
 const bestBy=k=>(a,b)=>b[k]>a[k]?b:a
-function sizeFarm(fp,scenario){
-	const ladder=A.capitalLadder.map(cap=>evaluateFarm(fp,cap,scenario))
+function sizeFarm(fp,scenario,below=Infinity){
+	const ladder=A.capitalLadder.filter(cap=>cap<below).map(cap=>evaluateFarm(fp,cap,scenario))
+	if(below<Infinity) return ladder.reduce(bestBy("net"))
 	return ladder.find(p=>p.multiple>=A.farmMultiple)??ladder.reduce(bestBy("multiple"))
 }
 const chooseFarm=(fp,quote=fp.quote,h=0)=>h?sizeFarm(fp,{quote,horizon:h})
@@ -436,7 +439,23 @@ function targetsFor({q,pStar,cost,drop,claimSell},{slippage}){
 		return{odds,drop:reward,dropRatio:reward!==null&&drop?reward/drop:null}
 	})}
 }
-const costTime=(min,fees=0)=>`${costUsd(wage(min)+fees)} · ${min} min`
+const costTime=(min,fees=0)=>`${costUsd(wage(min)+fees)} · ${min} min`,
+	farmTime=({handsOnMinutes,setupMinutes,exitMinutes,checkMinutes})=>
+		`${handsOnMinutes} min hands-on (${setupMinutes} setup + ${exitMinutes} exit + ${checkMinutes} weekly checks)`,
+	farmCost=({cost,gas,funding,slip,timeCost,capitalCharge})=>
+		`${costUsd(cost)} total (gas ${costUsd(gas)} + funding ${costUsd(funding)} + slippage ${costUsd(slip)} + time ${costUsd(timeCost)} + carry ${costUsd(capitalCharge)})`,
+	farmNet=n=>(n<0?"−":n>0?"+":"")+costUsd(abs(n))
+function entryTrigger(p,quote,scale=false){
+	const q=p.q||1,{odds,drop}=targetsFor({...p,q},quote).targets[+scale]
+	if(odds!==null&&odds<=1){
+		const precision=p.drop>1e6?7:4,unit=10**precision,
+			level=(ceil(odds*100*unit)/unit).toFixed(precision)
+		return{rule:`${p.horizon} d launch chance reaches ${level}%`,q:Number(level)/100}
+	}
+	const reward=ceil(drop*100)/100
+	return{rule:`${p.q?"":"launch is certain and "}the gross reward quote reaches ${costUsd(reward)} at ${p.q?"the modeled launch chance":"100% launch chance"}`,
+		q,share:reward/p.drop}
+}
 function farmPlan(p,review,curve,exitGrowth){
 	const {name:protocol,category,family,website,url,tvl_usd:tvl,band}=p,[actions,bps,entryMins,...base]=mechanisms[family],
 		[verb,entry,monitor]=category?.endsWith("Bridge")?plays.Bridge:hasOwn(plays,category)?plays[category]:base,
@@ -446,51 +465,58 @@ function farmPlan(p,review,curve,exitGrowth){
 			Network:/BTC$/.test(category)?"BTC":native,LP:"USDC/USDT"
 		}[family]||"USDC",
 		ticketFor=cap=>family==="LP"?`${whole(cap/2)} USDC + ${whole(cap/2)} USDT`:`${whole(cap)} ${asset}`,
-		action=`${verb} ${asset} on ${name}`,
 		{verifyMinutes:verify,testUsd,exitMinutes,claimMinutes,weeklyMinutes,firstSaleShare}=A,
 		prep=A.routeHandsOnMinutes+A.testMinutes,slippage=bps/100,
 		quote={entryGas:gas*(actions-1),exitGas:gas,slippage,delay:0,lockup:0},
 		fp={chain,quote,testGas:gas*actions,launchOdds:launchOdds(curve,p),
 			competingTvl:tvl*A.competingTvlShare,conditionalValue:p.launchValue*p.haircut,
-			handsOnMinutes:verify+prep+entryMins+exitMinutes,capped:!!p.flags.length},
+			setupMinutes:verify+prep+entryMins,exitMinutes,capped:!!p.flags.length},
 		result=chooseFarm(fp),pay=targetsFor(result,quote),
-		{capital:cap,pStar,verdict,horizon:h,q,claimSell}=result,
+		{capital:cap,verdict,horizon:h}=result,
+		scaleCap=max(cap,A.capitalLadder[1]),
+		test=verdict==="MARGINAL"?sizeFarm(fp,{horizon:h},scaleCap):null,
+		first=test??result,trigger=first.net<0?entryTrigger(first,quote):null,
+		route=`Plan route: ${name} (cheapest priced of ${chains.length} listed)`,
+		gate=trigger?"If entry trigger is met":"If eligible",
 		exits=[
 			`TVL < ${whole(tvl*A.exitTvlShare)} (${pct(A.exitTvlShare,0)} of snapshot TVL)`,
 			`token announced or no token by day ${h}`],
-		testFees=bridge+fp.testGas+testUsd*slippage/100,entryFees=quote.entryGas+cap*slippage/100,
-		verified=costTime(verify),weekly=costTime(weeklyMinutes)+"/check",ticket=verb+" "+ticketFor(cap),site=website||url,
-		route=chains.length>1?`. ${name}: cheapest priced route among ${chains.length} chains`:` on ${name}`
+		testFees=bridge+fp.testGas+testUsd*slippage/100,
+		weekly=costTime(weeklyMinutes)+"/check",site=website||url,
+		summary=f=>`${farmCost(f)} · ${farmTime(f)}`
 	if(exitGrowth!=null) exits.push(`7d TVL growth < ${exitGrowth.toFixed(2)}% (${category} p10) two weeks running`)
 	const steps=[
-		[`If farming ${protocol}, check rewards, assets, KYC, exits, deposit caps for ${whole(cap)}${route}.${site?" "+site:""}`,verified],
-		["If rules pending or caps full, wait.",verified,`Review ${review} or on change`],
-		["If ineligible, exit blocked or token recorded, stop.",verified],
-		[`If FARM, fund ${name}, deposit ${ticketFor(testUsd)} and withdraw it.`,`${costTime(prep,testFees)} + ${2*bridgeMinutes} min funding`],
-		["If test fails or is late, stop.",`${costTime(verify+prep,testFees)} spent. Recover ≤ ${whole(testUsd)}.`],
-		[`If FARM after rehearsal on ${name}, ${ticket} ${entry}.`,
-			`${costTime(entryMins,entryFees)}. Gas + slip cap ${costUsd(entryFees)}.`,
-			`${verdict} · Launch chance (${h} d) ${chance(q)} · break-even chance ${breakEven(pStar)}.`,
-			`Wait for lower costs${fp.capped?" and cleared flags":""}. Review ${review}.`,costTime(0)],
-		[`If eligible, log points, TVL, ${monitor} weekly.`,weekly],
-		[`If ${exits.join(", or ")}, exit on ${name}.`,`${costTime(exitMinutes,gas)} + lock/delay`],
-		[`If eligible at launch, claim and sell ${firstSaleShare*100}% at ${whole(band.low)} circ. cap, rest near ${whole(band.high)}.`,
-			`${costTime(claimMinutes,claimSell-wage(claimMinutes))}. Undo: buy back.`]
+		[trigger?"Watch":test?"Staged test":"Entry plan",
+			`${verdict} · ${h} d ${test?"test":trigger?"conditional":"entry"} ticket ${ticketFor(first.capital)} · expected net ${farmNet(first.net)}. ${route}.`,
+			summary(first)],
+		["Verify",`${trigger?"If entry trigger is met, confirm":"Confirm"} ${protocol} venue, reward rules, assets, KYC, caps and withdrawals. Wait if unverified or ineligible.${site?" "+site:""}`,costTime(verify)],
+		["Rehearse",`${gate} and venue is verified, fund ${name}, put in ${ticketFor(testUsd)} and withdraw it. Stop on failure or delay.`,
+			`${costTime(prep,testFees)} + ${2*bridgeMinutes} min funding wait`],
+		[test?"Test entry":"Entry",`${gate} and rehearsal passes on ${name}, ${verb} ${ticketFor(first.capital)} ${entry}.`,
+			costTime(entryMins,quote.entryGas+first.capital*slippage/100)],
+		["Monitor",`If position opens, log points, TVL, ${monitor} weekly.`,weekly],
+		["Exit",`If position opens on ${name}, exit on ${exits.join(", or ")}.`,costTime(exitMinutes,gas)],
+		["Claim & sell",`If position qualifies at launch, claim and sell ${firstSaleShare*100}% at ${whole(band.low)} circ. cap, rest near ${whole(band.high)}.`,
+			costTime(claimMinutes,first.claimSell-wage(claimMinutes))]
 	]
-	const [{drop}]=pay.targets
-	if(verdict==="SKIP") steps.push([`Revisit if points or snapshot announced. ${name} · ${
-		pStar===null||pStar>1?"break-even chance unreachable":`${needs(pStar,q)} launch chance`}.${
-		drop===null?"":` A ${costUsd(drop)} drop would break even.`}`,weekly])
-	return{...fp,...result,action,ticket,quoteTicket:cap=>verb+" "+ticketFor(cap),steps,exits,transactions,pay,stress:{
+	if(trigger) steps.splice(1,0,["Entry trigger",
+		`Enter only if ${trigger.rule}. Watch reward news ${weeklyMinutes} min/week. Review ${review} or on change.`,costTime(first.checkMinutes)])
+	if(test){
+		const scale=scaleCap===cap?result:evaluateFarm(fp,scaleCap,{horizon:h})
+		steps.push(["Scale up",
+			`After a successful test exit, reprice a new ${h} d cycle at ${ticketFor(scaleCap)}. Scale only if issuer flags clear and expected rewards cover 2× cost. At snapshot costs: ${entryTrigger(scale,quote,true).rule}.`,
+			summary(scale)])
+	}
+	return{...fp,...result,test,trigger,route,quoteTicket:ticketFor,steps,exits,transactions,pay,stress:{
 		doubleCost:sizeFarm(fp,{horizon:h,cost:A.stressCost}),halfShare:sizeFarm(fp,{horizon:h,share:A.stressShare})
 	}}
 }
 const isFarm=p=>p.plan.verdict==="FARM"
 const boardRows=rs=>rs.map(({slug,name,rank,score,launchValue,tokenOdds,haircut,ranges,plan:fp})=>({slug,name,rank,
 	implied_value_usd:score,launch_value_usd:launchValue,token_odds:tokenOdds,
-	issuer_factor:haircut,implied_value_ranges_usd:ranges,farm_steps:fp.steps.map(parts=>parts.join(" "))}))
+	issuer_factor:haircut,implied_value_ranges_usd:ranges,farm_steps:fp.steps.map(([,body,terms])=>body+" "+terms)}))
 const exportManifest=rows=>rows.map(({rank,slug,implied_value_usd,farm_steps})=>
-	[rank,slug,implied_value_usd,farm_steps[5].match(/.*\. (FARM|MARGINAL|SKIP) · Launch chance \(/)?.[1]])
+	[rank,slug,implied_value_usd,farm_steps[0].split(" · ")[0]])
 function digest(rs){
 	let hash=2166136261
 	for(const byte of new TextEncoder().encode(JSON.stringify(rs))) hash=Math.imul(hash^byte,16777619)
@@ -515,7 +541,7 @@ function boardChecks(board,{protocols,watchlist},bytes){
 }
 const orderedRows=rs=>count(rs,(p,i)=>p?.rank===i+1&&(!i||p.implied_value_usd<=rs[i-1]?.implied_value_usd)),
 	validSteps=steps=>Array.isArray(steps)&&steps.length>=3&&steps.length<=12
-		&&steps.every(s=>typeof s==="string"&&/^.{20,600}$/s.test(s.trim())&&/^(If|Revisit if) .+\$\d.*\d+ min/u.test(s))
+		&&steps.every(s=>typeof s==="string"&&/^.{20,600}$/s.test(s.trim())&&/\$\d.*\d+ min/u.test(s))
 function selfChecks({rows:rs,board,counts,recs,stress,calibration,value,odds},snap,expectedDigest){
 	const {evidence,search,deployed,selected:winner}=value.validation,
 		plans=rs.map(p=>p.plan),samples=plans.filter(p=>p.pStar!==null&&p.q>0&&p.drop>0),close=(a,b)=>abs(a-b)<1e-8
@@ -532,15 +558,23 @@ function selfChecks({rows:rs,board,counts,recs,stress,calibration,value,odds},sn
 		"flagged plans":rs.every(p=>p.flags.length?p.haircut===A.haircut&&p.plan.verdict!=="FARM":p.haircut===1),
 		"launch chance":plans.every(p=>values(p.launchOdds).every((q,i,curve)=>q>=(curve[i-1]??0)&&q<=1)),
 		"farm outcomes":plans.every(fp=>{
-			const {horizon:h,q,capital:cap,noToken,withToken,pStar,gas,fees,timeCost,capitalCharge,drop,claimSell}=fp,
-				loss=gas+fees+timeCost+capitalCharge,payoff=drop-claimSell
+			const {horizon:h,q,capital:cap,noToken,withToken,pStar,gas,funding,slip,timeCost,capitalCharge,drop,claimSell}=fp,
+				loss=gas+funding+slip+timeCost+capitalCharge,payoff=drop-claimSell
 			return h===chooseFarm(fp).horizon&&q===fp.launchOdds[h]
 				&&close(gas,fp.transactions*fp.chain.gas)
 				&&close(capitalCharge,cap*A.riskFreeRate*h/A.year)
-				&&close(timeCost,wage(fp.handsOnMinutes+weeks(h)*A.weeklyMinutes))
+				&&close(timeCost,wage(fp.handsOnMinutes))
 				&&close(noToken,-loss)&&close(withToken,payoff-loss)
 				&&(payoff<=0?pStar===null:close(pStar,loss/payoff))
 		}),
+		"SKIP conditional entry":plans.filter(p=>p.verdict==="SKIP").every(p=>
+			p.steps.slice(2).every(([,body])=>/^If (entry trigger is met|position )/.test(body))),
+		"SKIP trigger replay":plans.filter(p=>p.verdict==="SKIP").every(p=>{
+			const {net}=evaluateFarm(p,p.capital,p.trigger)
+			return p.steps[1][1].includes(p.trigger.rule)&&net>=-1e-8&&net<=1
+		}),
+		"hands-on total":plans.flatMap(p=>[p,p.test,...values(p.stress)].filter(Boolean)).every(p=>
+			p.handsOnMinutes===p.setupMinutes+p.exitMinutes+p.checkMinutes&&p.checkMinutes===weeks(p.horizon)*A.weeklyMinutes),
 		"expected net identity":plans.every(({q,withToken,noToken,net})=>close(net,q*withToken+(1-q)*noToken)),
 		"Break-even":samples.length>=3&&[0,floor(samples.length/2),-1].every(i=>{
 			const p=samples.at(i),{odds:q,dropRatio:share}=p.pay.targets[0]

@@ -9,7 +9,7 @@ import api from "../dashboard/model.js";
 const width = 1440;
 const height = 980;
 const boardHeight = 1120;
-const detailHeight = 1340;
+const detailHeight = 1440;
 const minimum = 300_000;
 const maximum = 320_000;
 const targetSize = 305_000;
@@ -218,13 +218,6 @@ function readPage() {
     return box.top >= 0 && box.bottom <= Math.min(tableBottom, innerHeight);
   }).length;
   const watchlist = new Set(globalThis.LaunchRadarData.snapshot.watchlist);
-  const plot = document.querySelector("#yield svg");
-  const names = [...(plot?.querySelectorAll("g text") ?? [])];
-  const boxes = names.map(name => name.getBoundingClientRect());
-  const plotBox = plot?.getBoundingClientRect();
-  const labelsFit = boxes.every((a, i) => a.left >= plotBox.left && a.right <= plotBox.right
-    && a.top >= plotBox.top && a.bottom <= plotBox.bottom
-    && boxes.slice(0, i).every(b => a.top >= b.bottom || a.bottom <= b.top || a.left >= b.right || a.right <= b.left));
   const visible = selector => {
     const box = document.querySelector(selector)?.getBoundingClientRect();
     return Boolean(box && box.height && box.top >= 0 && box.bottom <= innerHeight && box.right <= innerWidth);
@@ -283,15 +276,7 @@ function readPage() {
   }
   const stepItems = [...document.querySelectorAll(".steps li")];
   const labels = stepItems.map(li => li.querySelector("h3").textContent);
-  const steps = [];
-  for (const li of stepItems) {
-    const copy = li.querySelector("p");
-    const parts = [copy.firstChild.textContent.trim(), li.querySelector("small").textContent];
-    const follow = copy.querySelector("span")?.textContent;
-    if (follow) parts.push(follow);
-    if (li.querySelector("h3").textContent === "3c Wait") steps[steps.length - 1] += " " + parts.join(" ");
-    else steps.push(parts.join(" "));
-  }
+  const steps = stepItems.map(li => li.querySelector("p").textContent + " " + li.querySelector("small").textContent);
   const chips = [...document.querySelectorAll(".integrity .chip")];
   const integrity = chips.map(chip => chip.textContent);
   const integrityLines = new Set(chips.map(chip => chip.offsetTop)).size;
@@ -321,16 +306,20 @@ function readPage() {
     rankLabel: read("#sort-rank"),
     jargon: (`${document.querySelector("#view").textContent}\n${read("#assumptions .drawer")}`
       .match(/\bp\*|\bx\d+(?:\.\d+)?\s+q\b|\bq\s*(?:=|\(|≥|\d)|½\s*q\b|F walk-forward/gu) ?? []),
-    summary: read(".route"), defaultHalfOdds,
+    summary: read(".route"), route: read(".plan-route"), defaultHalfOdds,
     decision: decision(), decisionVisible: visible(".decision"),
     coverage: read(".coverage"), nested: read(".nested"),
     valueRange: read(".value-range"), rangeFarm: read(".range-net"),
     oddsNote: read(".timing"), pay: read(".pay"), payVisible: visible(".pay"),
     farms: read(".plans"), farmsVisible: visible(".plans"), farmBounds: document.querySelector(".plans")?.getBoundingClientRect().toJSON(),
+    farmHeading: read(".plans h2"),
     farmLinks: [...document.querySelectorAll(".plans a")].map(a => a.getAttribute("href")),
     farmBadges: [...document.querySelectorAll(".plans .badge")].map(chip => chip.textContent),
     farmActions: [...document.querySelectorAll(".plans .action")].map(hint => hint.textContent),
-    farmOutcomes: [...document.querySelectorAll(".plans .outcomes")].map(line => line.textContent),
+    farmCosts: [...document.querySelectorAll(".plans .plan-cost")].map(line => line.textContent),
+    farmTimes: [...document.querySelectorAll(".plans .plan-time")].map(line => line.textContent),
+    farmRoutes: [...document.querySelectorAll(".plans .plan-route")].map(line => line.textContent),
+    farmNets: [...document.querySelectorAll(".plans .pos")].map(line => line.textContent),
     labels, steps,
     gas: document.querySelector(".gas")?.innerText.replace("\n", " · "), gasVisible: visible(".gas"),
     exits: [...document.querySelectorAll(".exits li")].map(li => li.textContent),
@@ -339,7 +328,7 @@ function readPage() {
     quoteVisible: visible(".quote"), quotePass, quotes,
     equation: read(".valuation .equation"), amount: read(".amount"),
     sources: read(".sources"), sourcesVisible: visible(".sources"),
-    peersVisible: visible(".peers"),
+    peersVisible: visible(".peers"), peersBounds: document.querySelector(".peers")?.getBoundingClientRect().toJSON(),
     curve: read(".curve"), heldOut: read(".misses"), timing: read(".research") && read("#view .inset p"),
     capMisses: [...document.querySelectorAll(".misses strong")].map(node => node.textContent),
     oddsMisses: read(".odds-misses")?.match(/[\d.]+×/g),
@@ -349,10 +338,6 @@ function readPage() {
     assumptionTables: [...document.querySelectorAll("#assumptions table")].map(table => table.textContent),
     stress: read(".stress"), stressVisible: visible(".stress"), rowCheck: chips[0]?.textContent,
     rowPass: chips[0]?.dataset.pass,
-    chart: read("#yield p"), chartVisible: visible("#yield svg"), labelsFit,
-    chartBounds: [plotBox, ...boxes].map(box => box?.toJSON()),
-    chartNames: names.map(name => name.textContent),
-    chartAxes: [...(plot?.children ?? [])].filter(node => node.localName === "text").map(axis => axis.textContent),
     rows: rows.map(row => {
       const value = row.cells[2];
       return [row.dataset.slug, Number(row.cells[0].textContent), value.querySelector("b").textContent,
@@ -510,12 +495,9 @@ async function shoot(output, destination) {
     const { name } = plan.chain;
     const steps = boardBySlug.get(slug).farm_steps;
     const chainCount = new Set(chains).size;
-    const route = chainCount > 1 ? `${name}: cheapest priced route among ${chainCount} chains` : `on ${name}`;
-    if (!chains.includes(name) || !steps[0].includes(`${route}.`)
-      || steps.join(" ").split("cheapest priced route").length !== (chainCount > 1 ? 2 : 1)
-      || !steps[3].includes(`fund ${name},`) || !steps[5].includes(`rehearsal on ${name},`)
-      || !steps[7].includes(`on ${name}.`)
-      || (plan.verdict === "SKIP" && !steps.at(-1).includes(`${name} ·`))) {
+    if (!chains.includes(name) || !steps[0].includes(`Plan route: ${name} (cheapest priced of ${chainCount} listed)`)
+      || !steps.some(step => step.includes(`fund ${name},`)) || !steps.some(step => step.includes(`position opens on ${name}, exit`))
+      || JSON.stringify(steps) !== JSON.stringify(plan.steps.map(([, body, terms]) => body + " " + terms))) {
       throw new Error(`${slug}: checklist differs from priced chain ${name}.`);
     }
   }
@@ -524,6 +506,8 @@ async function shoot(output, destination) {
     const rounded = Number(value.toFixed(2));
     return (rounded > 0 ? "+" : "") + displaySigns(money(rounded));
   };
+  const totalTime = p => `${p.handsOnMinutes} min hands-on (${p.setupMinutes} setup + ${p.exitMinutes} exit + ${p.checkMinutes} weekly checks)`;
+  const totalCost = p => `${money(p.cost)} total (gas ${money(p.gas)} + funding ${money(p.funding)} + slippage ${money(p.slip)} + time ${money(p.timeCost)} + carry ${money(p.capitalCharge)})`;
   const chance = value => `${(100 * value).toFixed(1)}%`;
   const threshold = value => value == null || value > 1 ? "unreachable" : chance(value);
   const needed = (value, q) => value == null || value > 1 ? `unreachable at ${chance(q)}` : `needs ${chance(value)} vs ${chance(q)}`;
@@ -601,16 +585,6 @@ async function shoot(output, destination) {
         if (!info.rangesInline) throw new Error(`${name}: implied-value range moved off the figure's line`);
         if (info.equationOverflow.length) throw new Error(`${name}: board equation layout ${JSON.stringify(info.equationOverflow)}`);
         console.log(`${name} · ${info.rowCheck} · equations pass`);
-        const top = [...slugs].map(slug => modelBySlug.get(slug))
-          .filter(row => row.ageDays != null && Number.isFinite(row.plan.expectedYield))
-          .sort((a, b) => b.plan.expectedYield - a.plan.expectedYield || a.rank - b.rank)
-          .slice(0, 3).map(row => row.name);
-        if (!info.chartVisible || !info.labelsFit || JSON.stringify(info.chartNames) !== JSON.stringify(top)
-          || !["Days pre-token", "Expected yield"].every(axis => info.chartAxes.includes(axis))) {
-          throw new Error(`${name}: expected scatter labels ${top.join(" / ")}. Got ${JSON.stringify({
-            visible: info.chartVisible, labels: info.chartNames, axes: info.chartAxes, bounds: info.chartBounds
-          })}`);
-        }
       }
       if (["1-board.jpg", "calibration"].includes(name) && (!/carried TVL.*n=\d+/.test(info.curve)
         || !["Leave-one-out", "Walk-forward", "Family hold-out"].every(label => info.heldOut?.includes(label))
@@ -618,22 +592,30 @@ async function shoot(output, destination) {
         || !info.nested?.includes(`Nested walk-forward ${value.nested.miss.toFixed(2)}×`))) {
         throw new Error(`${name}: calibration summary is incomplete.`);
       }
-      if (name === "1-board.jpg" && (info.rows.length !== board.length || info.completeRows < 10 || !info.chart)) {
+      if (name === "1-board.jpg" && (info.rows.length !== board.length || info.completeRows < 10)) {
         throw new Error(`The full board did not render with 10 complete rows in view (${info.completeRows}).`);
       }
-      if (info.rows.length) {
-        const best = rows.filter(row => slugs.has(row.slug) && row.plan.verdict !== "SKIP")
-          .sort((a, b) => b.plan.net - a.plan.net).slice(0, 5);
-        if (!info.farmsVisible || !info.farms?.includes("Best plans that clear break-even")
+      if (info.farms) {
+        const ticket = ({ plan }) => plan.test ?? plan;
+        const eligible = rows.filter(row => slugs.has(row.slug) && ticket(row).net >= 0)
+          .sort((a, b) => ticket(b).net - ticket(a).net);
+        const best = eligible.slice(0, 5);
+        if (!info.farmsVisible || info.farmHeading !== `Best plans that clear break-even · ${eligible.length}/${slugs.size}`
           || info.farmLinks.length !== best.length || new Set(info.farmLinks).size !== best.length
           || info.farmBadges.join() !== best.map(row => row.plan.verdict).join()
-          || info.farmActions.join() !== best.map(row => row.plan.action).join()
+          || info.farmActions.join() !== best.map(({ plan }) => {
+            const p = plan.test ?? plan;
+            return `${plan.quoteTicket(p.capital)} ${plan.test ? "test" : "entry"} · ${p.horizon} d`;
+          }).join()
           || info.farmLinks.some((href, i) => href.split("?")[0] !== `#detail/${encodeURIComponent(best[i].slug)}`)
-          || info.farmOutcomes.join() !== best.map(({ plan }) => `Token ${signedMoney(plan.withToken)} · No token ${signedMoney(plan.noToken)}`).join()
+          || info.farmNets.join() !== best.map(row => `${signedMoney(ticket(row).net)} net`).join()
+          || info.farmTimes.join() !== best.map(row => totalTime(ticket(row))).join()
+          || info.farmCosts.join() !== best.map(row => totalCost(ticket(row))).join()
+          || info.farmRoutes.join() !== best.map(row => row.plan.route).join()
           || (!best.length && !info.farms.includes("No visible row clears break-even."))) {
           throw new Error(`${name}: the break-even panel differs from the visible rows. ${JSON.stringify({
             visible: info.farmsVisible, bounds: info.farmBounds, links: info.farmLinks, expected: best.map(row => row.slug), badges: info.farmBadges,
-            actions: info.farmActions, outcomes: info.farmOutcomes
+            actions: info.farmActions, nets: info.farmNets
           })}`);
         }
       }
@@ -641,7 +623,8 @@ async function shoot(output, destination) {
         const slug = page.hash.slice(8);
         const { name: protocol, plan, score } = modelBySlug.get(slug);
         const rate = (100 * assumptions.parameters.riskFreeRate).toFixed(0);
-        if (!info.decisionVisible || !info.quotePass || info.quotes.length !== 10
+        const hourly = assumptions.parameters.hourlyUsd;
+        if (!info.decisionVisible || !info.quotePass || info.quotes.length !== 10 || info.route !== plan.route
           || !info.checks.endsWith(` · ${rowProof} · 1/1`)
           || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get(slug).farm_steps.map(displaySigns))) {
           throw new Error(`${name}: Decision mismatch or out of view (${info.decision.join(" | ")}).`);
@@ -655,8 +638,8 @@ async function shoot(output, destination) {
         }
         for (const state of info.quotes) {
           const quote = { ...plan.quote, ...state.overrides };
-          const { withToken, noToken, q, pStar, verdict, gas, fees, timeCost, capitalCharge, holding, net, horizon, capital, drop, claimSell } =
-            api.chooseFarm(plan, quote, state.horizon);
+          const result = api.chooseFarm(plan, quote, state.horizon);
+          const { withToken, noToken, q, pStar, verdict, gas, holding, net, horizon, capital, drop, claimSell } = result;
           const { chain, transactions } = plan;
           const half = api.evaluateFarm(plan, capital, { quote, horizon, q: q / 2 });
           const quotedGas = quote.entryGas !== plan.quote.entryGas || quote.exitGas !== plan.quote.exitGas;
@@ -664,13 +647,13 @@ async function shoot(output, destination) {
           const expected = [
             `Launch chance (${horizon} d) ${chance(q)} · Token outcome ${signedMoney(withToken)}`,
             `No-token outcome ${signedMoney(noToken)}`,
-            `Gas ${money(gas)} + funding ${money(chain.bridge)} + slippage ${money(fees - chain.bridge)} + hands-on time ${money(timeCost)}`,
-            `+ Capital carry ${money(capitalCharge)} at a ${rate}%/yr stablecoin base rate for ${holding} d`,
+            totalCost(result),
+            `${totalTime(result)} at $${hourly}/h · carry at ${rate}%/yr for ${holding} d`,
             `Break-even chance ${threshold(pStar)} → ${verdict}`,
             `Expected net ${signedMoney(net)} = launch chance × token outcome + chance of no token × no-token outcome. Displayed figures rounded.`
           ];
           if (state.decision.join("\n") !== expected.join("\n")
-            || state.headline !== `${plan.quoteTicket(capital)} on ${chain.name} · ${horizon} d`
+            || state.headline !== `Decision scenario · ${plan.quoteTicket(capital)} · ${horizon} d`
             || !state.pay.includes(`What would make it pay · ${chain.name} · ${horizon} d`)
             || !state.pay.includes(`MARGINAL ${needed(pStar, q)}`)
             || !state.pay.includes(`FARM ${needed(pStar == null ? null : 2 * pStar, q)}`)
@@ -706,29 +689,30 @@ async function shoot(output, destination) {
         || info.tokenDetail !== "Token screen: pre-token — no gecko_id, no symbol, no market cap recorded in the snapshot"
         || !/^80% \$.*–\$.* · 50% \$.*–\$/u.test(info.valueRange)
         || !/Expected net.*(robust across 80% range|flips to .+ at (low|high) end)/iu.test(info.rangeFarm)
-        || info.labels.map(label => label.split(" ")[0]).join() !== "1,2a,2b,2c,3a,3b,3c,4,5,6,7"
-        || info.summary !== `${upshift.plan.ticket} on ${chain.name} · ${upshift.plan.horizon} d`
+        || info.labels.join() !== "Watch,Entry trigger,Verify,Rehearse,Entry,Monitor,Exit,Claim & sell"
+        || info.summary !== `Decision scenario · ${upshift.plan.quoteTicket(upshift.plan.capital)} · ${upshift.plan.horizon} d`
         || !info.oddsNote?.includes("no launch dates") || !info.oddsNote.includes(likenessTest)
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
-        || ![upshift.name, chain.name, "deposit caps", "cheapest priced route"].every(text => info.steps[0].includes(text))
-        || !info.steps.some(step => step.startsWith("If TVL") && step.includes(`${upshift.category} p10`))
+        || !info.steps.some(step => step.includes(upshift.name) && step.includes("KYC, caps and withdrawals"))
+        || !info.steps.some(step => step.includes(`${upshift.category} p10`))
         || !info.steps.some(step => step.includes("allocator vault. Hold shares"))
         || !info.gasVisible || info.gas !== gasLine || !info.exitsVisible
-        || JSON.stringify(info.exits) !== JSON.stringify(exits) || !info.steps.some(step => step.startsWith("If " + exits[0]))
+        || JSON.stringify(info.exits) !== JSON.stringify(exits) || !info.steps.some(step => step.includes(exits[0]))
         || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get("upshift")?.farm_steps.map(displaySigns))
         || !info.planVisible || !info.quoteVisible || !info.quotePass || !info.peersVisible
-        || !info.steps.some(step => step.includes("break-even chance") && /Gas \+ slip cap \$[\d.]+/.test(step))
-        || !info.steps.some(step => step.includes("deposit $80 USDC and withdraw it"))
+        || !info.steps[1].startsWith(`Enter only if ${upshift.plan.trigger.rule}.`)
+        || !info.steps[3].includes("put in $80 USDC and withdraw it")
+        || !info.steps[4].startsWith("If entry trigger is met and rehearsal passes")
         || !info.payVisible || !info.pay?.includes(`What would make it pay · ${chain.name} ·`)
-        || !info.steps.at(-1).startsWith("Revisit if points or snapshot announced.")
         || !info.stressVisible || !info.stress?.includes("Reward share halved"))) {
-        throw new Error(`Detail checks failed: ${JSON.stringify(info)}`);
+        const { quotes, ...detail } = info;
+        throw new Error(`Upshift detail checks failed: ${JSON.stringify(detail)}`);
       }
       if (name === "3-filtered.jpg") {
         const expected = rows.filter(row => row.chains.includes("Ethereum") && row.plan.verdict === "MARGINAL");
         if (info.completeRows < 5 || expected.length >= board.length || info.rows.length !== expected.length
           || expected.some(row => !slugs.has(row.slug)) || !info.rankLabel.startsWith(`Rank (of ${board.length})`)
-          || info.activeFilters.join() !== "Verdict: MARGINAL,Listed chain: Ethereum" || info.reset !== "#board") {
+          || info.activeFilters.join() !== "Verdict: MARGINAL,Listed on: Ethereum" || info.reset !== "#board") {
           throw new Error("The filtered board did not render with five complete rows, global ranks, and active filters.");
         }
       }
@@ -742,7 +726,7 @@ async function shoot(output, destination) {
       const dimensions = jpegSize(bytes);
       if (dimensions[0] !== width || dimensions[1] !== info.height) throw new Error("Unexpected screenshot dimensions.");
       writeFileSync(join(destination, name), bytes);
-      const content = [info.title, info.count, info.rowCheck, info.first, info.chart, info.summary, info.defaultHalfOdds, ...info.activeFilters].filter(Boolean).join(" · ");
+      const content = [info.title, info.count, info.rowCheck, info.first, info.farmHeading, info.summary, info.defaultHalfOdds, ...info.activeFilters].filter(Boolean).join(" · ");
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
       if (name === "1-board.jpg") console.log(`  ${info.completeRows} complete rows in view · DOM ready in ${info.loadMs} ms · ${info.coverage} · ${info.nested}\n  ${info.rows[0][3]}`);
       if (name === "3-filtered.jpg") console.log(`  ${info.completeRows} complete rows in view`);

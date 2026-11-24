@@ -97,13 +97,17 @@ const option=(v,lbl,selected)=>`<option value="${esc(v)}"${selected?" selected":
 	filterName=(k,v,name)=>name??(k==="tvl"?short(v)+"+":v),
 	filter=([lbl,k,opts,...names],st)=>`<label>${lbl}<select name=${k}>${html(opts,(v,i)=>option(v,filterName(k,v,names[i]),v===st[k]))}</select></label>`
 function plans(st,rows){
-	const best=rows.filter(({plan:p})=>p.verdict!=="SKIP").sort((a,b)=>b.plan.net-a.plan.net).slice(0,5)
-	return inset("Best plans that clear break-even",best.length?html(best,p=>{
-	const f=p.plan
-	return`<div><b class=pos>${net(f.net)} net</b>${pLink(p,st)} ${badge(f.verdict)}
-<small class=action>${esc(f.action)}</small><small>${usd(f.capital)} · ${f.handsOnMinutes} min hands-on<br>${launchLabel(f.horizon)} ${chance(f.q)} · Break-even chance ${breakEven(f.pStar)}</small>
-<small class=outcomes>Token ${decisionNet(f.withToken)} · No token ${decisionNet(f.noToken)}</small></div>`
-}):"<p>No visible row clears break-even."," plans")
+	const ticket=p=>p.plan.test??p.plan,
+		eligible=rows.filter(p=>ticket(p).net>=0).sort((a,b)=>ticket(b).net-ticket(a).net),
+		best=eligible.slice(0,5)
+	return inset(`Best plans that clear break-even · ${eligible.length}/${rows.length}`,
+		(best.length?`<p>Showing ${best.length} · ${rows.length-eligible.length} below break-even`+html(best,p=>{
+			const f=ticket(p)
+			return`<div><b class=pos>${net(f.net)} net</b>${pLink(p,st)} ${badge(p.plan.verdict)}
+<small class=action>${esc(p.plan.quoteTicket(f.capital))} ${p.plan.test?"test":"entry"} · ${f.horizon} d</small>
+<small class=plan-route>${esc(p.plan.route)}</small>
+<small class=plan-time>${farmTime(f)}</small><small class=plan-cost>${farmCost(f)}</small></div>`
+		}):"<p>No visible row clears break-even.")," plans")
 }
 const boardShell=st=>`${intro("Pre-token rankings","30–365 d farms")}
 <div class=integrity role=group aria-label=Integrity></div>
@@ -113,11 +117,7 @@ ${kpis(st)}
 <div class=filters>${searchBox(st)}
 ${html(filters,spec=>filter(spec,st))}</div>
 <div id=active-filters></div><div id=compare></div><div id=results></div>
-</section><aside class=rail>
-${inset("Expected yield by age",`<div id=yield></div>
-<div class=legend>${html(grades,v=>`<span class=${v.toLowerCase()}>${v}</span>`)}</div>`)}
-<div id=plans></div>
-</aside></div>`
+</section><aside class=rail id=plans></aside></div>`
 function filtered({scope,family,chain,verdict,flag,tvl,q,sort,dir}){
 	const field=cols[sort][1],read=typeof field==="function"?field:p=>p[field]
 	return rs.filter(p=>matchesSearch(p,q)
@@ -149,7 +149,7 @@ function tableRow(r,st){
 <td>${pct(tokenOdds,1)}<td>${short(tvl_usd)}
 <td>${pill(change_7d)}
 <td>${days(r)}
-<td>${badge(fp.verdict)}<td>${net(fp.net)}<small>${fp.horizon} d${fp.verdict==="SKIP"?` · ${needs(fp.pStar,fp.q)}`:""}</small>
+<td>${badge(fp.verdict)}<td>${net(fp.net)}<small>${usd(fp.capital)} · ${fp.horizon} d</small>
 <td><input type=checkbox data-compare="${k}" id=pick-${rank} aria-label="Compare ${esc(r.name)}"${st.compare.includes(slug)?" checked":st.compare.length===3?" disabled":""}>`
 }
 function compare(st){
@@ -186,7 +186,7 @@ function verifyRows(rows,st){
 }
 function drawBoard(st){
 	const rows=filtered(st),activeFilters=filters.flatMap(([lbl,k,opts,...names])=>
-		st[k]===defaults[k]?[]:[`${lbl}: ${filterName(k,st[k],names[opts.indexOf(st[k])])}`])
+		st[k]===defaults[k]?[]:[`${k==="chain"?"Listed on":lbl}: ${filterName(k,st[k],names[opts.indexOf(st[k])])}`])
 	if(st.q.trim()) activeFilters.unshift(`Search: ${st.q.trim()}`)
 	$("#token-groups").innerHTML=tokenLinks(st)
 	$("#active-filters").innerHTML=activeFilters.length?`${html(activeFilters,s=>`<span class=chip>${esc(s)}</span>`)}
@@ -200,35 +200,8 @@ function drawBoard(st){
 	})+"<th>Compare"
 	$("#results").innerHTML=rows.length?table("ranks",heads,html(rows,r=>tableRow(r,st))," role=region aria-label=Rankings"):"<p class=empty>No matches."
 	verifyRows(rows,st)
-	$("#yield").innerHTML=yieldChart(rows)
 	$("#plans").innerHTML=plans(st,rows)
 	$("#compare").innerHTML=compare(st)
-}
-function yieldChart(rs){
-	const rate=p=>p.plan.expectedYield,pts=rs.filter(p=>p.ageDays!=null&&finite(rate(p))),n=pts.length
-	if(!n) return "<p>No dated rows."
-	const days=ceil(max(...pts.map(p=>p.ageDays))/100)*100,rates=pts.map(p=>100*rate(p)),
-		low=floor(min(0,...rates)),span=ceil(max(1,...rates))-low,
-		x=t=>57+217*t,y=t=>130-120*t,
-		text=(x,y,anchor,s)=>`<text x=${x} y=${y} text-anchor=${anchor}>${s}</text>`,
-		points=pts.map((p,i)=>[p,x(p.ageDays/days),y((rates[i]-low)/span)]),
-		top=points.toSorted(([a],[b])=>rate(b)-rate(a)||a.rank-b.rank).slice(0,3)
-	let labelY=0
-	return`<svg class=plot viewBox="0 0 288 170" role=img aria-label="Age vs expected yield">
-${html(["start","middle","middle","end"],(anchor,i)=>{
-	const at=i/3
-	return`<path d="M57,${y(at)}H274M${x(at)},10V130"/>${text(51,y(at)+4,"end",signed(String(+(low+span*at).toFixed(1)))+"%")}${text(x(at),148,anchor,integer(days*at))}`
-})}
-${html(points.toReversed(),([{plan,ageDays,name},cx,cy])=>`<circle class=${plan.verdict.toLowerCase()} cx=${cx} cy=${cy} r=3.1>
-<title>${esc(name)} · ${ageDays} d · ${signed(pct(plan.expectedYield))}</title></circle>`)}
-<g>${html(top,([{name},cx,cy],i)=>{
-	labelY=max(labelY+20,min(cy+4,128-20*(top.length-1-i)))
-	const dx=cx>165?-8:8
-	return`<path d="M${cx},${cy}L${cx+dx},${labelY-4}"/>${text(cx+dx,labelY,dx<0?"end":"start",esc(name))}`
-})}</g>
-<text transform="translate(12 70) rotate(-90)" text-anchor=middle>Expected yield</text>
-${text(166,167,"middle","Days pre-token")}
-</svg><p>${n} plotted${rs.length>n?` · ${rs.length-n} undated`:""}`
 }
 
 const table=(kind,heads,body,attrs="")=>`<div class=scroll tabindex=0${attrs}><table class=${kind}><thead><tr>${heads}<tbody>${body}</table></div>`,
@@ -251,9 +224,9 @@ const quoteFields=[
 	["delay","Exit delay (d)",36500],["lockup","Lockup days",36500]
 ],
 	maybeMoney=n=>n==null?"unreachable":money(n),
-	quoteHeadline=(fp,{capital,horizon})=>`${fp.quoteTicket(capital)} on ${fp.chain.name} · ${horizon} d`
+	quoteHeadline=(fp,{capital,horizon})=>`Decision scenario · ${fp.quoteTicket(capital)} · ${horizon} d`
 function cashFlows(fp,quote,result){
-	const {horizon,q,capital,noToken,withToken,pStar,gas,fees,timeCost,holding,capitalCharge,drop,claimSell,verdict,net:gain}=result,
+	const {horizon,q,capital,noToken,withToken,pStar,gas,holding,drop,claimSell,verdict,net:gain}=result,
 		{chain,transactions}=fp,gasBasis=quote.entryGas===fp.quote.entryGas&&quote.exitGas===fp.quote.exitGas
 			?`${transactions} tx × ${money(chain.gas)}`:"Quoted gas",
 		half=evaluateFarm(fp,capital,{quote,horizon,q:q/2}),pay=targetsFor(result,quote),
@@ -261,11 +234,10 @@ function cashFlows(fp,quote,result){
 	return`<div class=decision>
 <p><b>${launchLabel(horizon)} ${chance(q)} · Token outcome ${decisionNet(withToken)}</b>
 <p><b>No-token outcome ${decisionNet(noToken)}</b>
-<p>Gas ${money(gas)} + funding ${money(chain.bridge)} + slippage ${money(fees-chain.bridge)} + hands-on time ${money(timeCost)}
-<p>+ Capital carry ${money(capitalCharge)} at a ${pct(riskFreeRate,0)}/yr stablecoin base rate for ${holding} d
+<p>${farmCost(result)}
+<p>${farmTime(result)} at ${usd(hourlyUsd)}/h · carry at ${pct(riskFreeRate,0)}/yr for ${holding} d
 <p>Break-even chance ${breakEven(pStar)} → ${badge(verdict)}
 <p><b>Expected net ${decisionNet(gain)}</b> = launch chance × token outcome + chance of no token × no-token outcome. Displayed figures rounded.</div>
-<p>Time at ${usd(hourlyUsd)}/h
 <p class=gas>${gasBasis} on ${esc(chain.name)} = ${money(gas)}
 <p>Drop ${money(drop)} − claim &amp; sell ${money(claimSell)}
 <p class=half-q>Launch chance halved (${chance(q/2)}) · ${net(half.net)} · ${badge(half.verdict)}
@@ -282,10 +254,8 @@ ${html(quoteFields,([k,lbl,max=1e6])=>`<label>${lbl}
 <input name=${k} type=number step=any min=0 max=${max} placeholder=${fp.quote[k]}>
 <small>Default</small></label>`)}
 </form>`," quote")
-const labels="1 Verify|2a Wait|2b Stop|2c Test withdrawal|3a Stop|3b Entry|4 Monitor|5 Exit|6 Claim & sell|7 Revisit".split("|"),
-	step=(lbl,body,terms,follow)=>`<li><div><h3>${lbl}</h3><p>${esc(signed(body))}${follow?` <span>${esc(signed(follow))}</span>`:""}</div><small>${esc(signed(terms))}</small>`,
-	tree=steps=>`<ol class=steps>${html(steps,([body,terms,follow,fallback,extra],i)=>
-		step(labels[i],body,terms,follow)+(fallback?step("3c Wait",fallback,extra):""))}</ol>`
+const tree=steps=>`<ol class=steps>${html(steps,([label,body,terms])=>
+		`<li><div><h3>${label}</h3><p>${esc(signed(body))}</div><small>${esc(terms)}</small>`)}</ol>`
 function detail(st,r){
 	const back=`<a class=back href="${href("board",st)}">← Rankings</a>`
 	if(!r) return back+intro("Unavailable")
@@ -294,7 +264,7 @@ function detail(st,r){
 			`pre-token — no gecko_id, no symbol, no ${r.mcap_usd==null?"":"positive "}market cap recorded in the snapshot`,
 		summary=`${rowName(r)} · ${short(r.tvl_usd)} TVL · ${chg(r.change_7d)} 7d · ${days(r)} d listed<br><span id=token-reason>Token screen: ${esc(tokenLine)}</span>`,
 		lbl=`<p class=kicker>#${r.rank}/${ns.ranked}${r.watchlist?" · ◆ Watchlist":""}`,
-		lead=`<p class=route>${esc(quoteHeadline(fp,fp))}`,
+		lead=`<p><span class=route>${esc(quoteHeadline(fp,fp))}</span> · <span class=plan-route>${esc(fp.route)}</span></p>`,
 		stressRows=[[null,"Default"],...scenarios].map(([k,lbl])=>{
 		const p=fp.stress[k]??fp,{all=verdicts,farm}=stress[k]??{}
 		return[lbl,usd(p.capital),badge(p.verdict),net(p.net),grades.map(v=>farm?`${all[v]} (${farm[v]})`:all[v]).join(" / ")]
@@ -352,10 +322,11 @@ ${facts("Chain|Gas/tx|Funding|Time",entries({...chainQuotes,"Other chains":fallb
 }
 function verifyDetail(){
 	const rank=Number($(".kicker").textContent.split("/")[0].slice(1)),saved=board[rank-1],
-		entry=$(".steps li:nth-child(6) p"),follow=entry.querySelector("span").textContent
+		steps=$$(".steps li")
 	return sameHash&&matchesExport(rank,$("#quote").dataset.slug,$(".amount").textContent,$(".decision .badge").textContent,usd)
 		&&$(".value-range").textContent===valueRange(saved.implied_value_ranges_usd)
-		&&signed(saved.farm_steps[5]).includes(follow)
+		&&steps.length===saved.farm_steps.length
+		&&steps.every((li,i)=>li.querySelector("p").textContent+" "+li.querySelector("small").textContent===signed(saved.farm_steps[i]))
 }
 const pages={board:boardShell,tokens,calibration,detail}
 let activeRoute
