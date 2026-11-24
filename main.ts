@@ -22,10 +22,15 @@ function run() {
   const inputFile = statSync(input).isDirectory() ? join(input, "snapshot.json") : input;
   const snapshot = readSnapshot(inputFile);
   const model = modelApi.buildModel(snapshot);
-  const boardDigest = modelApi.digest(model.board.rows);
   const boardText = JSON.stringify(model.board, null, 2) + "\n";
-  requirePass(modelApi.boardChecks(model.board, snapshot, Buffer.byteLength(boardText)), "Board gate");
+  const exported = JSON.parse(boardText);
+  const boardDigest = modelApi.digest(exported.rows);
+  const manifest = modelApi.exportManifest(exported.rows);
+  requirePass(modelApi.boardChecks(exported, snapshot, Buffer.byteLength(boardText)), "Board gate");
   requirePass(modelApi.selfChecks(model, snapshot, boardDigest), "Model checks");
+  if (manifest.some((entry, i) => entry[3] !== model.rows[i].plan.verdict)) {
+    throw new Error("Published checklist verdict differs from the model.");
+  }
   mkdirSync(output, { recursive: true });
   for (const dir of ["dashboard", "screenshots"]) {
     cpSync(join(import.meta.dirname, dir), join(output, dir), { recursive: true });
@@ -36,7 +41,7 @@ function run() {
   if (dossier.byteLength > 1.5 * 1024 * 1024) throw new Error("Dossier exceeds the gate's 1.5 MiB limit.");
   const dossierText = JSON.parse(new TextDecoder().decode(dossier)).text;
   if (/^\[Cut at 65536 bytes:/m.test(dossierText)) throw new Error("Dashboard source exceeds the dossier text budget.");
-  const data = JSON.stringify({ snapshot, boardDigest });
+  const data = JSON.stringify({ snapshot, boardDigest, manifest });
   writeFileSync(join(output, "board.json"), boardText);
   writeFileSync(join(output, "data.js"), `globalThis.LaunchRadarData = ${data};\n`);
   writeFileSync(join(output, "dossier.json"), dossier);

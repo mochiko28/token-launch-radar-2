@@ -111,7 +111,7 @@ const record=(keys,read)=>object(keys.map(k=>[k,read(k)])),unique=items=>[...new
 	DAY=86_400_000,
 	familyOf=new Map(entries(families).flatMap(([family,categories])=>
 	categories.split("|").map(category=>[category,family])))
-const products=["Bridge","Canonical Bridge","Cross Chain Bridge","Restaked BTC","CEX"],
+const products=["Bridge","Canonical Bridge","Cross Chain Bridge","Restaked BTC"],
 	liquid=["Liquid Staking","Liquid Restaking"],
 	version=/\s+(?:v\s*\d+(?:\.\d+)*|\d+\.\d+(?:\.\d+)*)$/i,
 	exchange=/^(?:Binance|Coinbase|Bybit|Kraken|Bitget|OKX|Bitfinex|Gemini)\b/i,
@@ -151,15 +151,18 @@ function prepare(snap){
 			ageDays=date===null?null:max(1,floor((asOf-date)/DAY)),
 			growth=limit(p.change_7d??A.missingGrowth,...A.growthClip),
 			carriedTvl=tvl*(1+growth/100),
-			product=products.includes(category)||exchange.test(name)
-			||/\b(?:wrapped|bridged|staked)\b/i.test(name)||(!isLiquid&&/\bstaking\b/i.test(name)),
+			receipt=name.match(/\b(?:wrapped|bridged|staked)\b/i)?.[0]||(!isLiquid&&name.match(/\bstaking\b/i)?.[0]),
+			venue=name.match(exchange)?.[0],wrapper=products.includes(category)||!!receipt,
+			product=wrapper||category==="CEX"||!!venue,
 			recorded=hasToken(p),
 			watchlist=snap.watchlist.includes(p.slug),
 			flags=recorded?[]:[issuerWords.has(word1(name))&&"Recorded issuer match",
 				isLiquid&&"Liquid staking/restaking",version.test(name)&&"Versioned name"].filter(Boolean),
-			status=p.mcap_usd>0?"traded":recorded?"recorded":product&&!watchlist?"setAside":"ranked"
+			status=p.mcap_usd>0?"traded":recorded?"recorded":product&&!watchlist?"setAside":"ranked",
+			reason=status==="traded"?"cap":status==="recorded"?"id":status==="setAside"?(wrapper?"product":"exchange"):product?"watch":"pre",
+			nameRule=[venue,receipt,...flags.filter(f=>f!=="Liquid staking/restaking")].filter(Boolean).join(" · ")
 		return{...p,family,date,ageDays,growth,carriedTvl,flags,
-			product,productPeer:product||isLiquid||receiptId.test(gecko_id),watchlist,recorded,status,
+			product,productPeer:product||isLiquid||receiptId.test(gecko_id),watchlist,recorded,status,reason,nameRule,
 			size:log(carriedTvl/A.tvlReference),rawSize:log(tvl/A.tvlReference)}
 	})
 }
@@ -305,7 +308,7 @@ function selectFit(pts,inner){
 				assess(winner.terms.filter(t=>t!==(omit==="carry"?"growth":omit)),winner.candidate,omit)))
 	evidence.push({term:"Issuer haircut",withTerm:winner,without:winner,verdict:flagNote})
 	return{fit:fitValue(pts,winner.terms,null,winner.candidate),
-		validation:{baseline:assess(null),deployed,selected:winner,trials,evidence,search},
+		validation:{baseline:assess(null),deployed,selected:winner,evidence,search},
 		ranges:rangeTest(splits,winner),nested:nestedTest(splits.walk)}
 }
 const levels={80:[.1,.9],50:[.25,.75]},coverage=keys(levels),
@@ -479,6 +482,8 @@ const isFarm=p=>p.plan.verdict==="FARM"
 const boardRows=rs=>rs.map(({slug,name,rank,score,launchValue,tokenOdds,haircut,ranges,plan:fp})=>({slug,name,rank,
 	implied_value_usd:score,launch_value_usd:launchValue,token_odds:tokenOdds,
 	issuer_factor:haircut,implied_value_ranges_usd:ranges,farm_steps:fp.steps.map(parts=>parts.join(" "))}))
+const exportManifest=rows=>rows.map(({rank,slug,implied_value_usd,farm_steps})=>
+	[rank,slug,implied_value_usd,farm_steps[5].match(/.*\. (FARM|MARGINAL|SKIP) · Launch chance \(/)?.[1]])
 function digest(rs){
 	let hash=2166136261
 	for(const byte of new TextEncoder().encode(JSON.stringify(rs))) hash=Math.imul(hash^byte,16777619)
@@ -504,12 +509,15 @@ function boardChecks(board,{protocols,watchlist},bytes){
 const orderedRows=rs=>count(rs,(p,i)=>p?.rank===i+1&&(!i||p.implied_value_usd<=rs[i-1]?.implied_value_usd)),
 	validSteps=steps=>Array.isArray(steps)&&steps.length>=3&&steps.length<=12
 		&&steps.every(s=>typeof s==="string"&&/^.{20,600}$/s.test(s.trim())&&/^(If|Revisit if) .+\$\d.*\d+ min/u.test(s))
-function selfChecks({rows:rs,board,counts,stress,reference,calibration,value,odds},snap,expectedDigest){
+function selfChecks({rows:rs,board,counts,recs,stress,reference,calibration,value,odds},snap,expectedDigest){
 	const {evidence,search,deployed,selected:winner}=value.validation,
 		plans=rs.map(p=>p.plan),samples=plans.filter(p=>p.pStar!==null&&p.q>0&&p.drop>0),close=(a,b)=>abs(a-b)<1e-8
 	return[...boardChecks(board,snap),...checks({
-		"group counts":statuses.reduce((n,k)=>n+counts[k],0)===counts.total
-			&&counts.ranked===rs.length&&calibration.every(p=>p.mcap_usd>0&&!p.productPeer),
+		"calibration caps":calibration.every(p=>p.mcap_usd>0&&!p.productPeer),
+		"token screen":counts.total===snap.protocols.length&&counts.ranked===rs.length
+			&&recs.length===counts.total&&new Set(recs.map(p=>p.slug)).size===recs.length
+			&&recs.every((p,i)=>p.slug===snap.protocols[i].slug&&reasons[p.reason]?.[0]===p.status)
+			&&statuses.every(k=>count(recs,p=>reasons[p.reason]?.[0]===k)===counts[k]),
 		"value factors":rs.every(p=>scoreOf(p)===p.score),
 		"attribution":rs.every(p=>abs(values(p.attribution).reduce((a,b)=>a*b,1)*reference.score/p.score-1)<1e-10),
 		"bootstrap bands":rs.every(p=>p.band.low>0&&p.band.low<=p.band.high&&p.tokenOdds>0&&p.tokenOdds<1),
@@ -579,19 +587,19 @@ function buildModel(snap){
 		verdicts=tally(rs,p=>p.plan.verdict),farms=rs.filter(isFarm),
 		stress=record(["doubleCost","halfShare"],k=>({all:tally(rs,p=>p.plan.stress[k].verdict),
 			farm:tally(farms,p=>p.plan.stress[k].verdict)})),
-		calibration=pts.map(p=>({...p,launchValue:exp(capLog(fit,p))})),peerRatios=band(pts.map(capRatio)),
-		audit=rs.slice(0,20).map(p=>{
-			const ratio=p.launchValue/p.carriedTvl
-			return{...p,ratio,outlier:ratio<peerRatios[0]||ratio>peerRatios[1]}
-		})
-	return{rows:rs,reference,board:{rows:boardRows(rs)},counts,verdicts,stress,
-		value,odds,calibration,audit,peerRatios,assumptions:settings}
+		calibration=pts.map(p=>({...p,launchValue:exp(capLog(fit,p))}))
+	return{rows:rs,recs,reference,board:{rows:boardRows(rs)},counts,verdicts,stress,
+		value,odds,calibration,assumptions:settings}
 }
 const statuses=["traded","recorded","setAside","ranked"],band=xs=>A.bandQuantiles.map(q=>quant(xs,q)),
+	reasons={cap:["traded","Positive market cap"],id:["recorded","Token ID or symbol recorded"],
+		product:["setAside","Wrapped, staked or bridged product"],exchange:["setAside","Exchange category or name"],
+		pre:["ranked","Pre-token"],watch:["ranked","Watchlist exception"]},
 	likeness="Token-likeness is a snapshot score based on how closely a protocol’s TVL and listing age match those of protocols whose tokens already trade.",
-	timing="We hold TVL fixed and use the rise in token-likeness with listing age to estimate launch chance for protocols still without a token, a modelled assumption because the snapshot has no launch dates."
-const settings={parameters:A,chainQuotes,fallbackChain,mechanisms,families,timing,
+	timing="For protocols where the snapshot records no token, we hold TVL fixed and use the rise in token-likeness with listing age to estimate launch chance. The snapshot has no launch dates."
+const settings={parameters:A,chainQuotes,fallbackChain,timing,
 	notes:[likeness,timing,"Issuer haircut · "+flagNote,"Missing listing age uses the median.",
+		`Rewards assume ${pct(A.depositorShare,0)} for depositors; ${pct(A.competingTvlShare,0)} of TVL competes.`,
 		"Excludes yield/tax/price moves. Requote borrow/mint/trade."]}
-if(typeof module==="object") module.exports={buildModel,boardChecks,selfChecks,boardRows,digest,
+if(typeof module==="object") module.exports={buildModel,boardChecks,selfChecks,boardRows,digest,exportManifest,
 	evaluateFarm,chooseFarm,orderedRows,validSteps}

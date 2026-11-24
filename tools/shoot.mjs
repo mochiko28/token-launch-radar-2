@@ -11,7 +11,7 @@ const height = 980;
 const boardHeight = 1120;
 const detailHeight = 1340;
 const minimum = 300_000;
-const maximum = 350_000;
+const maximum = 320_000;
 const targetSize = 305_000;
 
 async function freePort() {
@@ -177,7 +177,11 @@ const shots = [
 const pages = [...shots,
   { name: "mezzanine", hash: "#detail/mezzanine", viewHeight: detailHeight, probeOnly: true },
   { name: "calibration", hash: "#calibration", probeOnly: true },
-  { name: "watchlist-skip", hash: "#board?scope=watchlist&verdict=SKIP", probeOnly: true }
+  { name: "watchlist-skip", hash: "#board?scope=watchlist&verdict=SKIP", probeOnly: true },
+  { name: "empty-board", hash: "#board?q=__no_protocol__", probeOnly: true },
+  ...["", "traded", "setAside", "recorded", "ranked"].map(group => ({
+    name: "tokens-" + group, hash: "#tokens" + (group ? "/" + group : ""), probeOnly: true
+  }))
 ];
 
 function readPage() {
@@ -268,28 +272,30 @@ function readPage() {
     if (li.querySelector("h3").textContent === "3c Wait") steps[steps.length - 1] += " " + parts.join(" ");
     else steps.push(parts.join(" "));
   }
-  const chips = [...document.querySelectorAll(".integrity button")];
-  const help = document.querySelector("#check-help");
+  const chips = [...document.querySelectorAll(".integrity .chip")];
   const integrity = chips.map(chip => chip.textContent);
   const integrityLines = new Set(chips.map(chip => chip.offsetTop)).size;
-  const integrityWidth = chips.length ? [chips[0].parentElement.clientWidth, chips.reduce((sum, chip) => sum + chip.offsetWidth, 0)] : [];
-  const integrityPass = chips.length === 10 && visible(".integrity")
-    && integrityLines === 1
+  const integrityPass = chips.length === 3 && visible(".integrity") && integrityLines === 1
     && chips.every(chip => chip.dataset.pass === "true" && chip.textContent.startsWith("✓ "));
-  const helpPass = chips.every(chip => {
-    chip.click();
-    const opened = help.open && document.activeElement === help.querySelector("summary");
-    help.open = false;
-    return opened;
-  });
-  if (chips.length) {
-    document.activeElement.blur();
-    window.scrollTo(0, 0);
+  const tokenLinks = [...document.querySelectorAll("#token-groups a")].map(a => [a.textContent, a.getAttribute("href")]);
+  const tokenTable = () => [...document.querySelectorAll("#results tbody tr")].map(tr => [...tr.cells].map(cell => cell.textContent));
+  let tokenRows, tokenSearch;
+  if (location.hash.startsWith("#tokens")) {
+    tokenRows = tokenTable();
+    if (location.hash === "#tokens/ranked") {
+      const search = document.querySelector("#search");
+      search.value = "uPsHiFt";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      tokenSearch = [location.hash, read("#shown"), tokenTable().map(row => row[0])];
+      search.value = "";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    }
   }
   return {
     loadMs: performance.getEntriesByType("navigation")[0].domContentLoadedEventEnd,
     checks: read("#checks"), checksPass: document.querySelector("#checks")?.dataset.pass,
-    integrity, integrityPass, integrityLines, integrityWidth, helpPass, title: read("h1"), count: read("#shown"), first: read("tbody tr th a"),
+    integrity, integrityPass, integrityLines, title: read("h1"), count: read("#shown"), first: read("tbody tr th a"),
+    tokenLinks, tokenRows, tokenSearch, tokenDetail: read("#token-reason"), tokenDetailVisible: visible("#token-reason"),
     activeFilters: [...document.querySelectorAll("#active-filters .chip")].map(node => node.textContent),
     reset: document.querySelector("#active-filters a")?.getAttribute("href"),
     rankLabel: read("#sort-rank"),
@@ -468,8 +474,12 @@ async function shoot(output, destination) {
   const boardBySlug = new Map(board.map(row => [row.slug, row]));
   const url = pathToFileURL(join(output, "dashboard", "index.html")).href;
   const data = readFileSync(join(output, "data.js"), "utf8").trim();
-  const { snapshot } = JSON.parse(data.slice("globalThis.LaunchRadarData = ".length, -1));
-  const { value, odds, rows, assumptions } = api.buildModel(snapshot);
+  const { snapshot, boardDigest, manifest } = JSON.parse(data.slice("globalThis.LaunchRadarData = ".length, -1));
+  if (api.digest(board) !== boardDigest || JSON.stringify(api.exportManifest(board)) !== JSON.stringify(manifest)) {
+    throw new Error("Offline payload digest or manifest differs from board.json.");
+  }
+  const { value, odds, rows, recs, counts, assumptions } = api.buildModel(snapshot);
+  const verdictBySlug = new Map(manifest.map(([, slug, , verdict]) => [slug, verdict]));
   const upshift = rows.find(row => row.slug === "upshift");
   const { exits: rawExits, gas, chain, transactions } = upshift.plan;
   const exits = rawExits.map(displaySigns);
@@ -512,17 +522,42 @@ async function shoot(output, destination) {
       if (!["EPERM", "EACCES"].includes(error.code)) throw error;
       console.log("Loopback TCP unavailable. Using Firefox headless PNG capture with page diagnostics.");
     }
+    const rowProof = "Shown rows = board.json (digest ok)";
+    const groupNames = { traded: "traded", setAside: "set aside", recorded: "token, no cap", ranked: "ranked" };
+    const reasonNames = {
+      cap: "Positive market cap", id: "Token ID or symbol recorded", product: "Wrapped, staked or bridged product",
+      exchange: "Exchange category or name", pre: "Pre-token", watch: "Watchlist exception"
+    };
     const verify = (name, info) => {
-      const check = /^(\d+)\/(\d+) self-checks pass(?: · 1\/1 rows match)?$/.exec(info.checks);
+      const check = /^(\d+)\/(\d+) self-checks pass(?: · .+)?$/.exec(info.checks);
       if (!check || check[1] !== check[2] || Number(check[1]) === 0 || info.checksPass !== "true") {
         throw new Error(`${name}: ${info.checks}`);
       }
-      if (name === "2-detail.jpg" && !info.checks.endsWith(" · 1/1 rows match")) throw new Error(`${name}: missing row check`);
       if (info.jargon.length) throw new Error(`${name}: probability jargon rendered: ${info.jargon.join(", ")}`);
       if (["1-board.jpg", "3-filtered.jpg", "watchlist-skip"].includes(name)) {
-        if (!info.integrityPass || !info.helpPass || !info.integrity.includes(`✓ ${likenessTest}`)) {
-          throw new Error(`${name}: integrity strip or explanation failed (${info.integrityLines} lines, widths ${info.integrityWidth}, help ${info.helpPass}): ${info.integrity.join(" · ")}`);
+        if (!info.integrityPass || !info.integrity.includes(`✓ Export watchlist ${counts.watchlistCovered}/${counts.watchlistTotal}`)) {
+          throw new Error(`${name}: integrity strip failed: ${info.integrity.join(" · ")}`);
         }
+      }
+      if (name === "1-board.jpg" && JSON.stringify(info.tokenLinks) !== JSON.stringify(Object.entries(groupNames)
+        .map(([group, label]) => [`${counts[group]} ${label}`, `#tokens/${group}`]))) {
+        throw new Error("Snapshot counts do not link to their token filters.");
+      }
+      if (name.startsWith("tokens-")) {
+        const group = name.slice(7);
+        const field = value => String(value ?? "—") || "—";
+        const expected = recs.filter(row => !group || row.status === group).map(p =>
+          [p.name, reasonNames[p.reason], ...[p.mcap_usd, p.gecko_id, p.symbol, p.category, p.nameRule].map(field)]);
+        if (JSON.stringify(info.tokenRows) !== JSON.stringify(expected)
+          || info.count !== `${expected.length}/${expected.length} shown`
+          || (group === "ranked" && JSON.stringify(info.tokenSearch) !== JSON.stringify(
+            ["#tokens/ranked?q=uPsHiFt", `1/${counts.ranked} shown`, ["Upshift"]]))) {
+          throw new Error(`${name}: token evidence, filter or search differs from the snapshot.`);
+        }
+        console.log(`Token screen ${group || "all"} · ${info.count} · evidence and search pass`);
+      }
+      if (name === "empty-board" && (info.rowCheck !== "No rows to verify" || info.rowPass !== "null" || info.rows.length)) {
+        throw new Error("Empty results show an export match.");
       }
       const page = pages.find(page => page.name === name);
       if (info.width !== width || info.height !== (page.viewHeight ?? height) || info.dpr !== 1) {
@@ -530,14 +565,15 @@ async function shoot(output, destination) {
       }
       if (info.scrollbar) throw new Error(`${name}: page scrollbar occupies ${info.scrollbar}px`);
       const slugs = new Set(info.rows.map(([slug]) => slug));
-      if (slugs.size !== info.rows.length || info.rows.some(([slug, rank, value, launch, odds, issuer], i) => {
+      if (slugs.size !== info.rows.length || info.rows.some(([slug, rank, value, launch, odds, issuer, verdict], i) => {
         const row = boardBySlug.get(slug);
         return row?.rank !== rank || row.implied_value_usd !== value || row.launch_value_usd !== launch
-          || row.token_odds !== odds || row.issuer_factor !== issuer || (i > 0 && info.rows[i - 1][1] >= rank);
+          || row.token_odds !== odds || row.issuer_factor !== issuer || verdictBySlug.get(slug) !== verdict
+          || (i > 0 && info.rows[i - 1][1] >= rank);
       })) {
         throw new Error(`${name}: page order or values differ from board.json`);
       }
-      if (info.rows.length && (info.rowPass !== "true" || info.rowCheck !== `✓ Rows match board.json ${info.rows.length}/${info.rows.length}`)) {
+      if (info.rows.length && (info.rowPass !== "true" || info.rowCheck !== `✓ ${rowProof} · ${info.rows.length}/${info.rows.length}`)) {
         throw new Error(`${name}: ${info.rowCheck}`);
       }
       if (info.rows.length) {
@@ -579,10 +615,12 @@ async function shoot(output, destination) {
         }
       }
       if (page.hash.startsWith("#detail/")) {
-        const { name: protocol, plan } = modelBySlug.get(page.hash.slice(8));
+        const slug = page.hash.slice(8);
+        const { name: protocol, plan } = modelBySlug.get(slug);
         const rate = (100 * assumptions.parameters.riskFreeRate).toFixed(0);
         if (!info.decisionVisible || !info.quotePass || info.quotes.length !== 10
-          || !info.checks.endsWith(" · 1/1 rows match")) {
+          || !info.checks.endsWith(` · ${rowProof} · 1/1`)
+          || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get(slug).farm_steps.map(displaySigns))) {
           throw new Error(`${name}: Decision mismatch or out of view (${info.decision.join(" | ")}).`);
         }
         for (const state of info.quotes) {
@@ -634,6 +672,8 @@ async function shoot(output, destination) {
         for (const row of info.termRows) console.log(`  ${row.join(" | ")}`);
       }
       if (name === "2-detail.jpg" && (info.steps.length < 3
+        || !info.tokenDetailVisible
+        || info.tokenDetail !== "Token screen: pre-token — no gecko_id, no symbol, no market cap recorded in the snapshot"
         || !/^80% \$.*–\$.* · 50% \$.*–\$/u.test(info.valueRange)
         || !/Expected net.*(robust across 80% range|flips to .+ at (low|high) end)/iu.test(info.rangeFarm)
         || info.labels.map(label => label.split(" ")[0]).join() !== "1,2a,2b,2c,3a,3b,3c,4,5,6,7"
@@ -677,7 +717,7 @@ async function shoot(output, destination) {
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
       if (name === "1-board.jpg") console.log(`  ${info.completeRows} complete rows in view · DOM ready in ${info.loadMs} ms · ${info.coverage} · ${info.nested}`);
       if (name === "3-filtered.jpg") console.log(`  ${info.completeRows} complete rows in view`);
-      if (name === "2-detail.jpg") console.log(`  ${info.gas}\n  ${info.exits.join("\n  ")}`);
+      if (name === "2-detail.jpg") console.log(`  ${info.tokenDetail}\n  ${info.gas}\n  ${info.exits.join("\n  ")}`);
       if (info.valueRange) console.log(`  ${info.valueRange} · ${info.rangeFarm}`);
       if (info.integrity.length) console.log(`  ${info.integrityLines} integrity line · ${info.integrity.join(" · ")}`);
     }

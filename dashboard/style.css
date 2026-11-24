@@ -26,8 +26,8 @@ nav{gap:24px;margin-right:auto}
 .panel{border:var(--line);min-width:0}
 .btn,.chip{border:0}
 .btn{padding:4px 12px;background:var(--signal);color:var(--ink)}
-#checks,.rank,.kicker,footer{font:.76rem monospace}
-small,dt,.curve,footer{color:var(--dim)}
+#checks,.rank,.kicker{font:.76rem monospace}
+small,dt,.curve{color:var(--dim)}
 .intro,.bar,.dialog-top{justify-content:space-between}
 .integrity,.readings,.drivers dl{flex-wrap:wrap}
 .intro{align-items:end;margin:12px 0 24px}
@@ -40,6 +40,8 @@ small,dt,.curve,footer{color:var(--dim)}
 .kpi h2,.filters label,.kicker{text-transform:uppercase}
 .kpi strong{font-size:1.94rem}
 .groups{grid:auto/1fr 1fr}
+#token-groups a{text-decoration:underline}
+#token-groups [aria-current]{color:inherit;font-weight:700}
 .readings,.band,.board,.detail,.research,.drivers dl{gap:1rem}
 :not(strong)>small,.readings span,svg,.back{display:block}
 .misses strong{font-size:1.4rem}

@@ -1,9 +1,9 @@
 "use strict";
 {
-const {snapshot:snap,boardDigest}=LaunchRadarData,model=buildModel(snap),
+const {snapshot:snap,boardDigest,manifest}=LaunchRadarData,model=buildModel(snap),
 	$=sel=>document.querySelector(sel),$$=sel=>[...document.querySelectorAll(sel)]
 const html=(items,draw)=>items.map(draw).join(""),view=$("#view"),check=$("#checks"),
-	results=selfChecks(model,snap,boardDigest),checks=object(results.map(c=>[c.name,c.pass])),
+	results=selfChecks(model,snap,boardDigest),
 	passed=count(results,c=>c.pass),allPass=passed===results.length,selfCount=`${passed}/${results.length}`,
 	signed=s=>s.replace(/(^|[\s$(,])-(?=\$?\d)/g,"$1−"),
 	dollars=opts=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",...opts}).format,
@@ -16,16 +16,16 @@ const dash="—",hit=n=>n==null?dash:pct(n,0),
 	net=n=>sign(n)+money(n),decisionNet=n=>net(decisionUsd(n)),
 	tone=n=>n>0?"pos":n<0?"neg":"",
 	esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c])
-const {rows:rs,counts:ns,verdicts,stress,value,odds,assumptions:setup,board:{rows:board}}=model,
-	hash=digest(board),sameHash=hash===boardDigest,
+const {rows:rs,recs,counts:ns,verdicts,stress,value,odds,assumptions:setup,board:{rows:board}}=model,
+	sameHash=digest(board)===boardDigest&&digest(manifest)===digest(exportManifest(board)),
 	{parameters:{horizons,tvlReference,riskFreeRate,hourlyUsd}}=setup,
 	auc=odds.validation,{loo,walk}=auc,
 	showAuc=fold=>fold.auc?.toFixed(3)??dash
 const likenessTest=`Token-likeness test: AUC ${showAuc(walk)} walk-forward`,
 	valTests=entries({loo:"Leave-one-out",walk:"Walk-forward",family:"Family hold-out"}),
-	{baseline,selected,trials,evidence,search}=value.validation,
+	{baseline,selected,evidence,search}=value.validation,
 	{ranges:{heldOut,n:rangeN},nested}=value,
-	groups=[["traded"],["recorded","token, no cap"],["setAside","set aside"],["ranked"]],
+	groups=[["traded","traded"],["setAside","set aside"],["recorded","token, no cap"],["ranked","ranked"]],
 	choices=items=>["",...unique(items).sort()]
 const grades=keys(verdicts),
 	scenarios=[["doubleCost","2× cost"],["halfShare","Reward share halved"]],
@@ -81,9 +81,13 @@ const [intercept,slope]=value.fit.coefficients,
 <p class=curve>${short(exp(intercept))} × (carried TVL / ${short(tvlReference)})<sup>${signed(slope.toFixed(3))}</sup> · n=${ns.valueFit}
 <p class=nested>Nested walk-forward ${mult(nested.miss)} · shrinkage ${nested.shrinkage}/${nested.folds}
 <p class=coverage>WF coverage (n=${rangeN}) · 80% range ${hit(heldOut[80])} · 50% range ${hit(heldOut[50])}`
-const kpis=`<section class=kpis aria-label=Validation>
+const tokenLinks=(st,separator="")=>groups.map(([k,lbl])=>
+	`<a href="${href("tokens",st,k)}"${st.route==="tokens"&&st.slug===k?' aria-current="page"':""}><b>${ns[k]}</b> ${lbl}</a>`).join(separator),
+	searchBox=st=>`<label>Search<input id=search type=search value="${esc(st.q)}" autocomplete=off></label>`,
+	matchesSearch=(p,q)=>`${p.name} ${p.slug}`.toLowerCase().includes(q.trim().toLowerCase())
+const kpis=st=>`<section class=kpis>
 ${card("Snapshot",`<strong>${ns.total}</strong>
-<div class=groups>${html(groups,([k,lbl=k])=>`<span><b>${ns[k]}</b> ${lbl}</span>`)}</div>`)}
+<div class=groups id=token-groups>${tokenLinks(st)}</div>`)}
 ${card(missTitle,valueStats)}
 ${card(`${oddsLabel} · held-out AUC`,`<div class=readings>${html(valTests.slice(0,2),([k,lbl])=>
 	`<div><strong>${showAuc(auc[k])}</strong><span>${lbl}</span></div>`)}</div><p>Snapshot score from TVL and listing age compared with traded-token peers`)}
@@ -104,24 +108,20 @@ ${html(best,p=>{
 }
 const boardShell=st=>`${intro("Pre-token rankings","30–365 d farms")}
 <div class=integrity role=group aria-label=Integrity></div>
-${kpis}
+${kpis(st)}
 <div class=board><section class=panel>
 <div class=bar><h2>Protocols</h2><small id=shown role=status></small></div>
-<div class=filters><label>Search<input id=search type=search value="${esc(st.q)}" autocomplete=off></label>
+<div class=filters>${searchBox(st)}
 ${html(filters,spec=>filter(spec,st))}</div>
 <div id=active-filters></div><div id=compare></div><div id=results></div>
 </section><aside class=rail>
 ${inset("Expected yield by age",`<div id=yield></div>
 <div class=legend>${html(grades,v=>`<span class=${v.toLowerCase()}>${v}</span>`)}</div>`)}
 <div id=plans></div>
-</aside></div>
-<details class="panel inset" id=check-help><summary>Integrity</summary><ul>
-<li>LOO: log-cap residuals. WF: prior rows.
-<li>Nested: midpoint split.
-</ul></details>`
+</aside></div>`
 function filtered({scope,family,chain,verdict,flag,tvl,q,sort,dir}){
-	const query=q.trim().toLowerCase(),field=cols[sort][1],read=typeof field==="function"?field:p=>p[field]
-	return rs.filter(p=>`${p.name} ${p.slug}`.toLowerCase().includes(query)
+	const field=cols[sort][1],read=typeof field==="function"?field:p=>p[field]
+	return rs.filter(p=>matchesSearch(p,q)
 		&&(scope!=="watchlist"||p.watchlist)&&(!family||p.family===family)
 		&&(!chain||p.chains.includes(chain))&&(!verdict||p.plan.verdict===verdict)
 		&&p.tvl_usd>=+tvl&&(!flag||!!p.flags.length===(flag==="flagged"))).sort((a,b)=>{
@@ -133,7 +133,6 @@ function filtered({scope,family,chain,verdict,flag,tvl,q,sort,dir}){
 const range=r=>r.map(short).join("–"),
 	valueRange=r=>`80% ${range(r[80])} · 50% ${range(r[50])}`,
 	valueTitle=([score,base,s,factor],r)=>`${usd(score)} · 80% range ${range(r[80])} · ${short(base)} × ${pct(s,1)} × ${factor}`,
-	fields="implied_value_usd launch_value_usd token_odds issuer_factor".split(" "),
 	endpoints=rs.flatMap(({score,ranges})=>[score,...ranges[80]]),
 	logMin=log(min(...endpoints)),logSpan=log(max(...endpoints))-logMin||1,
 	barAt=n=>1+40*(log(n)-logMin)/logSpan
@@ -156,43 +155,38 @@ function compare(st){
 	if(!picks.length) return "<p class=hint>Compare up to 3."
 	const update=(compare,lbl,title=lbl)=>`<a class=btn href="${href("board",{...st,compare})}" title="${esc(title)}">${lbl}</a>`,
 		heads=picks.map(p=>pLink(p,st)+" "+update(st.compare.filter(s=>s!==p.slug),"×",`Remove ${p.name}`)),
-		stats=[["Value",p=>short(p.score)],[oddsLabel,p=>pct(p.tokenOdds)],["TVL",p=>short(p.tvl_usd)],
-		["7d TVL",p=>chg(p.change_7d)],["Days listed",days],["Verdict",p=>badge(p.plan.verdict)],
-		["Capital",p=>usd(p.plan.capital)],["Expected net",p=>net(p.plan.net)]]
+		stats=[["Value",p=>short(p.score)],["TVL",p=>short(p.tvl_usd)],
+		["Verdict",p=>badge(p.plan.verdict)],["Expected net",p=>net(p.plan.net)]]
 	return`<div class=compare><div class=bar><h2>Compare</h2>${update([],"Clear")}</div>
 ${facts(["Metric",...heads],stats.map(([lbl,read])=>[lbl,...picks.map(read)]))}</div>`
 }
+function matchesExport(rank,slug,value,verdict,format){
+	const row=manifest?.[rank-1]
+	return row?.[0]===rank&&row[1]===slug&&format(row[2])===value&&row[3]===verdict
+}
+const rowStatus=(matched,total,pass)=>!total?"No rows to verify":
+	`${pass?"Shown rows = board.json (digest ok)":"Export check failed"} · ${matched}/${total}`
 function verifyRows(rows,st){
 	const trs=$$("#results tbody tr"),
-		total=rows.length,sorted=trs.length===total&&(!total||$(`[aria-sort=${ariaSort(st)}] #sort-${st.sort}`))
+		total=rows.length,sorted=trs.length===total&&$(`[aria-sort=${ariaSort(st)}] #sort-${st.sort}`)
 			&&trs.every((tr,i)=>tr.dataset.slug===rows[i].slug)
 	const matched=count(trs,tr=>{
-		const [rank,,value,odds]=tr.cells,p=board[rank.textContent-1]
-		if(p?.slug!==tr.dataset.slug) return false
-		const factors=fields.map(k=>p[k]),[score,,s]=factors
-		return tr.dataset.factors===factors.join()&&odds.textContent===pct(s,1)
-			&&value.textContent.trim()===short(score)&&value.title===valueTitle(factors,p.implied_value_ranges_usd)
+		const [rank,,value,odds]=tr.cells,n=Number(rank.textContent)
+		return matchesExport(n,tr.dataset.slug,value.textContent.trim(),tr.querySelector(".badge")?.textContent,short)
+			&&odds.textContent===pct(board[n-1].token_odds,1)
 	})
-	integrity(matched,total,sorted&&matched===total)
-}
-function integrity(matched,total,rowsPass){
-	const miss=(k,lbl,f=selected[k])=>[f.n&&f.miss<baseline[k].miss,`${lbl} ${mult(f.miss)}`]
+	const pass=!!(sameHash&&sorted&&matched===total)
 	$(".integrity").innerHTML=html([
-		[rowsPass&&sameHash,`Rows match board.json ${matched}/${total}`],
-		[sameHash,`Hash ${hash}`],
-		[checks["group counts"],`${ns.total}=${groups.map(([k])=>ns[k]).join("+")}`],
-		[checks.coverage,`Watchlist ${ns.watchlistCovered}/${ns.watchlistTotal}`],
-		miss("loo","Value LOO"),miss("walk","Walk"),
-		[checks["80% LOO coverage"],`80% range: ${hit(heldOut[80])} held-out`],
-		[!!nested.folds,`nested WF ${mult(nested.miss)}`],
-		[loo.auc>.5&&walk.auc>.5,likenessTest],
-		[allPass,`Checks ${selfCount}`]
-	],([ok,lbl])=>`<button class=chip data-pass=${ok}>${ok?"✓":"✗"} ${lbl}</button>`)
+		[total?pass:null,rowStatus(matched,total,pass)],
+		[ns.watchlistCovered===ns.watchlistTotal,`Export watchlist ${ns.watchlistCovered}/${ns.watchlistTotal}`],
+		[allPass,selfCount+" checks"]
+	],([ok,lbl])=>`<span class=chip data-pass=${ok}>${ok==null?"":ok?"✓ ":"✗ "}${lbl}</span>`)
 }
 function drawBoard(st){
 	const rows=filtered(st),activeFilters=filters.flatMap(([lbl,k,opts,...names])=>
 		st[k]===defaults[k]?[]:[`${lbl}: ${filterName(k,st[k],names[opts.indexOf(st[k])])}`])
 	if(st.q.trim()) activeFilters.unshift(`Search: ${st.q.trim()}`)
+	$("#token-groups").innerHTML=tokenLinks(st)
 	$("#active-filters").innerHTML=activeFilters.length?`${html(activeFilters,s=>`<span class=chip>${esc(s)}</span>`)}
 <a class=btn href="${href("board",{...st,...defaults,sort:st.sort})}">Reset filters</a>`:""
 	$("#shown").textContent=`${rows.length}/${st.scope==="watchlist"?ns.watchlistCovered:ns.ranked} shown`
@@ -290,7 +284,9 @@ function detail(st,r){
 	const back=`<a class=back href="${href("board",st)}">← Rankings</a>`
 	if(!r) return back+intro("Unavailable")
 	const {plan:fp,flags,band,ranges,rangeFarm:[low,high]}=r,
-		summary=`${rowName(r)} · ${short(r.tvl_usd)} TVL · ${chg(r.change_7d)} 7d · ${days(r)} d listed`,
+		tokenLine=r.reason==="watch"?`watchlist exception — kept despite ${r.nameRule||r.category}`:
+			`pre-token — no gecko_id, no symbol, no ${r.mcap_usd==null?"":"positive "}market cap recorded in the snapshot`,
+		summary=`${rowName(r)} · ${short(r.tvl_usd)} TVL · ${chg(r.change_7d)} 7d · ${days(r)} d listed<br><span id=token-reason>Token screen: ${esc(tokenLine)}</span>`,
 		lbl=`<p class=kicker>#${r.rank}/${ns.ranked}${r.watchlist?" · ◆ Watchlist":""}`,
 		lead=`<p class=route>${esc(quoteHeadline(fp,fp))}`,
 		stressRows=[[null,"Default"],...scenarios].map(([k,lbl])=>{
@@ -331,31 +327,35 @@ ${inset("Terms · miss / within 3×",`<p>Token-likeness miss uses the inverse sc
 ${inset(`${ns.valueFit} screened tokens`,facts("Protocol|Family|Carried TVL|Cap|Fit",
 	model.calibration.toSorted((a,b)=>b.mcap_usd-a.mcap_usd)
 		.map(p=>[esc(p.name),p.family,short(p.carriedTvl),short(p.mcap_usd),short(p.launchValue)])))}
-${inset(missTitle,valueStats+"<p>Flat ratio: fold median cap/carried TVL."+
-	facts(["Terms after TVL",...valTests.map(([k,lbl])=>`${lbl} (n=${selected[k].n})`)],[baseline,...trials,...(selected.candidate?[selected]:[])].map(t=>[
-		(t.candidate||t.terms?.join(" + ")||(t===baseline?"Flat ratio":"None"))+(t===selected?" · selected":""),
-		...valTests.map(([k])=>mult(t[k].miss,3))
-	])))}
+${inset(missTitle,valueStats+"<p>Flat ratio: fold median cap/carried TVL.")}
 </div>`
 }
-function audit(st){
-	const peerRange=model.peerRatios.map(n=>mult(n)).join("–")
-	return`${intro("Top 20 audit")}${inset("",
-facts("Rank|Protocol|Raw 7d|Carried 7d|Growth|Value / TVL|Peer range|Issuer flags",
-	model.audit.map(r=>[r.rank,pLink(r,st),chg(r.change_7d),chg(r.growth),
-		r.change_7d==null?"Imputed":r.change_7d!==r.growth?"<b>Clipped</b>":"As reported",
-		mult(r.ratio),peerRange+(r.outlier?" · outlier":""),r.flags.map(esc).join(" · ")||"—"])))}`
+const tokens=st=>`${intro("Token screen","Pre-token means the snapshot records no token.")}
+<section class=panel><div class=bar><div id=token-groups></div><small id=shown role=status></small></div>
+<div class=filters>${searchBox(st)}</div><div id=results></div></section>`
+function drawTokens(st){
+	const scope=statuses.includes(st.slug)?recs.filter(p=>p.status===st.slug):recs,
+		rows=scope.filter(p=>matchesSearch(p,st.q)),field=v=>esc(v||dash)
+	$("#token-groups").innerHTML=`<a href="${href("tokens",st)}">All ${ns.total}</a> · `+tokenLinks(st," · ")
+	$("#shown").textContent=`${rows.length}/${scope.length} shown`
+	$("#results").innerHTML=rows.length?facts("Protocol|Reason|Market cap ($)|gecko_id|Symbol|Category|Name rule hit",
+		rows.map(p=>[bySlug.has(p.slug)?pLink(p,st):esc(p.name),reasons[p.reason][1],esc(p.mcap_usd??dash),
+			field(p.gecko_id),field(p.symbol),field(p.category),field(p.nameRule)])):"<p class=empty>No matches."
 }
 function drawer(){
-	const {parameters,chainQuotes,fallbackChain,mechanisms,families,notes}=setup,
-		section=(heads,obj,read)=>facts(heads,entries(obj).map(([k,v])=>[k,...read(v)]))
+	const {chainQuotes,fallbackChain,notes}=setup
 	return`<ul>${html(notes,s=>`<li>${esc(s)}`)}</ul>
-${facts("Parameter|Value",entries(parameters).map(([k,v])=>[k.replace(/^odds/,"token-likeness").replace(/[A-Z]/g,c=>" "+c.toLowerCase()),signed(String(v))]))}
-${section("Chain|Gas/tx|Funding|Time",{...chainQuotes,"Other chains":fallbackChain},([g,f,m])=>[money(g),money(f),m+" min"])}
-${section("Family|Actions|Fees|Time|Deposit",mechanisms,([n,bps,m,verb,where])=>[n,bps+" bps",m+" min",verb+" "+esc(where)])}
-${section("Family|Categories",families,cats=>[cats.replaceAll("|",", ")])}`
+${facts("Chain|Gas/tx|Funding|Time",entries({...chainQuotes,"Other chains":fallbackChain})
+	.map(([k,[g,f,m]])=>[k,money(g),money(f),m+" min"]))}`
 }
-const pages={board:boardShell,audit,calibration,detail}
+function verifyDetail(){
+	const rank=Number($(".kicker").textContent.split("/")[0].slice(1)),saved=board[rank-1],
+		entry=$(".steps li:nth-child(6) p"),follow=entry.querySelector("span").textContent
+	return sameHash&&matchesExport(rank,$("#quote").dataset.slug,$(".amount").textContent,$(".decision .badge").textContent,usd)
+		&&$(".value-range").textContent===valueRange(saved.implied_value_ranges_usd)
+		&&signed(saved.farm_steps[5]).includes(follow)
+}
+const pages={board:boardShell,tokens,calibration,detail}
 let activeRoute
 function render(){
 	const st=readRoute(),{route,slug}=st,focus=document.activeElement?.id,
@@ -364,29 +364,20 @@ function render(){
 	view.innerHTML=pages[route](st,r)
 	document.title=$("h1").textContent+" · Launch Radar"
 	if(route==="board") drawBoard(st)
-	const saved=board[r?.rank-1],match=sameHash&&saved?.slug===r?.slug&&r
-		&&$(".amount").textContent===usd(saved.implied_value_usd)
-		&&$(".value-range").textContent===valueRange(saved.implied_value_ranges_usd)
+	else if(route==="tokens") drawTokens(st)
+	const match=r&&verifyDetail()
 	check.hidden=route==="board"
 	check.textContent=selfCount+" self-checks pass"
-	if(route==="detail") check.append(` · ${+!!match}/1 rows match`)
+	if(route==="detail") check.append(` · ${rowStatus(+!!match,+!!r,match)}`)
 	check.dataset.pass=allPass&&(route!=="detail"||!!match)
 	document.getElementById(focus)?.focus()
 	if(activeRoute!==route) window.scrollTo(0,0)
 	activeRoute=route
 }
 
-$("footer").textContent=`Digest ${boardDigest}`
 check.title=results.map(({name,pass})=>`${name}: ${pass?"pass":"fail"}`).join("\n")
 $(".drawer").innerHTML=drawer()
 $("#open").onclick=()=>$("#assumptions").showModal()
-view.onclick=({target})=>{
-	if(!target.matches(".integrity .chip")) return
-	const help=$("#check-help")
-	help.open=true
-	help.firstChild.focus()
-}
-
 view.oninput=({target:el})=>{
 	if(el.id==="search") updateBoard({...readRoute(),q:el.value})
 	const form=el.form
@@ -411,9 +402,10 @@ function nav(st){
 	}
 }
 function updateBoard(st){
-	history.replaceState(null,"",link("board",st))
+	history.replaceState(null,"",link(st.route,st,st.route==="tokens"?st.slug:""))
 	nav(st)
-	drawBoard(st)
+	if(st.route==="tokens") drawTokens(st)
+	else drawBoard(st)
 }
 
 view.onchange=({target:el})=>{

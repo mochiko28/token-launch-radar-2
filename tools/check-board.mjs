@@ -157,7 +157,7 @@ function report(output, input) {
   const passed = self.filter(check => check.pass).length;
   console.log(`${passed}/${self.length} model self-checks pass (including board digest)`);
   const { traded, recorded, setAside, ranked, watchlistCovered, watchlistTotal, total, valueFit, oddsFit } = model.counts;
-  console.log(`${traded} traded with cap + ${recorded} token recorded without cap + ${setAside} products set aside + ${ranked} pre-token ranked = ${total} | watchlist ${watchlistCovered}/${watchlistTotal}`);
+  console.log(`${traded} traded with cap + ${recorded} token recorded without cap + ${setAside} set aside + ${ranked} pre-token ranked = ${total} | watchlist ${watchlistCovered}/${watchlistTotal}`);
   const { fit, validation } = model.value;
   const names = ["intercept", "logCarriedTvl", ...fit.features.map(([, name]) => name)];
   const curve = names.map((name, i) => `${name}=${fit.coefficients[i].toFixed(6)}`).join(", ");
