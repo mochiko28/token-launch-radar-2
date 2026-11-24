@@ -22,9 +22,8 @@ const {rows:rs,recs,counts:ns,verdicts,stress,value,odds,assumptions:setup,board
 	showAuc=fold=>fold.auc?.toFixed(3)??dash
 const aucLabel="Token-screen ranking accuracy (AUC)",
 	likenessTest=`${aucLabel} ${showAuc(auc.walk)} walk-forward`,
-	{headline,chosen,misses,ablation,issuerNote,ranges:{labels,hits,n:rangeN,source}}=value,
+	{headline,foldScores,ablation,issuerNote,ranges:{labels,hits,n:rangeN}}=value,
 	levelsShown=[80,50],rangeLabel=k=>labels[k]==null?"Uncalibrated range":`${labels[k]}% range`,
-	chosenNote=chosen==="full"?"All value terms retained":`${outerTerms[chosen]} dropped from value`,
 	groups=[["traded","traded"],["setAside","set aside"],["recorded","token, no cap"],["ranked","ranked"]],
 	choices=items=>["",...unique(items).sort()]
 const grades=keys(verdicts),
@@ -69,17 +68,16 @@ const badge=v=>`<span class="badge ${v.toLowerCase()}">${v}</span>`,
 	days=r=>r.ageDays==null?dash:integer(r.ageDays),
 	rowName=r=>esc(r.category||r.family)
 const intro=(title,copy="",lead="",lbl="")=>`<header class=intro><div>${lbl}<h1>${title}</h1>${lead}<p>${copy}</div><small>DefiLlama<br>${esc(snap.as_of)} UTC</small></header>`,
-	missTitle="Full model median miss vs flat ratio",
+	missTitle="Deployed value median miss vs flat ratio",
 	panel=(kind,title,body)=>`<section class="panel ${kind}">${title?`<h2>${title}</h2>`:""}${body}</section>`,
 	card=(title,body)=>panel("kpi",title,body),inset=(title,body,kind="")=>panel("inset"+kind,title,body)
 
-const valueStats=`<p class=nested>Outer test, selection inside training only</p>
+const valueStats=`<p class=nested>Outer test · refit on training only</p>
 <div class="readings misses">${html(entries(outerTests),([k,lbl])=>{
 		const {miss,flat,n}=headline[k]
 		return`<div><span>${lbl} · n=${n}</span><strong>${mult(miss)}</strong> / ${mult(flat)}</div>`
 	})}</div>
-${chosen==="full"?"":`<p class=deployed>With ${outerTerms[chosen].toLowerCase()} removed · ${mult(misses[chosen].walk)} walk-forward · ${mult(misses[chosen].family)} family</p>`}
-<p class=coverage>${rangeN?`${outerTests[source]} coverage · ${levelsShown.map(k=>`${rangeLabel(k)} (${hits[k]}/${rangeN})`).join(" · ")}`:"No outer residuals for range coverage"}</p>`
+<p class=coverage>${rangeN?`Family holdout coverage · ${levelsShown.map(k=>`${rangeLabel(k)} (${hits[k]}/${rangeN})`).join(" · ")}`:"Range coverage unavailable"}</p>`
 const tokenLinks=(st,separator="")=>groups.map(([k,lbl])=>
 	`<a href="${href("tokens",st,k)}"${st.route==="tokens"&&st.slug===k?' aria-current="page"':""}><b>${ns[k]}</b> ${lbl}</a>`).join(separator),
 	searchBox=st=>`<label>Search<input id=search type=search value="${esc(st.q)}" autocomplete=off></label>`,
@@ -87,7 +85,7 @@ const tokenLinks=(st,separator="")=>groups.map(([k,lbl])=>
 const kpis=st=>`<section class=kpis>
 ${card("Snapshot",`<strong>${ns.total}</strong>
 <div class=groups id=token-groups>${tokenLinks(st)}</div>`)}
-${card(missTitle,valueStats+`<a class=evidence href="${href("calibration",st)}">${chosenNote} · term tests →</a>`)}
+${card(missTitle,valueStats+`<a class=evidence href="${href("calibration",st)}">Fold results and term tests →</a>`)}
 ${card(aucLabel,`<div class=readings>${html([["loo","Leave-one-out"],["walk","Walk-forward"]],([k,lbl])=>
 	`<div><strong>${showAuc(auc[k])}</strong><span>${lbl}</span></div>`)}</div><p>Snapshot score from TVL and listing age compared with traded-token peers`)}
 ${card("Watchlist",`<strong>${ns.watchlistCovered}<small> / ${ns.watchlistTotal}</small></strong>
@@ -209,7 +207,7 @@ const table=(kind,heads,body,attrs="")=>`<div class=scroll tabindex=0${attrs}><t
 function valueSources(r,st){
 	return`<div class=sources><p>Base and power fit to traded caps.
 <p>Estimated cap if a token trades ${usd(r.launchValue)} · snapshot TVL ${usd(r.tvl_usd)}
-<p>7-day TVL change ${chg(r.change_7d)}${chosen==="growth"?" · excluded from value":r.growth!==r.change_7d?` (uses ${chg(r.growth)})`:""}
+<p>7-day TVL change ${chg(r.change_7d)}${r.growth!==r.change_7d?` (uses ${chg(r.growth)})`:""}
 <p>Token-likeness uses TVL and days since listing (${r.ageDays==null?"median used":days(r)+" d"}).
 <p>Issuer factor · ${r.flags.length?r.flags.map(esc).join(" · "):"No flags"} · ${issuerNote}
 <p><a class=evidence href="${href("calibration",st)}">Outer test and term ablation →</a></div>`
@@ -283,13 +281,18 @@ ${inset(`Stress · snapshot defaults (${fp.horizon} d)`,facts("Scenario|Capital|
 </div></div>`
 }
 function calibration(){
-	const table=facts(["Term","Pooled",...values(outerTests),"Kept because / decision"],
-		ablation.map(({term,withTerm,without,reason})=>[term,...["pooled",...keys(outerTests)]
-			.map(k=>`${mult(withTerm[k])} / ${mult(without[k])}`),reason]))
+	const table=facts(["Term","Pooled outer effect",...values(outerTests),"Reason"],
+		ablation.map(({term,withTerm,without,reason})=>[term,
+			`Miss ${mult(withTerm.pooled)} with / ${mult(without.pooled)} without`,...keys(outerTests)
+			.map(k=>`${mult(withTerm[k])} / ${mult(without[k])}`),reason])),
+		folds=html(entries(outerTests),([k,label])=>`<h3>${label}</h3>${facts("Held out|Deployed|Flat ratio|n",
+			foldScores[k].map(f=>[f.label,mult(f.miss),mult(f.flat),f.n]))}`)
 	return`${intro("Trading-token calibration")}
 ${inset(missTitle,valueStats+`<p>Flat ratio multiplies held-out TVL by the median cap-to-TVL ratio in training.
-<p>We score the rank value against known traded caps from one snapshot, pooled across dated and family holdouts. Walk-forward orders listings by date and uses snapshot TVL, growth and caps.</p>`)}
-${inset("Value terms · median miss with / without",`<p>We refit with one term removed at a time and use the lowest pooled outer miss across ${headline.walk.n+headline.family.n} predictions to set the ranking. Range coverage is measured on the residuals used to set the bounds.</p>${table}
+<p>Walk-forward orders listings by date. Both tests use TVL, growth and caps from the snapshot.
+<p>For each family holdout, we set range bounds using leave-one-out cap residuals from training peers. Coverage counts held-out caps inside those bounds applied to the implied value. The published ranges use all traded peers for calibration.</p>
+<details class=folds><summary>Individual outer folds</summary>${folds}</details>`)}
+${inset("Value terms · median miss with / without",`<p>Each test removes one term. The age test removes the whole token-likeness factor. The pooled result combines ${headline.walk.n+headline.family.n} outer predictions.</p>${table}
 <p>The issuer rule fired on ${value.flagged} held-out predictions using only training issuer names.</p>`," ablation")}
 ${inset(oddsLabel,`<p class=likeness>${likenessTest}. ${setup.timing}`)}`
 }

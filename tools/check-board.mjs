@@ -158,20 +158,20 @@ function report(output, input) {
   console.log(`${passed}/${self.length} model self-checks pass (including board digest)`);
   const { traded, recorded, setAside, ranked, watchlistCovered, watchlistTotal, total, valueFit, oddsFit } = model.counts;
   console.log(`${traded} traded with cap + ${recorded} token recorded without cap + ${setAside} set aside + ${ranked} pre-token ranked = ${total} | watchlist ${watchlistCovered}/${watchlistTotal}`);
-  const { fit, headline, chosen, misses, ablation, ranges } = model.value;
-  const names = ["intercept", "logTvl", ...fit.features.map(([, name]) => name)];
+  const { fit, headline, foldScores, ablation, ranges } = model.value;
+  const names = ["intercept", "logGrowthAdjustedTvl"];
   const curve = names.map((name, i) => `${name}=${fit.coefficients[i].toFixed(6)}`).join(", ");
   console.log(`Log market-cap fit (${valueFit} tokens, TVL divided by $100M): ${curve}`);
   const show = miss => miss == null ? "unavailable" : `${miss.toFixed(3)}x`;
-  console.log("Full model outer test, selection inside training only");
+  console.log("Deployed value outer test, refit on training only");
   for (const [key, label] of [["walk", "Walk-forward"], ["family", "Leave-one-family-out"]]) {
     const { miss, flat, n } = headline[key];
-    console.log(`${label} median miss ${show(miss)} vs ${show(flat)} flat (n=${n}) · deployed ${show(misses[chosen][key])}`);
+    console.log(`${label} median miss ${show(miss)} vs ${show(flat)} flat (n=${n} across ${foldScores[key].length} folds)`);
   }
   for (const { term, withTerm, without, reason } of ablation) {
     console.log(`${term} · ${show(withTerm.pooled)} with / ${show(without.pooled)} without · ${reason}`);
   }
-  console.log([80, 50].map(k => `${ranges.labels[k]}% range covers ${ranges.hits[k]}/${ranges.n}`).join(" · "));
+  console.log(ranges.n ? `Family holdout coverage · ${[80, 50].map(k => `${ranges.labels[k]}% range covers ${ranges.hits[k]}/${ranges.n}`).join(" · ")}` : "Range coverage unavailable");
   for (const [key, label] of [["loo", "Leave-one-out"], ["walk", "Walk-forward"]]) {
     const { auc, n } = model.odds.validation[key];
     console.log(`${label} token-screen ranking accuracy (AUC) ${auc?.toFixed(3) ?? "unavailable"} (n=${n} of ${oddsFit})`);

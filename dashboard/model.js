@@ -67,7 +67,7 @@ Mezo|.34|2.6|17`),
 	},
 	A={
 		growthClip:[-30,30],missingGrowth:0,haircut:.65,year:365,tvlReference:1e8,missingAgeFallback:365,
-		familyPenalty:2,oddsPenalty:1,valueWarmup:25,oddsWarmup:60,
+		oddsPenalty:1,valueWarmup:25,oddsWarmup:60,
 		bootstrapDraws:192,bootstrapSeed:918273,bandQuantiles:[.1,.9],
 		hourlyUsd:20,depositorShare:.05,competingTvlShare:.2,
 		capitalLadder:[1000,2500,5000,10000,25000,50000],farmMultiple:2,
@@ -123,7 +123,7 @@ const byText=(a,b)=>(a>b)-(a<b),bySlug=(a,b)=>byText(a.slug,b.slug),
 	tally=(rs,get)=>record(["FARM","MARGINAL","SKIP"],v=>count(rs,p=>get(p)===v)),
 	word1=name=>name.toLowerCase().match(/[\p{L}\p{N}]+/u)?.[0]
 const hasToken=p=>p.mcap_usd>0||!!(p.gecko_id||p.symbol),
-	rawScore=({launchValue,tokenOdds,scoreOdds=tokenOdds,haircut})=>launchValue*scoreOdds*haircut,
+	rawScore=({launchValue,tokenOdds,haircut})=>launchValue*tokenOdds*haircut,
 	scoreOf=p=>max(1,round(rawScore(p))),
 	costUsd=new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format,
 	integer=n=>round(n).toLocaleString("en-US"),whole=n=>"$"+integer(n)
@@ -200,20 +200,12 @@ function accum({matrix,target},x,residual,weight=1){
 	}
 }
 
-const valueTerms=[
-	["age","logAge",logAge],["growth","clippedGrowth",p=>p.growth/100],
-	...keys(families).concat("Other").map(f=>["family",f,p=>+(f===p.family)])
-]
-const capInputs=(p,{features,medianDays,omit})=>[
-	1,omit==="growth"?p.rawSize:p.size,...features.map(([,,read])=>read(p,medianDays))]
-function fitValue(pts,terms,omit,ridge){
-	const features=valueTerms.filter(([term])=>terms.includes(term)),
-		fit={terms,features,medianDays:terms.includes("age")?medianAge(pts):null,omit,ridge},eps=1e-8,
-		eq=normal([eps,eps+(ridge?sqrt(pts.length):0),...features.map(([t])=>t==="family"?A.familyPenalty:eps)])
-	for(const p of pts) accum(eq,capInputs(p,fit),p.response)
-	return{...fit,coefficients:solve(eq.matrix,eq.target)}
+function fitValue(pts,omitGrowth=false){
+	const eps=1e-8,eq=normal([eps,eps+sqrt(pts.length)])
+	for(const p of pts) accum(eq,[1,omitGrowth?p.rawSize:p.size],p.response)
+	return{omitGrowth,coefficients:solve(eq.matrix,eq.target)}
 }
-const capLog=(fit,p)=>dot(capInputs(p,fit),fit.coefficients)
+const capLog=(fit,p)=>dot([1,fit.omitGrowth?p.rawSize:p.size],fit.coefficients)
 const leaveOut=(pts,group)=>[...Map.groupBy(pts,group).values()]
 	.map(test=>[pts.filter(p=>!test.includes(p)),test]).filter(([train])=>train.length)
 function folds(pts,walk,warmup=A.valueWarmup){
@@ -228,64 +220,57 @@ function folds(pts,walk,warmup=A.valueWarmup){
 	return splits
 }
 
-const blindTests=["loo","walk"],
-	flagNote="assumption, not supported by the test"
+const blindTests=["loo","walk"]
 const medianMiss=es=>es.length?exp(quant(es.map(abs))):null
-function selectFit(pts){
-	const splits={loo:folds(pts),walk:folds(pts,true),family:leaveOut(pts,p=>p.family)},tests=keys(splits),
-		assess=(terms,ridge=false)=>({terms,ridge,...record(tests,k=>medianMiss(splits[k].flatMap(([train,test])=>{
-			const fit=fitValue(train,terms,null,ridge)
-			return test.map(p=>p.response-capLog(fit,p))
-		})))}),
-		terms=["age","family","growth"],
-		trials=Array.from({length:2**terms.length},(_,mask)=>assess(terms.filter((_,i)=>mask&(1<<i)))),
-		mass=trial=>tests.reduce((n,k)=>n*(trial[k]??1),1),
-		lower=(a,b,k)=>a[k]!==null&&a[k]<b[k],
-		better=(a,b)=>tests.every(k=>lower(a,b,k)),
-		deployed=trials.filter((trial,mask)=>terms.every((_,i)=>!(mask&(1<<i))||better(trial,trials[mask^(1<<i)])))
-			.sort((a,b)=>mass(a)-mass(b))[0],
-		ridge=assess(deployed.terms,true)
-	return blindTests.every(k=>lower(ridge,deployed,k))&&ridge.family!==null&&ridge.family<=deployed.family+.1?ridge:deployed
-}
 const levels={80:[.1,.9],50:[.25,.75]},coverage=keys(levels),
-	inside=(errors,[lo,hi])=>count(errors,e=>lo<=e&&e<=hi)
+	inside=(e,[lo,hi])=>lo<=e&&e<=hi
+function rangeFit(pts){
+	const errors=folds(pts).flatMap(([train,test])=>{
+		const fit=fitValue(train)
+		return test.map(p=>p.response-capLog(fit,p))
+	})
+	return errors.length?record(coverage,k=>levels[k].map(q=>quant(errors,q))):null
+}
 const outerTerms={growth:"7-day growth",age:"Age / token-likeness",issuer:"Issuer factor"},
 	variants=["full",...keys(outerTerms)],outerTests={walk:"Walk-forward",family:"Leave-one-family-out"}
-const variantFit=(train,{terms,ridge},omit)=>fitValue(train,terms.filter(t=>t!==omit),omit,ridge)
 function outerFolds(pts,recs){
 	const splits={walk:folds(pts,true),family:leaveOut(pts,p=>p.family)}
 	return record(keys(outerTests),k=>splits[k].map(([train,test])=>{
 		// Keep aliases of held-out tokens out of the status model and issuer lookup too.
 		const held=new Set(test.map(tokenId)),eligible=recs.filter(p=>!held.has(tokenId(p))&&
 			(k==="walk"?p.date!==null&&p.date<test[0].date:p.family!==test[0].family)),
-			choice=selectFit(train),fits=record(["full","growth","age"],omit=>variantFit(train,choice,omit)),
+			fit=fitValue(train),noGrowth=fitValue(train,true),
 			odds=fitOdds(eligible.filter(p=>!p.product)),words=issuerWords(eligible),
-			ratio=quant(train.map(p=>p.mcap_usd/p.tvl_usd))
-		return test.map(p=>{
+			ratio=quant(train.map(p=>p.mcap_usd/p.tvl_usd)),
+			label=k==="walk"?new Date(test[0].date).toISOString().slice(0,10):test[0].family,
+			quantiles=rangeFit(train),rows=test.map(p=>{
 			const likeness=tokenOdds(odds,p),issuer=issuerFlags(p,words).length?A.haircut:1,
-				error=(fit,s,h)=>p.response-log(scoreOf({launchValue:exp(capLog(fit,p)),tokenOdds:s,haircut:h})),
-				full=error(fits.full,likeness,issuer)
-			return {full,growth:error(fits.growth,likeness,issuer),
-				age:error(fits.age,1,issuer),issuer:error(fits.full,likeness,1),
+				launchValue=exp(capLog(fit,p)),error=(cap,s,h)=>p.response-log(scoreOf({launchValue:cap,tokenOdds:s,haircut:h}))
+			return {slug:p.slug,full:error(launchValue,likeness,issuer),growth:error(exp(capLog(noGrowth,p)),likeness,issuer),
+				age:error(launchValue,1,issuer),issuer:error(launchValue,likeness,1),
 				flat:p.response-log(p.tvl_usd*ratio),flagged:issuer!==1}
 		})
+		return{label,quantiles,rows,training:train.map(p=>p.slug)}
 	}))
 }
-const outerMiss=(rows,kind)=>medianMiss(rows.map(row=>row[kind]))
+const outerMiss=(rows,kind)=>medianMiss(rows.map(row=>row[kind])),
+	outerSummary=rows=>({miss:outerMiss(rows,"full"),flat:outerMiss(rows,"flat"),n:rows.length}),
+	bandSource="family"
 function valueTest(pts,recs){
-	const tests=outerFolds(pts,recs),errors=record(keys(tests),k=>tests[k].flat()),pooled=values(errors).flat(),
+	const tests=outerFolds(pts,recs),errors=record(keys(tests),k=>tests[k].flatMap(f=>f.rows)),pooled=values(errors).flat(),
 		misses=record(variants,k=>({pooled:outerMiss(pooled,k),...record(keys(tests),s=>outerMiss(errors[s],k))})),
-		chosen=variants.reduce((a,b)=>misses[b].pooled<misses[a].pooled?b:a),
-		headline=record(keys(tests),k=>({miss:misses.full[k],flat:outerMiss(errors[k],"flat"),n:errors[k].length})),
-		issuerNote=misses.issuer.pooled>misses.full.pooled?"Lower pooled miss with the factor":flagNote,
+		headline=record(keys(tests),k=>outerSummary(errors[k])),
+		foldScores=record(keys(tests),k=>tests[k].map(f=>({label:f.label,...outerSummary(f.rows)}))),
+		issuerNote=misses.issuer.pooled>misses.full.pooled?"Lower pooled miss with the factor":"Assumption · no lower pooled miss with the factor",
+		reasons={growth:"Kept · required snapshot input, clipped to ±30%",
+			age:"Kept · days without a recorded token enter through token-likeness",issuer:`Kept · ${issuerNote}`},
 		ablation=entries(outerTerms).map(([k,term])=>({term,withTerm:misses.full,without:misses[k],
-			reason:k===chosen?"Dropped · lowest pooled miss":k==="issuer"?issuerNote:
-			misses[k].pooled<misses.full.pooled?"Kept · another single omission helped more":"Kept · removal did not lower pooled miss"})),
-		source=errors.walk.length?"walk":"family",bandErrors=errors[source].map(r=>r[chosen]),n=bandErrors.length,
-		quantiles=record(coverage,k=>levels[k].map(q=>quant(bandErrors,q)??0)),
-		hits=record(coverage,k=>inside(bandErrors,quantiles[k])),
+			reason:reasons[k]})),
+		bands=tests[bandSource].filter(f=>f.quantiles),n=bands.flatMap(f=>f.rows).length,
+		hits=record(coverage,k=>bands.reduce((sum,f)=>sum+count(f.rows,r=>inside(r.full,f.quantiles[k])),0)),
 		labels=record(coverage,k=>n?round(100*hits[k]/n):null)
-	return{tests,misses,chosen,headline,ablation,issuerNote,flagged:count(pooled,r=>r.flagged),ranges:{quantiles,hits,labels,n,source}}
+	return{tests,misses,headline,foldScores,ablation,issuerNote,flagged:count(pooled,r=>r.flagged),
+		ranges:{quantiles:rangeFit(pts),hits,labels,n,source:bandSource}}
 }
 const sigmoid=x=>1/(1+exp(-limit(x,-35,35))),
 	oddsFeatures=(p,age)=>[1,p.rawSize,logAge(p,age)]
@@ -316,10 +301,8 @@ const tvlMillions=A.tvlReference/1e6,
 	equationScore=([base,tvl,slope,...terms])=>max(1,round(terms.reduce((v,[,n])=>v*n,
 		base*1e6*(tvl/tvlMillions)**slope)))
 function valueEquation(fit,p){
-	const [intercept,slope,...weights]=fit.coefficients,[,size,...inputs]=capInputs(p,fit),
-		terms=[...(fit.omit==="growth"?[]:[["growth",exp((size-p.rawSize)*slope)]]),
-			...fit.features.flatMap(([label],i)=>inputs[i]&&weights[i]?[[label,exp(inputs[i]*weights[i])]]:[]),
-			...(p.scoreOdds===1?[]:[["token-likeness",p.tokenOdds]]),["issuer",p.haircut]]
+	const [intercept,slope]=fit.coefficients,terms=[
+		["growth",exp((p.size-p.rawSize)*slope)],["token-likeness",p.tokenOdds],["issuer",p.haircut]]
 	let shown
 	for(let digits=4;digits<=17;digits++){
 		const print=n=>+n.toPrecision(digits)
@@ -339,14 +322,14 @@ function oddsTest(splits){
 	const pairs=positive.length*negative.length
 	return{auc:pairs?wins/pairs:null,n:scored.length}
 }
-function bootstrap(pts,{terms,ridge,omit}){
+function bootstrap(pts){
 	let seed=A.bootstrapSeed
 	return Array.from({length:A.bootstrapDraws},()=>{
 		const sample=pts.map(()=>{
 			seed=(Math.imul(seed,1664525)+1013904223)>>>0
 			return pts[floor(seed*pts.length/2**32)]
 		})
-		return fitValue(sample,terms,omit,ridge)
+		return fitValue(sample)
 	})
 }
 function peersFor({rawSize,category,family},pts){
@@ -497,8 +480,9 @@ const orderedRows=rs=>count(rs,(p,i)=>p?.rank===i+1&&(!i||p.implied_value_usd<=r
 	validSteps=steps=>Array.isArray(steps)&&steps.length>=3&&steps.length<=12
 		&&steps.every(s=>typeof s==="string"&&/^.{20,600}$/s.test(s.trim())&&/\$\d.*\d+ min/u.test(s))
 function selfChecks({rows:rs,board,counts,recs,stress,calibration,value},snap,expectedDigest){
-	const {headline,tests,chosen,ranges:{quantiles,hits,labels,n,source}}=value,
-		bandErrors=tests[source].flat().map(r=>r[chosen]),
+	const {headline,foldScores,tests,fit,ranges:{hits,labels,n,source}}=value,
+		[intercept,slope]=fit.coefficients,calibrationBySlug=new Map(calibration.map(p=>[p.slug,p])),
+		bands=tests[source].filter(f=>f.quantiles),bandRows=bands.flatMap(f=>f.rows),
 		plans=rs.map(p=>p.plan),samples=plans.filter(p=>p.pStar!==null&&p.q>0&&p.drop>0),close=(a,b)=>abs(a-b)<1e-8
 	return[...boardChecks(board,snap),...checks({
 		"calibration caps":calibration.every(p=>p.mcap_usd>0&&!p.productPeer),
@@ -506,17 +490,28 @@ function selfChecks({rows:rs,board,counts,recs,stress,calibration,value},snap,ex
 			&&recs.length===counts.total&&new Set(recs.map(p=>p.slug)).size===recs.length
 			&&recs.every((p,i)=>p.slug===snap.protocols[i].slug&&reasons[p.reason]?.[0]===p.status)
 			&&statuses.every(k=>count(recs,p=>reasons[p.reason]?.[0]===k)===counts[k]),
-		"value factors":rs.every(p=>scoreOf(p)===p.score),
+		"deployed value factors":rs.length===board.rows.length&&rs.every((p,i)=>{
+			const growth=limit(p.change_7d??A.missingGrowth,...A.growthClip),
+				cap=exp(intercept+slope*log(p.tvl_usd*(1+growth/100)/A.tvlReference)),row=board.rows[i]
+			return row.slug===p.slug&&row.rank===i+1&&row.launch_value_usd===cap
+				&&row.implied_value_usd===max(1,round(cap*row.token_odds*row.issuer_factor))
+		}),
 		"displayed value equation":rs.every(p=>equationScore(p.equation)===p.score),
 		"bootstrap bands":rs.every(p=>p.band.low>0&&p.band.low<=p.band.high&&p.tokenOdds>0&&p.tokenOdds<1),
-		"outer headline replay":entries(headline).every(([k,{miss,flat,n}])=>{
-			const heldOut=tests[k].flat()
-			return n===heldOut.length&&miss===outerMiss(heldOut,"full")&&flat===outerMiss(heldOut,"flat")
-				&&value.misses[chosen][k]===outerMiss(heldOut,chosen)
+		"outer headline replay":entries(tests).every(([k,folds])=>{
+			const same=({miss,flat,n},rows)=>n===rows.length&&miss===outerMiss(rows,"full")&&flat===outerMiss(rows,"flat")
+			return same(headline[k],folds.flatMap(f=>f.rows))&&foldScores[k].length===folds.length
+				&&folds.every((f,i)=>foldScores[k][i].label===f.label&&same(foldScores[k][i],f.rows))
 		}),
-		"outer band coverage label":n===bandErrors.length&&coverage.every(k=>hits[k]===inside(bandErrors,quantiles[k])
-			&&(n?abs(labels[k]-100*hits[k]/n)<=5:labels[k]===null)),
-		"flagged plans":rs.every(p=>p.haircut===(p.flags.length&&chosen!=="issuer"?A.haircut:1)
+		"outer band coverage label":source===bandSource&&n===bandRows.length&&bands.every(f=>{
+			const train=f.training.map(slug=>calibrationBySlug.get(slug))
+			return train.every(p=>p.family!==f.label)&&f.rows.every(r=>calibrationBySlug.get(r.slug).family===f.label)
+				&&JSON.stringify(f.quantiles)===JSON.stringify(rangeFit(train))
+		})&&coverage.every(k=>{
+			const covered=bands.flatMap(f=>f.rows.filter(r=>inside(r.full,f.quantiles[k]))).length
+			return hits[k]===covered&&labels[k]===(n?round(100*covered/n):null)
+		}),
+		"flagged plans":rs.every(p=>p.haircut===(p.flags.length?A.haircut:1)
 			&&(!p.flags.length||p.plan.verdict!=="FARM")),
 		"launch chance":plans.every(p=>values(p.launchOdds).every((q,i,curve)=>q>=(curve[i-1]??0)&&q<=1)),
 		"farm outcomes":plans.every(fp=>{
@@ -546,8 +541,11 @@ function selfChecks({rows:rs,board,counts,recs,stress,calibration,value},snap,ex
 			const matches=rs.filter(p=>p.plan.stress[k].verdict===v)
 			return all[v]===matches.length&&farm[v]===count(matches,isFarm)
 		})),
-		"value term choice":variants.every(k=>value.misses[k].pooled===outerMiss(values(tests).flat(2),k)
-			&&value.misses[chosen].pooled<=value.misses[k].pooled),
+		"value term replay":entries(outerTerms).every(([term,label],i)=>{
+			const a=value.ablation[i],matches=(rows,k)=>a.withTerm[k]===outerMiss(rows,"full")&&a.without[k]===outerMiss(rows,term)
+			return a.term===label&&matches(values(tests).flat().flatMap(f=>f.rows),"pooled")
+				&&entries(tests).every(([k,folds])=>matches(folds.flatMap(f=>f.rows),k))
+		}),
 		"board digest":digest(boardRows(rs))===expectedDigest
 	})]
 }
@@ -556,18 +554,17 @@ function buildModel(snap){
 		categories=Map.groupBy(recs,p=>p.category),
 		review=new Date(Date.parse(snap.as_of)+A.reviewDays*DAY).toISOString().slice(0,10)
 	if(pts.length<3) throw new Error("Need 3 screened caps.")
-	const tested=valueTest(pts,recs),{chosen,ranges:{quantiles}}=tested,
-		fit=variantFit(pts,selectFit(pts),chosen),value={...tested,fit},
-		resamples=bootstrap(pts,fit),
+	const fit=fitValue(pts),value={...valueTest(pts,recs),fit},
+		{ranges:{quantiles}}=value,resamples=bootstrap(pts),
 		oddsPts=recs.filter(p=>!p.product),
 		oddsFit=fitOdds(oddsPts),oddsFolds=record(blindTests,k=>folds(oddsPts,k==="walk",A.oddsWarmup)),
 		odds={validation:record(blindTests,k=>oddsTest(oddsFolds[k]))}
 	const rs=(groups.ranked??[]).map(p=>{
 		const launchValue=exp(capLog(fit,p)),
 			s=tokenOdds(oddsFit,p),
-			haircut=p.flags.length&&chosen!=="issuer"?A.haircut:1,
+			haircut=p.flags.length?A.haircut:1,
 			[low,high]=band(resamples.map(fit=>exp(capLog(fit,p)))),
-			row={...p,launchValue,tokenOdds:s,scoreOdds:chosen==="age"?1:s,haircut,band:{low,high},
+			row={...p,launchValue,tokenOdds:s,haircut,band:{low,high},
 			peers:peersFor(p,pts)}
 		row.score=scoreOf(row)
 		row.equation=valueEquation(fit,row)
