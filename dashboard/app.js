@@ -13,18 +13,18 @@ const dash="—",mult=n=>n==null?dash:n.toFixed(3)+"×",
 	chg=n=>n==null?dash:sign(n)+signed(n.toFixed(2))+"%",
 	net=farmNet,decisionNet=n=>net(decisionUsd(n)),
 	esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c])
-const {rows:rs,recs,counts:ns,verdicts,stress,value,odds,assumptions:setup,board:{rows:board}}=model,
+const {rows:rs,recs,counts:ns,verdicts,value,odds,assumptions:setup,board:{rows:board}}=model,
 	sameHash=digest(board)===boardDigest&&digest(manifest)===digest(exportManifest(board)),
 	{parameters:{horizons,riskFreeRate,hourlyUsd}}=setup,
 	auc=odds.validation,
 	showAuc=k=>auc[k].auc?.toFixed(3)??dash
 const aucLabel="Token-screen ranking accuracy (AUC)",
 	likenessTest=`${aucLabel} ${showAuc("walk")} walk-forward`,
-	{headline,ablation,issuerNote,candidates,form,weight,ranges:{labels,hits,n:rangeN}}=value,
-	levelsShown=[80,50],rangeLabel=k=>labels[k]==null?"Uncalibrated range":`${labels[k]}% range`,
+	{headline,ablation,issuerNote,candidates,form,weight,ranges:{label,hits,n:rangeN}}=value,
+	rangeLabel=label==null?"Uncalibrated range":`${label}% range`,
 	groups=[["traded","traded"],["setAside","set aside"],["recorded","token, no cap"],["ranked","ranked"]],
 	choices=items=>["",...unique(items).sort()]
-const grades=keys(verdicts),
+const grades=keys(verdicts),boardCounts=actionCounts(verdicts),
 	scenarios=[["doubleCost","2× cost"],["halfShare","Reward share halved"]],
 	oddsLabel="Token-likeness",netLabel="Expected net",empty="<p class=empty>No matches.",
 	cols={
@@ -37,7 +37,7 @@ const order=k=>cols[k][2]||"desc",filters=[
 	["Scope","scope",["all","watchlist"],"All ranked","Watchlist"],
 	["Family","family",choices(rs.map(p=>p.family)),"All families"],
 	["Verdict","verdict",["",...grades],"All verdicts"],
-	["Listed chain","chain",choices(rs.flatMap(p=>p.chains)),"All chains"],
+	["Listed on","chain",choices(rs.flatMap(p=>p.chains)),"All chains"],
 	["Min TVL","tvl",["",1e7,5e7,1e8,5e8].map(String),"Any TVL"],
 	["Issuer","flag",["","flagged","clear"],"Any issuer","Flagged","No flags"]
 ]
@@ -74,7 +74,7 @@ const valueStats=`<p class=nested>Form chosen inside training only</p>
 		const {miss,flat,n}=headline[k]
 		return`<div><span>${lbl} · n=${n}</span><strong>${mult(miss)}</strong> / ${mult(flat)}${miss!==null&&miss>=flat?"<small>Flat ratio ties or wins.</small>":""}</div>`
 	})}</div>
-<p class=coverage>${rangeN?`Family holdout coverage · ${levelsShown.map(k=>`${rangeLabel(k)} (${hits[k]}/${rangeN})`).join(" · ")}`:"Range coverage unavailable"}</p>`
+<p class=coverage>${rangeN?`Family holdout coverage · ${rangeLabel} (${hits}/${rangeN})`:"Range coverage unavailable"}</p>`
 const tokenLinks=(st,separator="")=>groups.map(([k,lbl])=>
 	`<a href="${href("tokens",st,k)}"${st.route==="tokens"&&st.slug===k?' aria-current="page"':""}><b>${ns[k]}</b> ${lbl}</a>`).join(separator),
 	searchBox=st=>`<label>Search<input id=search type=search value="${esc(st.q)}" autocomplete=off></label>`,
@@ -85,23 +85,19 @@ ${card("Snapshot",`<strong>${ns.total}</strong>
 ${card(missTitle,valueStats+calLink(st))}
 ${card(aucLabel,`<div class=readings>${html([["loo","Leave-one-out"],["walk",outerTests.walk]],([k,lbl])=>
 	`<div><strong>${showAuc(k)}</strong><span>${lbl}</span></div>`)}</div><p>TVL and listing age vs traded peers`)}
-${card("Watchlist",`<strong>${ns.watchlistCovered}<small> / ${ns.watchlistTotal}</small></strong>
-<p>Floor ${short(snap.floor_usd)}`)}</section>`
+${card("First actions",`<b id=cover-counts>${boardCounts}</b><p>Floor ${short(snap.floor_usd)}`)}</section>`
 const option=(v,lbl,selected)=>`<option value="${esc(v)}"${selected?" selected":""}>${esc(lbl)}`,
 	filterName=(k,v,name)=>name??(k==="tvl"?short(v)+"+":v),
 	filter=([lbl,k,opts,...names],st)=>`<label>${lbl}<select name=${k}>${html(opts,(v,i)=>option(v,filterName(k,v,names[i]),v===st[k]))}</select></label>`
 function plans(st,rows){
-	const ticket=p=>p.plan.test??p.plan,
-		eligible=rows.filter(p=>ticket(p).net>=0).sort((a,b)=>ticket(b).net-ticket(a).net),
-		best=eligible.slice(0,5)
-	return inset(`Best plans that clear break-even · ${eligible.length}/${rows.length}`,
+	const best=rows.filter(p=>p.plan.capital).sort((a,b)=>b.plan.net-a.plan.net).slice(0,5)
+	return inset(`Top funded plans <small id=rail-counts>${boardCounts}</small>`,
 		(best.length?html(best,p=>{
-			const f=ticket(p)
-			return`<div><b class=pos>${net(f.net)} net</b>${pLink(p,st)} ${badge(p.plan.verdict)}
-<small class=action>${esc(p.plan.quoteTicket(f.capital))} ${p.plan.test?"test":"entry"} · ${f.horizon} d</small>
-<small class=plan-route>${esc(p.plan.route)}</small>
-<small class=plan-time>${farmTime(f)}</small><small class=plan-cost>${farmCost(f)}</small></div>`
-		}):"<p>No visible row clears break-even.")," plans")
+			const f=p.plan
+			return`<div><b class=pos>${net(f.net)} net</b>${pLink(p,st)}
+<small class=action>${firstAction(f)}</small><small class=plan-route>${esc(f.route)}</small>
+<small class=plan-time>${f.handsOnMinutes} min hands-on</small><small class=plan-cost>${money(f.cost)} total cost</small></div>`
+		}):"<p>No funded plans in these results.")," plans")
 }
 const boardShell=st=>`${intro("Pre-token rankings","30–365 d farms")}
 <div class=integrity role=group aria-label=Integrity></div>
@@ -109,7 +105,8 @@ ${kpis(st)}
 <div class=board><section class=panel>
 <div class=bar><h2>Protocols</h2><small id=compare-count role=status></small><small id=shown role=status></small></div>
 <div class=filters>${searchBox(st)}
-${html(filters,spec=>filter(spec,st))}</div>
+${html(filters,spec=>filter(spec,st))}
+<small class=chain-note>Listed on = chains in the snapshot; plan route = cheapest priced chain among them</small></div>
 <div id=active-filters></div><div id=compare></div><div id=results></div>
 </section><aside class=rail id=plans></aside></div>`
 function filtered({scope,family,chain,verdict,flag,tvl,q,sort,dir}){
@@ -124,7 +121,7 @@ function filtered({scope,family,chain,verdict,flag,tvl,q,sort,dir}){
 	})
 }
 const range=r=>r.map(short).join("–"),
-	valueRange=r=>levelsShown.map(k=>`${rangeLabel(k)} ${range(r[k])}`).join(" · "),
+	valueRange=r=>`${rangeLabel} ${range(r[80])}`,
 	endpoints=rs.flatMap(({score,ranges})=>[score,...ranges[80]]),
 	logMin=log(min(...endpoints)),logSpan=log(max(...endpoints))-logMin||1,
 	barAt=n=>1+40*(log(n)-logMin)/logSpan
@@ -139,11 +136,11 @@ function tableRow(r,st){
 <td class=rank>${rank} ${pick(r)}
 <th scope=row>${pLink(r,st)}${r.flags.length?" <span title='Issuer flag'>!</span>":""}
 <small>${rowName(r)}${watchlist?" <span class=watch title=Watchlist>◆</span>":""}
-<td class=value title="${rangeLabel(80)} ${range(ranges[80])}"><b>${short(score)}</b><svg class=range aria-hidden=true><path d="M${lo} 4H${hi}"/><path d="M${barAt(score)} 0v8"/></svg>${equation(r,short)}
+<td class=value title="${valueRange(ranges)}"><b>${short(score)}</b><svg class=range aria-hidden=true><path d="M${lo} 4H${hi}"/><path d="M${barAt(score)} 0v8"/></svg>${equation(r,short)}
 <td>${pct(tokenOdds,1)}<td>${short(tvl_usd)}
 <td><b class="${change_7d>0?"pos":change_7d<0?"neg":""}">${chg(change_7d)}</b>
 <td>${days(r)}
-<td>${badge(fp.verdict)}<td>${net(fp.net)}<small>${usd(fp.capital)} · ${fp.horizon} d</small>`
+<td>${badge(fp.verdict)}<td>${firstAction(fp,short," ")} <span class=first-net>${net(fp.net)}</span>${fp.capital?`<small>${fp.horizon} d</small>`:""}`
 }
 function matchesExport(rank,slug,value,verdict,format){
 	const row=manifest?.[rank-1]
@@ -159,8 +156,10 @@ function verifyRows(rows,st){
 		const [rank,,value,odds]=tr.cells,n=Number(rank.textContent)
 		return matchesExport(n,tr.dataset.slug,value.firstElementChild.textContent,tr.querySelector(".badge")?.textContent,short)
 			&&odds.textContent===pct(board[n-1].token_odds,1)
+			&&tr.querySelector(".first-net").textContent===net(rs[n-1].plan.net)
 	})
-	const pass=!!(sameHash&&sorted&&matched===total)
+	const pass=!!(sameHash&&sorted&&matched===total
+		&&$("#cover-counts").textContent===$("#rail-counts").textContent)
 	$(".integrity").innerHTML=html([
 		[total?pass:null,rowStatus(matched,total,pass)],
 		[ns.watchlistCovered===ns.watchlistTotal,`Export watchlist ${ns.watchlistCovered}/${ns.watchlistTotal}`],
@@ -169,7 +168,7 @@ function verifyRows(rows,st){
 }
 function drawBoard(st){
 	const rows=filtered(st),activeFilters=filters.flatMap(([lbl,k,opts,...names])=>
-		st[k]===defaults[k]?[]:[`${k==="chain"?"Listed on":lbl}: ${filterName(k,st[k],names[opts.indexOf(st[k])])}`])
+		st[k]===defaults[k]?[]:[`${lbl}: ${filterName(k,st[k],names[opts.indexOf(st[k])])}`])
 	if(st.q.trim()) activeFilters.unshift(`Search: ${st.q.trim()}`)
 	$("#token-groups").innerHTML=tokenLinks(st)
 	$("#active-filters").innerHTML=activeFilters.length?`${html(activeFilters,s=>`<span class=chip>${esc(s)}</span>`)}
@@ -182,9 +181,9 @@ function drawBoard(st){
 <a id=sort-${k} href="${href("board",{...st,sort:k,dir})}">${lbl}${active?` <span aria-hidden=true>${dir==="desc"?"↑":"↓"}</span>`:""}</a>`
 	})
 	$("#results").innerHTML=rows.length?table("ranks",heads,html(rows,r=>tableRow(r,st))," role=region aria-label=Rankings"):empty
+	$("#plans").innerHTML=plans(st,rows)
 	verifyRows(rows,st)
 	drawCompare(st)
-	$("#plans").innerHTML=plans(st,rows)
 }
 
 const table=(kind,heads,body,attrs="")=>`<div class=scroll tabindex=0${attrs}><table class=${kind}><thead><tr>${heads}<tbody>${body}</table></div>`,
@@ -196,10 +195,10 @@ function drawCompare(st){
 	$("#compare-count").textContent=`Compare ${size}/3`
 	$("#compare").innerHTML=size?facts(["Compare",...rows.map(r=>pLink(r,st)+pick(r))],[
 		[cols.value[0],...rows.map(r=>usd(r.score))],
-		["Equation",...rows.map(r=>equation(r,usd))],
+		["First action",...rows.map(r=>firstAction(r.plan))],
 		[cols.verdict[0],...rows.map(r=>badge(r.plan.verdict))],
 		[netLabel,...rows.map(r=>net(r.plan.net))],
-		["Time / cost",...rows.map(({plan:p})=>`${p.handsOnMinutes} min hands-on · ${p.horizon} d · ${money(p.cost)}`)]
+		["Time / cost",...rows.map(({plan:p})=>`${p.handsOnMinutes??0} min hands-on · ${money(p.cost)}`)]
 	]):""
 	for(const box of $$("input[name=compare]")){
 		box.checked=compared.has(+box.value)
@@ -218,20 +217,23 @@ const quoteFields=[
 	["delay","Exit delay (d)",36500],["lockup","Lockup days",36500]
 ],
 	maybeMoney=n=>n==null?"unreachable":money(n),
-	quoteHeadline=(fp,{capital,horizon})=>`Decision scenario · ${fp.quoteTicket(capital)} · ${horizon} d`
-function cashFlows(fp,quote,result){
+	actionLine=p=>`${firstAction(p)} · ${netLabel} ${net(p.net)}`
+function cashFlows(fp,quote,action,edited=false){
+	const result=action.candidate??action
 	const {horizon,q,capital,noToken,withToken,pStar,gas,holding,drop,claimSell,verdict,net:gain}=result,
 		{chain,transactions}=fp,gasBasis=quote.entryGas===fp.quote.entryGas&&quote.exitGas===fp.quote.exitGas
 			?`${transactions} tx × ${money(chain.gas)}`:"Quoted gas",
 		half=evaluateFarm(fp,capital,{quote,horizon,q:q/2}),pay=targetsFor(result,quote),
 		[marginal,farm]=pay.targets.map(t=>`${needs(t.odds,q)} or drop ${maybeMoney(t.drop)}`)
-	return`<div class=decision>
+	return`${edited?`<p class=quote-action>With edited inputs · ${actionLine(action)}`:""}
+${action.candidate?`<p class=conditional>Conditional ticket · ${esc(fp.quoteTicket(capital))} · ${horizon} d`:""}
+<div class=decision>
 <p><b>Launch chance (${horizon} d) ${chance(q)} · Token outcome ${decisionNet(withToken)}</b>
 <p><b>No-token outcome ${decisionNet(noToken)}</b>
 <p>${farmCost(result)}
 <p>${farmTime(result)} at ${usd(hourlyUsd)}/h · carry at ${pct(riskFreeRate,0)}/yr for ${holding} d
 <p>Break-even chance ${breakEven(pStar)} → ${badge(verdict)}
-<p><b>${netLabel} ${decisionNet(gain)}</b> = launch chance × token outcome + chance of no token × no-token outcome. Displayed figures rounded.</div>
+<p><b>${action.candidate?"Net before cash reward":netLabel} ${decisionNet(gain)}</b> = launch chance × token outcome + chance of no token × no-token outcome. Displayed figures rounded.</div>
 <p class=gas>${gasBasis} on ${esc(chain.name)} = ${money(gas)}
 <p>Drop ${money(drop)} − claim &amp; sell ${money(claimSell)}
 <p class=half-q>Launch chance halved (${chance(q/2)}) · ${net(half.net)} · ${badge(half.verdict)}
@@ -239,7 +241,7 @@ function cashFlows(fp,quote,result){
 <br>MARGINAL ${marginal} · all-in cost ≤ ${maybeMoney(pay.maxCost)}<br>FARM ${farm}`
 }
 
-const quotePanel=({plan:fp,slug})=>inset("Decision",`
+const quotePanel=({plan:fp,slug})=>inset("Ticket economics",`
 <div id=quote-result aria-live=polite>${cashFlows(fp,fp.quote,fp)}</div>
 <p class=timing>${setup.timing} ${likenessTest}.
 <form id=quote data-slug="${esc(slug)}" class=quotes>
@@ -253,17 +255,18 @@ const tree=steps=>`<ol class=steps>${html(steps,([label,body,terms])=>
 function detail(st,r){
 	const back=`<a class=back href="${href("board",st)}">← Rankings</a>`
 	if(!r) return back+intro("Unavailable")
-	const {plan:fp,ranges,rangeFarm:[low,high]}=r,
+	const {plan:fp,ranges,rangeFarm}=r,
 		tokenLine=r.reason==="watch"?`watchlist exception — kept despite ${r.nameRule||r.category}`:
 			`pre-token — no gecko_id, no symbol, no ${r.mcap_usd==null?"":"positive "}market cap recorded in the snapshot`,
 		summary=`${rowName(r)} · ${short(r.tvl_usd)} TVL · ${chg(r.change_7d)} 7d · ${days(r)} d listed<br><span id=token-reason>Token screen: ${esc(tokenLine)}</span>`,
 		lbl=`<p class=kicker>#${r.rank}/${ns.ranked}${r.watchlist?" · ◆ Watchlist":""}`,
-		lead=`<p><span class=route>${esc(quoteHeadline(fp,fp))}</span> · <span class=plan-route>${esc(fp.route)}</span></p>`,
+		lead=`<p><b class=route>${actionLine(fp)}</b> · <span class=plan-route>${esc(fp.route)}</span>
+<small id=detail-counts>${boardCounts}</small></p>`,
 		stressRows=[[null,"Default"],...scenarios].map(([k,lbl])=>{
-		const p=fp.stress[k]??fp,{all=verdicts,farm}=stress[k]??{}
-		return[lbl,usd(p.capital),badge(p.verdict),net(p.net),grades.map(v=>farm?`${all[v]} (${farm[v]})`:all[v]).join(" / ")]
+		const p=fp.stress[k]??fp
+		return[lbl,badge(p.verdict),net(p.net)]
 	}),
-		flips=[low,high].flatMap(({verdict},i)=>verdict===fp.verdict?[]:[`flips to ${verdict} at ${i?"high":"low"} end`])
+		flips=rangeFarm.flatMap(({verdict},i)=>verdict===fp.verdict?[]:[`flips to ${verdict} at ${i?"high":"low"} end`])
 	return`${back}${intro(esc(r.name),summary,lead,lbl)}
 <div class=detail><div>
 ${quotePanel(r)}
@@ -273,9 +276,9 @@ ${equation(r,usd)}${valueSources(r,st)}`," valuation")}
 ${inset("Nearest traded peers",facts("Protocol|TVL|Cap",
 		r.peers.map(p=>[esc(p.name),short(p.tvl_usd),short(p.mcap_usd)]))," peers")}
 </div><div>
-${inset("Farm checklist · snapshot defaults",`<p class=range-net>${netLabel} ${net(low.net)} / ${net(high.net)} · ${flips.join(" · ")||`same verdict at both ends of ${rangeLabel(80)}`}
+${inset("Farm checklist · snapshot defaults",`${fp.capital?`<p class=range-net>${netLabel} ${rangeFarm.map(p=>net(p.net)).join(" / ")} · ${flips.join(" · ")||`same verdict at both ends of ${rangeLabel}`}`:""}
 <h3>Exit triggers</h3><ul class=exits>${html(fp.exits,s=>`<li>${esc(signed(s))}`)}</ul>${tree(fp.steps)}`)}
-${inset(`Stress · snapshot defaults (${fp.horizon} d)`,facts("Scenario|Capital|Verdict|Net|Board F/M/S",stressRows)+"<small>(Default FARM)</small>"," stress")}
+${fp.capital?inset("Same ticket · snapshot defaults",facts("Scenario|Verdict|Net",stressRows)," stress"):""}
 </div></div>`
 }
 function calibration(){
@@ -305,15 +308,13 @@ function drawTokens(st){
 			field(p.gecko_id),field(p.symbol),field(p.category),field(p.nameRule)])):empty
 }
 function drawer(){
-	const {chainQuotes,fallbackChain,notes}=setup
-	return`<ul><li>Issuer factor · ${issuerNote}${html(notes,s=>`<li>${esc(s)}`)}</ul>
-${facts("Chain|Gas/tx|Funding|Time",entries({...chainQuotes,"Other chains":fallbackChain})
-	.map(([k,[g,f,m]])=>[k,money(g),money(f),m+" min"]))}`
+	return`<ul><li>Issuer factor · ${issuerNote}${html(setup.notes,s=>`<li>${esc(s)}`)}</ul>`
 }
 function verifyDetail(){
 	const rank=Number($(".kicker").textContent.split("/")[0].slice(1)),saved=board[rank-1],
-		steps=$$(".steps li")
-	return sameHash&&matchesExport(rank,$("#quote").dataset.slug,$(".amount").textContent,$(".decision .badge").textContent,usd)
+		steps=$$(".steps li"),fp=rs[rank-1].plan
+	return sameHash&&matchesExport(rank,$("#quote").dataset.slug,$(".amount").textContent,fp.verdict,usd)
+		&&$(".route").textContent===actionLine(fp)&&$("#detail-counts").textContent===boardCounts
 		&&$(".value-range").textContent===valueRange(saved.implied_value_ranges_usd)
 		&&steps.length===saved.farm_steps.length
 		&&steps.every((li,i)=>li.querySelector("p").textContent+" "+li.querySelector("small").textContent===signed(saved.farm_steps[i]))
@@ -351,9 +352,8 @@ view.oninput=({target:el})=>{
 		input.nextElementSibling.textContent=observed?"Quoted":"Default"
 		if(observed) quote[input.name]=input.valueAsNumber
 	}
-	const result=chooseFarm(fp,quote,+form.elements.horizon.value)
-	$("#quote-result").innerHTML=cashFlows(fp,quote,result)
-	$(".route").textContent=quoteHeadline(fp,result)
+	const h=+form.elements.horizon.value,edited=h||!same(quote,fp.quote)
+	$("#quote-result").innerHTML=cashFlows(fp,quote,chooseFarm(fp,quote,h),edited)
 }
 function nav(st){
 	$(".brand").href=link("board",st)

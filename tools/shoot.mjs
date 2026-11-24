@@ -185,6 +185,7 @@ const shots = [
 ];
 const pages = [...shots,
   { name: "mezzanine", hash: "#detail/mezzanine", viewHeight: detailHeight, probeOnly: true },
+  { name: "alphagrowth", hash: "#detail/alphagrowth", viewHeight: detailHeight, probeOnly: true },
   { name: "calibration", hash: "#calibration", probeOnly: true },
   { name: "watchlist-skip", hash: "#board?scope=watchlist&verdict=SKIP", probeOnly: true },
   { name: "empty-board", hash: "#board?q=__no_protocol__", probeOnly: true },
@@ -262,6 +263,8 @@ function readPage() {
         .map(input => [input.name, input.valueAsNumber])),
       decision: decision(),
       headline: read(".route"),
+      editedAction: read(".quote-action"),
+      conditional: read(".conditional"),
       pay: read(".pay"),
       gas: read(".gas"),
       halfChance: halfOdds(),
@@ -339,7 +342,6 @@ function readPage() {
     farms: read(".plans"), farmsVisible: visible(".plans"), farmBounds: document.querySelector(".plans")?.getBoundingClientRect().toJSON(),
     farmHeading: read(".plans h2"),
     farmLinks: [...document.querySelectorAll(".plans a")].map(a => a.getAttribute("href")),
-    farmBadges: [...document.querySelectorAll(".plans .badge")].map(chip => chip.textContent),
     farmActions: [...document.querySelectorAll(".plans .action")].map(hint => hint.textContent),
     farmCosts: [...document.querySelectorAll(".plans .plan-cost")].map(line => line.textContent),
     farmTimes: [...document.querySelectorAll(".plans .plan-time")].map(line => line.textContent),
@@ -365,12 +367,15 @@ function readPage() {
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     assumptions: read("#assumptions .drawer ul"),
     assumptionTables: [...document.querySelectorAll("#assumptions table")].map(table => table.textContent),
+    actionCounts: ["cover", "rail", "detail"].map(place => read(`#${place}-counts`)),
+    listingNote: read(".chain-note"),
     stress: read(".stress"), stressVisible: visible(".stress"), rowCheck: chips[0]?.textContent,
     rowPass: chips[0]?.dataset.pass,
     rows: rows.map(row => {
       const value = row.cells[2];
       return [row.dataset.slug, Number(row.cells[0].textContent), value.querySelector("b").textContent,
-        value.querySelector(".equation").textContent, row.querySelector(".badge").textContent, watchlist.has(row.dataset.slug)];
+        value.querySelector(".equation").textContent, row.querySelector(".badge").textContent, watchlist.has(row.dataset.slug),
+        row.querySelector(".first-net").textContent, row.lastElementChild.textContent];
     }),
     completeRows, rangesInline, equationOverflow, width: innerWidth, height: innerHeight, dpr: devicePixelRatio,
     scrollbar: innerWidth - document.documentElement.clientWidth
@@ -514,10 +519,10 @@ async function shoot(output, destination) {
   if (api.digest(board) !== boardDigest || JSON.stringify(api.exportManifest(board)) !== JSON.stringify(manifest)) {
     throw new Error("Offline payload digest or manifest differs from board.json.");
   }
-  const { value, odds, rows, recs, counts, assumptions } = api.buildModel(snapshot);
+  const { value, odds, rows, recs, counts, verdicts, assumptions } = api.buildModel(snapshot);
   const verdictBySlug = new Map(manifest.map(([, slug, , verdict]) => [slug, verdict]));
   const upshift = rows.find(row => row.slug === "upshift");
-  const { exits: rawExits, gas, chain, transactions } = upshift.plan;
+  const { exits: rawExits, candidate: { gas }, chain, transactions } = upshift.plan;
   const exits = rawExits.map(displaySigns);
   const modelBySlug = new Map(rows.map(row => [row.slug, row]));
   for (const { slug, chains, plan } of rows) {
@@ -531,12 +536,16 @@ async function shoot(output, destination) {
     }
   }
   const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format;
+  const compact = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD",
+    notation: "compact", maximumFractionDigits: 2 }).format;
   const signedMoney = value => {
     const rounded = Number(value.toFixed(2));
     return (rounded > 0 ? "+" : "") + displaySigns(money(rounded));
   };
   const totalTime = p => `${p.handsOnMinutes} min hands-on (${p.setupMinutes} setup + ${p.exitMinutes} exit + ${p.checkMinutes} weekly checks)`;
   const totalCost = p => `${money(p.cost)} total (gas ${money(p.gas)} + funding ${money(p.funding)} + slippage ${money(p.slip)} + time ${money(p.timeCost)} + carry ${money(p.capitalCharge)})`;
+  const actionLine = p => `${api.firstAction(p)} · Expected net ${signedMoney(p.net)}`;
+  const actionCounts = api.actionCounts(verdicts);
   const chance = value => `${(100 * value).toFixed(1)}%`;
   const threshold = value => value == null || value > 1 ? "unreachable" : chance(value);
   const needed = (value, q) => value == null || value > 1 ? `unreachable at ${chance(q)}` : `needs ${chance(value)} vs ${chance(q)}`;
@@ -545,10 +554,8 @@ async function shoot(output, destination) {
   const mult = miss => miss == null ? "—" : `${miss.toFixed(3)}×`;
   const { headline, ranges, candidates, form } = value;
   const scheme = { walk: "Walk-forward", family: "Leave-one-family-out" };
-  const levels = [80, 50];
-  const rangeLabels = levels.map(level => ranges.n ? `${ranges.labels[level]}% range` : "Uncalibrated range");
-  const coverage = ranges.n ? `Family holdout coverage · ${levels.map((level, i) =>
-    `${rangeLabels[i]} (${ranges.hits[level]}/${ranges.n})`).join(" · ")}` : "Range coverage unavailable";
+  const rangeLabel = ranges.n ? `${ranges.label}% range` : "Uncalibrated range";
+  const coverage = ranges.n ? `Family holdout coverage · ${rangeLabel} (${ranges.hits}/${ranges.n})` : "Range coverage unavailable";
   const comparisons = ["walk", "family", "pooled"];
   const candidateRows = Object.entries(api.forms).map(([key, label]) => [
     label + (key === form ? " · deployed" : ""), ...comparisons.map(test => mult(candidates[key][test]))
@@ -608,9 +615,12 @@ async function shoot(output, destination) {
       }
       if (info.scrollbar) throw new Error(`${name}: page scrollbar occupies ${info.scrollbar}px`);
       const slugs = new Set(info.rows.map(([slug]) => slug));
-      if (slugs.size !== info.rows.length || info.rows.some(([slug, rank, value, equation, verdict], i) => {
-        const row = boardBySlug.get(slug);
+      if (slugs.size !== info.rows.length || info.rows.some(([slug, rank, value, equation, verdict, , net, ticket], i) => {
+        const row = boardBySlug.get(slug), plan = modelBySlug.get(slug).plan;
         return row?.rank !== rank || !provesValue(equation, row.implied_value_usd, value) || verdictBySlug.get(slug) !== verdict
+          || net !== signedMoney(plan.net)
+          || ticket !== `${api.firstAction(plan, compact, " ")} ${net}${plan.capital ? `${plan.horizon} d` : ""}`
+          || !row.farm_steps[0].startsWith(`${api.firstAction(plan)} · expected net ${net}.`)
           || (i > 0 && info.rows[i - 1][1] >= rank);
       })) {
         throw new Error(`${name}: page order, values or equation differ from board.json`);
@@ -621,7 +631,7 @@ async function shoot(output, destination) {
       if (info.rows.length) {
         if (!info.rangesInline) throw new Error(`${name}: implied-value range moved off the figure's line`);
         if (info.equationOverflow.length) throw new Error(`${name}: board equation layout ${JSON.stringify(info.equationOverflow)}`);
-        console.log(`${name} · ${info.rowCheck} · equations pass`);
+        console.log(`${name} · ${info.rowCheck} · equations and first actions pass`);
       }
       if (["1-board.jpg", "calibration"].includes(name) && (
         !Object.entries(scheme).every(([key, label]) => {
@@ -637,25 +647,21 @@ async function shoot(output, destination) {
       }
       if (name === "1-board.jpg" && !info.comparePass) throw new Error("Compare limit, filtering or removal failed.");
       if (info.farms) {
-        const ticket = ({ plan }) => plan.test ?? plan;
-        const eligible = rows.filter(row => slugs.has(row.slug) && ticket(row).net >= 0)
-          .sort((a, b) => ticket(b).net - ticket(a).net);
-        const best = eligible.slice(0, 5);
-        if (!info.farmsVisible || info.farmHeading !== `Best plans that clear break-even · ${eligible.length}/${slugs.size}`
+        const best = rows.filter(row => slugs.has(row.slug) && row.plan.capital)
+          .sort((a, b) => b.plan.net - a.plan.net).slice(0, 5);
+        if (!info.farmsVisible || info.farmHeading !== `Top funded plans ${actionCounts}`
+          || info.actionCounts.slice(0, 2).some(text => text !== actionCounts)
+          || info.listingNote !== "Listed on = chains in the snapshot; plan route = cheapest priced chain among them"
           || info.farmLinks.length !== best.length || new Set(info.farmLinks).size !== best.length
-          || info.farmBadges.join() !== best.map(row => row.plan.verdict).join()
-          || info.farmActions.join() !== best.map(({ plan }) => {
-            const p = plan.test ?? plan;
-            return `${plan.quoteTicket(p.capital)} ${plan.test ? "test" : "entry"} · ${p.horizon} d`;
-          }).join()
+          || info.farmActions.join() !== best.map(({ plan }) => api.firstAction(plan)).join()
           || info.farmLinks.some((href, i) => href.split("?")[0] !== `#detail/${encodeURIComponent(best[i].slug)}`)
-          || info.farmNets.join() !== best.map(row => `${signedMoney(ticket(row).net)} net`).join()
-          || info.farmTimes.join() !== best.map(row => totalTime(ticket(row))).join()
-          || info.farmCosts.join() !== best.map(row => totalCost(ticket(row))).join()
+          || info.farmNets.join() !== best.map(({ plan }) => `${signedMoney(plan.net)} net`).join()
+          || info.farmTimes.join() !== best.map(({ plan }) => `${plan.handsOnMinutes} min hands-on`).join()
+          || info.farmCosts.join() !== best.map(({ plan }) => `${money(plan.cost)} total cost`).join()
           || info.farmRoutes.join() !== best.map(row => row.plan.route).join()
-          || (!best.length && !info.farms.includes("No visible row clears break-even."))) {
+          || (!best.length && !info.farms.includes("No funded plans in these results."))) {
           throw new Error(`${name}: the break-even panel differs from the visible rows. ${JSON.stringify({
-            visible: info.farmsVisible, bounds: info.farmBounds, links: info.farmLinks, expected: best.map(row => row.slug), badges: info.farmBadges,
+            visible: info.farmsVisible, bounds: info.farmBounds, links: info.farmLinks, expected: best.map(row => row.slug),
             actions: info.farmActions, nets: info.farmNets
           })}`);
         }
@@ -666,6 +672,7 @@ async function shoot(output, destination) {
         const rate = (100 * assumptions.parameters.riskFreeRate).toFixed(0);
         const hourly = assumptions.parameters.hourlyUsd;
         if (!info.decisionVisible || !info.quotePass || info.quotes.length !== 10 || info.route !== plan.route
+          || info.summary !== actionLine(plan) || info.actionCounts[2] !== actionCounts
           || !info.checks.endsWith(` · ${rowProof} · 1/1`)
           || JSON.stringify(info.steps) !== JSON.stringify(boardBySlug.get(slug).farm_steps.map(displaySigns))) {
           throw new Error(`${name}: Decision mismatch or out of view (${info.decision.join(" | ")}).`);
@@ -677,7 +684,9 @@ async function shoot(output, destination) {
         }
         for (const state of info.quotes) {
           const quote = { ...plan.quote, ...state.overrides };
-          const result = api.chooseFarm(plan, quote, state.horizon);
+          const action = api.chooseFarm(plan, quote, state.horizon);
+          const result = action.candidate ?? action;
+          const edited = state.horizon || Object.keys(state.overrides).length;
           const { withToken, noToken, q, pStar, verdict, gas, holding, net, horizon, capital, drop, claimSell } = result;
           const { chain, transactions } = plan;
           const half = api.evaluateFarm(plan, capital, { quote, horizon, q: q / 2 });
@@ -689,10 +698,14 @@ async function shoot(output, destination) {
             totalCost(result),
             `${totalTime(result)} at $${hourly}/h · carry at ${rate}%/yr for ${holding} d`,
             `Break-even chance ${threshold(pStar)} → ${verdict}`,
-            `Expected net ${signedMoney(net)} = launch chance × token outcome + chance of no token × no-token outcome. Displayed figures rounded.`
+            `${action.candidate ? "Net before cash reward" : "Expected net"} ${signedMoney(net)} = launch chance × token outcome + chance of no token × no-token outcome. Displayed figures rounded.`
           ];
           if (state.decision.join("\n") !== expected.join("\n")
-            || state.headline !== `Decision scenario · ${plan.quoteTicket(capital)} · ${horizon} d`
+            || state.headline !== actionLine(plan)
+            || state.editedAction !== (edited ? `With edited inputs · ${actionLine(action)}` : undefined)
+            || state.conditional !== (action.candidate
+              ? `Conditional ticket · ${plan.quoteTicket(capital)} · ${horizon} d`
+              : undefined)
             || !state.pay.includes(`What would make it pay · ${chain.name} · ${horizon} d`)
             || !state.pay.includes(`MARGINAL ${needed(pStar, q)}`)
             || !state.pay.includes(`FARM ${needed(pStar == null ? null : 2 * pStar, q)}`)
@@ -700,11 +713,11 @@ async function shoot(output, destination) {
             || state.gas !== `${gasBasis} on ${chain.name} = ${money(gas)}`
             || state.halfChance !== `Launch chance halved (${chance(q / 2)}) · ${signedMoney(half.net)} · ${half.verdict}`
             || state.context.join() !== info.quotes[0].context.join()
-            || state.context.some(text => !text.includes("snapshot defaults"))) {
+            || state.context.filter(Boolean).some(text => !text.includes("snapshot defaults"))) {
             throw new Error(`${name}: inconsistent quote at ${horizon} d (${JSON.stringify(state.overrides)}).`);
           }
         }
-        console.log(`${protocol} · ${info.checks}\nDecision\n${info.decision.join("\n")}`);
+        console.log(`${protocol} · ${info.checks}\n${info.summary}\n${plan.trigger ? info.steps[1] : info.steps[0]}\n${info.decision.join("\n")}`);
       }
       if (name === "calibration") {
         if (!info.likeness?.includes(likenessTest)) throw new Error("Missing token-screen ranking accuracy.");
@@ -714,8 +727,8 @@ async function shoot(output, destination) {
         }
         if (JSON.stringify(info.termRows) !== JSON.stringify(termRows)) throw new Error("Ablation rows differ from the outer tests.");
         if (!info.assumptions?.includes(value.issuerNote)) throw new Error("Missing issuer factor evidence in Assumptions.");
-        if (!info.assumptionTables.some(table => table.includes("Gas/tx") && /Other chains\$1\.50/.test(table))) {
-          throw new Error("Missing chain gas assumptions or fallback.");
+        if (info.assumptionTables.length) {
+          throw new Error("Assumptions unexpectedly include a quote table.");
         }
         console.log(info.candidateHeading);
         for (const row of info.candidateRows) console.log(`  ${row.join(" | ")}`);
@@ -725,10 +738,8 @@ async function shoot(output, destination) {
       if (name === "2-detail.jpg" && (info.steps.length < 3
         || !info.tokenDetailVisible
         || info.tokenDetail !== "Token screen: pre-token — no gecko_id, no symbol, no market cap recorded in the snapshot"
-        || !info.valueRange.startsWith(`${rangeLabels[0]} $`) || !info.valueRange.includes(` · ${rangeLabels[1]} $`)
-        || !(info.rangeFarm.endsWith(`same verdict at both ends of ${rangeLabels[0]}`) || /flips to .+ at (low|high) end/u.test(info.rangeFarm))
-        || info.labels.join() !== "Watch,Entry trigger,Verify,Rehearse,Entry,Monitor,Exit,Claim & sell"
-        || info.summary !== `Decision scenario · ${upshift.plan.quoteTicket(upshift.plan.capital)} · ${upshift.plan.horizon} d`
+        || !info.valueRange.startsWith(`${rangeLabel} $`) || info.valueRange.includes(" · ")
+        || info.labels.join() !== "First action,Entry trigger,Verify,Rehearse,Entry,Monitor,Exit,Claim & sell"
         || !info.oddsNote?.includes("no launch dates") || !info.oddsNote.includes(likenessTest)
         || !info.steps.every(step => /\d+ min/.test(step) && /\$\d/.test(step))
         || !info.steps.some(step => step.includes(upshift.name) && step.includes("KYC, caps and withdrawals"))
@@ -741,21 +752,20 @@ async function shoot(output, destination) {
         || !info.steps[1].startsWith(`Enter only if ${upshift.plan.trigger.rule}.`)
         || !info.steps[3].includes("put in $80 USDC and withdraw it")
         || !info.steps[4].startsWith("If entry trigger is met and rehearsal passes")
-        || !info.payVisible || !info.pay?.includes(`What would make it pay · ${chain.name} ·`)
-        || !info.stressVisible || !info.stress?.includes("Reward share halved"))) {
+        || !info.payVisible || !info.pay?.includes(`What would make it pay · ${chain.name} ·`))) {
         const { quotes, ...detail } = info;
         throw new Error(`Upshift detail checks failed: ${JSON.stringify(detail)}`);
       }
       if (name === "3-filtered.jpg") {
         const expected = rows.filter(row => row.chains.includes("Ethereum") && row.plan.verdict === "MARGINAL");
         const compared = expected.slice(0, 2);
-        const [values, equations, verdicts, nets, plans] = info.compareRows;
+        const [values, actions, verdicts, nets, plans] = info.compareRows;
         if (!info.compareVisible || info.compareRanks.join() !== compared.map(row => row.rank).join()
           || info.compareRows.length !== 5 || compared.some(({ rank, plan }, i) => {
             const score = board[rank - 1].implied_value_usd, formatted = `$${score.toLocaleString("en-US")}`, col = i + 1;
-            return values[col] !== formatted || !provesValue(equations[col], score, formatted)
+            return values[col] !== formatted || actions[col] !== api.firstAction(plan)
               || verdicts[col] !== plan.verdict || nets[col] !== signedMoney(plan.net)
-              || plans[col] !== `${plan.handsOnMinutes} min hands-on · ${plan.horizon} d · ${money(plan.cost)}`;
+              || plans[col] !== `${plan.handsOnMinutes} min hands-on · ${money(plan.cost)}`;
           })) throw new Error("The side-by-side comparison differs from the ranked rows.");
         console.log("Compare selection limit, filtering, removal and displayed values pass.");
         if (info.completeRows < 5 || expected.length >= board.length || info.rows.length !== expected.length
@@ -779,7 +789,7 @@ async function shoot(output, destination) {
       if (name === "1-board.jpg") console.log(`  ${info.completeRows} complete rows in view · DOM ready in ${info.loadMs} ms · ${info.coverage} · ${info.nested}\n  ${info.rows[0][3]}`);
       if (name === "3-filtered.jpg") console.log(`  ${info.completeRows} complete rows in view`);
       if (name === "2-detail.jpg") console.log(`  ${info.tokenDetail}\n  ${info.equation}\n  ${info.gas}\n  ${info.exits.join("\n  ")}`);
-      if (info.valueRange) console.log(`  ${info.valueRange} · ${info.rangeFarm}`);
+      if (info.valueRange) console.log(`  ${[info.valueRange, info.rangeFarm].filter(Boolean).join(" · ")}`);
       if (info.integrity.length) console.log(`  ${info.integrityLines} integrity line · ${info.integrity.join(" · ")}`);
     }
     console.log("Firefox reported no console errors or uncaught exceptions.");

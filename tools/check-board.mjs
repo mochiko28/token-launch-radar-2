@@ -179,13 +179,13 @@ function report(output, input) {
     console.log(`${term} (with / without) · ${["walk", "family", "pooled"].map(key =>
       `${key} ${show(withTerm[key])} / ${show(without[key])}`).join(" · ")}`);
   }
-  console.log(ranges.n ? `Family holdout coverage · ${[80, 50].map(k => `${ranges.labels[k]}% range covers ${ranges.hits[k]}/${ranges.n}`).join(" · ")}` : "Range coverage unavailable");
+  console.log(ranges.n ? `Family holdout coverage · ${ranges.label}% range covers ${ranges.hits}/${ranges.n}` : "Range coverage unavailable");
   for (const [key, label] of [["loo", "Leave-one-out"], ["walk", "Walk-forward"]]) {
     const { auc, n } = model.odds.validation[key];
     console.log(`${label} token-screen ranking accuracy (AUC) ${auc?.toFixed(3) ?? "unavailable"} (n=${n} of ${oddsFit})`);
   }
   console.log(model.assumptions.timing);
-  console.log(Object.entries(model.verdicts).map(([name, n]) => `${name} ${n}`).join(" | "));
+  console.log(api.actionCounts(model.verdicts));
   for (const [scenario, { all, farm }] of Object.entries(model.stress)) {
     console.log(`${scenario}, all rows (base FARM): ${Object.entries(all).map(([verdict, count]) => `${verdict} ${count} (${farm[verdict]})`).join(" | ")}`);
   }
