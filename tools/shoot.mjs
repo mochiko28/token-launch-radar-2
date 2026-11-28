@@ -185,7 +185,8 @@ function encodeJpeg(png, work, candidates = []) {
 
 const shots = [
   { name: "1-board.jpg", hash: "#board", viewHeight: boardHeight },
-  { name: "2-detail.jpg", hash: "#detail/upshift", viewHeight: detailHeight },
+  { name: "2-detail.jpg", hash: "#detail/loopscale-curation", viewHeight: detailHeight },
+  { name: "upshift", hash: "#detail/upshift", viewHeight: detailHeight, probeOnly: true },
   { name: "3-filtered.jpg", hash: "#board?chain=Ethereum&verdict=MARGINAL", viewHeight: boardHeight }
 ];
 const pages = [...shots,
@@ -902,7 +903,7 @@ async function shoot(output, destination) {
         console.log("Held-out median miss by omitted term:");
         for (const row of info.termRows) console.log(`  ${row.join(" | ")}`);
       }
-      if (name === "2-detail.jpg" && (info.steps.length < 3
+      if (name === "upshift" && (info.steps.length < 3
         || !info.tokenDetailVisible
         || info.tokenDetail !== "Token screen · no CoinGecko ID, token symbol or market cap in the snapshot"
         || !info.valueRange.startsWith(`${rangeLabel} $`) || info.valueRange.includes(" · ")
@@ -963,7 +964,7 @@ async function shoot(output, destination) {
       console.log(`${name} · ${dimensions.join("×")} · ${bytes.length} bytes · ${encoder} · ${info.checks}\n  ${content}`);
       if (name === "1-board.jpg") console.log(`  ${info.completeRows} complete rows in view · DOM ready in ${info.loadMs} ms · ${info.coverage} · ${info.nested}\n  ${info.rows[0][3]}`);
       if (name === "3-filtered.jpg") console.log(`  ${info.completeRows} complete rows in view`);
-      if (name === "2-detail.jpg") console.log(`  ${info.tokenDetail}\n  ${info.equation}\n  ${info.gas}\n  ${info.exits.join("\n  ")}`);
+      if (name === "upshift") console.log(`  ${info.tokenDetail}\n  ${info.equation}\n  ${info.gas}\n  ${info.exits.join("\n  ")}`);
       if (info.valueRange) console.log(`  ${[info.valueRange, info.familyCoverage, info.edgePlans].filter(Boolean).join(" · ")}
   ${info.quotes[0].age.title} · ${info.quotes[0].age.current} · ${info.quotes[0].age.height}px`);
       if (info.integrity.length) console.log(`  ${info.integrityLines} integrity line · ${info.integrity.join(" · ")}`);
