@@ -112,7 +112,7 @@ const boardView=st=>`${intro("Pre-token rankings","30–365 d farms")}
 <div class=integrity role=group aria-label=Checks></div>
 ${kpis(st)}
 <div class=board><section class=panel>
-<div class=bar><h2>Protocols</h2><small class=grid-key>Amber bar = value range · Tick = estimate · <b class=watch>◆</b> Watchlist · Status adj. = factor from token-likeness</small>${status("compare-count")}${status("shown")}</div>
+<div class=bar><h2>Protocols</h2><small class=grid-key>Amber bar = value range · Tick = estimate · <b class=watch>◆</b> Watchlist · Status = token-likeness factor (TVL, age)</small>${status("compare-count")}${status("shown")}</div>
 <div class=filters>${searchBox(st)}
 ${html(filters,spec=>filter(spec,st))}
 <small class=chain-note>Plan route uses the cheapest priced listed chain.</small></div>
@@ -209,7 +209,7 @@ function compare(st){
 		box.disabled=picked.size===3&&!box.checked
 	}
 }
-const sources=(r,st)=>`<div class=sources><p>Value at launch ${short(r.plan.grossCap)} (traded-peer fit${r.haircut===1?"":" × issuer factor"}) · Ranked value ${short(r.score)} = that × status adj. (rounded${r.score===1?", min $1":""})
+const sources=(r,st)=>`<div class=sources><p>Value at launch ${short(r.plan.grossCap)} (traded-peer fit${r.haircut===1?"":" × issuer factor"}) · Ranked value ${short(r.score)} = that × status (rounded${r.score===1?", min $1":""})
 <p>7-day growth ${chg(r.change_7d)}${clipped(r)?` (uses ${chg(r.growth)})`:""}
 <p>${forms[form]} · ${r.ageDays==null?"median age":days(r)+" d listed"}${form==="shrink"?` · 1 − ${weight} × (1 − token-likeness)`:""}
 <p>Issuer factor · ${r.flags.map(esc).join(" · ")||"No flags"}

@@ -378,13 +378,13 @@ const refM=A.refTvl/1e6,scoreEq=([base,tvl,slope,...terms])=>max(1,round(terms.r
 function equationFor(fit,p){
 	const [intercept,slope]=fit.coefs,terms=[
 		["growth",exp((p.size-p.rawSize)*slope)],
-		fit.age?["age",exp(dot(capInputs(fit,p).slice(2),fit.coefs.slice(2)))]:["status adj.",p.valueAge],
+		fit.age?["age",exp(dot(capInputs(fit,p).slice(2),fit.coefs.slice(2)))]:["status",p.valueAge],
 		["issuer",p.haircut]]
+	const base=+(exp(intercept)/1e6).toPrecision(9),power=+slope.toPrecision(9)
 	let shown
 	for(let digits=4;digits<=17;digits++){
 		const print=n=>+n.toPrecision(digits)
-		shown=[print(exp(intercept)/1e6),print(p.tvl_usd/1e6),print(slope),
-			...terms.map(([label,n])=>[label,print(n)])]
+		shown=[base,print(p.tvl_usd/1e6),power,...terms.map(([label,n])=>[label,print(n)])]
 		if(scoreEq(shown)===p.score) break
 	}
 	return shown

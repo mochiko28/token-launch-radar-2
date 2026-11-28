@@ -693,7 +693,7 @@ async function shoot(output, destination) {
           || info.integrity[2] !== `✓ ${checkCount} self-checks pass`) {
           throw new Error(`${name}: integrity strip failed: ${info.integrity.join(" · ")}`);
         }
-        if (!info.gridKeyVisible || info.gridKey !== "Amber bar = value range · Tick = estimate · ◆ Watchlist · Status adj. = factor from token-likeness") {
+        if (!info.gridKeyVisible || info.gridKey !== "Amber bar = value range · Tick = estimate · ◆ Watchlist · Status = token-likeness factor (TVL, age)") {
           throw new Error(`${name}: the grid key is missing or out of view.`);
         }
       }
@@ -821,7 +821,7 @@ async function shoot(output, destination) {
           }
         }
         const launch = compact(launchCap * haircut);
-        const relation = `Value at launch ${launch} (traded-peer fit${haircut === 1 ? "" : " × issuer factor"}) · Ranked value ${compact(score)} = that × status adj. (rounded${score === 1 ? ", min $1" : ""})`;
+        const relation = `Value at launch ${launch} (traded-peer fit${haircut === 1 ? "" : " × issuer factor"}) · Ranked value ${compact(score)} = that × status (rounded${score === 1 ? ", min $1" : ""})`;
         if (!provesValue(info.equation, score, info.amount, clipped(row)) || !info.sourcesVisible
           || ![relation, "7-day growth", "d listed",
             "Issuer factor", "Calibration →"].every(label => info.sources.includes(label))) {
