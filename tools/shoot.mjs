@@ -659,11 +659,13 @@ async function shoot(output, destination) {
   const tests = Object.keys(scheme);
   const dropPairs = Object.entries(api.outerTerms).map(([term, label]) =>
     [label, ...tests.map(key => mult(value.ablation[term][key].miss))]);
+  const kept = Object.keys(api.outerTerms).map(term =>
+    tests.every(key => value.ablation[term][key].miss < headline[key].miss) ? "dropped" : "kept");
   const dropLine = "Held out without · " + dropPairs.map(([label, ...miss]) => `${label} ${miss.join("/")}`).join(" · ");
   const termRows = [
-    ["Model", ...tests.map(key => `${scheme[key]} · n=${headline[key].n}`)],
-    ["Full model", ...tests.map(key => mult(headline[key].miss))],
-    ...dropPairs.map(([label, ...miss]) => [`Without ${label}`, ...miss])
+    ["Model", ...tests.map(key => `${scheme[key]} · n=${headline[key].n}`), "Both tests improve?"],
+    ["Full model", ...tests.map(key => mult(headline[key].miss)), "—"],
+    ...dropPairs.map(([label, ...miss], i) => [`Without ${label}`, ...miss, kept[i]])
   ];
   const work = mkdtempSync("/work/.tmp/rw-firefox-");
   try {

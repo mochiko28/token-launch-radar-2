@@ -81,6 +81,7 @@ const valueStats=`<p class=nested>Form chosen inside training only</p>
 	})}</div>
 <p class=coverage>${bandName} · Coverage ${coveragePct(coverage.walk.Pooled)} date / ${coveragePct(coverage.family.Pooled)} family</p>`
 const dropPairs=entries(outerTerms).map(([k,label])=>[label,...schemes.map(s=>mult(ablation[k][s].miss))]),
+	kept=i=>schemes.every(s=>ablation[keys(outerTerms)[i]][s].miss<headline[s].miss)?"dropped":"kept",
 	dropLine=`<p class=drop>Held out without · ${dropPairs.map(([label,...miss])=>label+" "+miss.join("/")).join(" · ")}</p>`
 const tokenLinks=(st,separator="")=>entries(groups).map(([k,label])=>
 	`<a href="${href("tokens",st,k)}"${st.route==="tokens"&&st.slug===k?" aria-current=page":""}><b>${ns[k]}</b> ${label}</a>`).join(separator),
@@ -303,9 +304,9 @@ function calibration(){
 	const tests=[...schemes,"pooled"],
 		scores=facts(["Value form",...values(outerTests),"Pooled"],entries(forms).map(([f,label])=>
 			[label+(f===form?" · deployed":""),...tests.map(k=>mult(candidates[f][k]))])),
-		table=facts(["Model",...schemes.map(k=>`${outerTests[k]} · n=${headline[k].n}`)],[
-			["Full model",...schemes.map(k=>mult(headline[k].miss))],
-			...dropPairs.map(([label,...miss])=>["Without "+label,...miss])]),
+		table=facts(["Model",...schemes.map(k=>`${outerTests[k]} · n=${headline[k].n}`),"Both tests improve?"],[
+			["Full model",...schemes.map(k=>mult(headline[k].miss)),dash],
+			...dropPairs.map(([label,...miss],i)=>["Without "+label,...miss,kept(i)])]),
 		bands=facts(["Family",...values(outerTests)],keys(coverage.family).map(f=>[f,...schemes.map(k=>{
 			const b=coverage[k][f]
 			return b?.n?`${coveragePct(b)} (${b.hits}/${b.n})`:dash
