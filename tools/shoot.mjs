@@ -660,10 +660,10 @@ async function shoot(output, destination) {
   const dropPairs = Object.entries(api.outerTerms).map(([term, label]) =>
     [label, ...tests.map(key => mult(value.ablation[term][key].miss))]);
   const kept = Object.keys(api.outerTerms).map(term =>
-    tests.every(key => value.ablation[term][key].miss < headline[key].miss) ? "dropped" : "kept");
+    ["kept", "mixed: kept", "dropped"][tests.filter(key => value.ablation[term][key].miss < headline[key].miss).length]);
   const dropLine = "Held out without · " + dropPairs.map(([label, ...miss]) => `${label} ${miss.join("/")}`).join(" · ");
   const termRows = [
-    ["Model", ...tests.map(key => `${scheme[key]} · n=${headline[key].n}`), "Both tests improve?"],
+    ["Model", ...tests.map(key => `${scheme[key]} · n=${headline[key].n}`), "Tests improved without it → verdict"],
     ["Full model", ...tests.map(key => mult(headline[key].miss)), "—"],
     ...dropPairs.map(([label, ...miss], i) => [`Without ${label}`, ...miss, kept[i]])
   ];
@@ -829,7 +829,7 @@ async function shoot(output, destination) {
         }
         const key = foldCoverage.family[family] ? family : "Other";
         const { hits, n } = foldCoverage.family[key] ?? { hits: 0, n: 0 };
-        if (info.familyCoverage !== `${key}: ${hits}/${n} held-out values in range`) {
+        if (info.familyCoverage !== `${key}: ${hits}/${n} family-test values in range`) {
           throw new Error(`${name}: family coverage differs from the held-out family rows.`);
         }
         if (plan.capital) {

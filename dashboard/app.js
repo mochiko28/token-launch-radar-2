@@ -81,7 +81,7 @@ const valueStats=`<p class=nested>Misses: form chosen inside each training fold<
 	})}</div>
 <p class=coverage>${bandName} · Coverage ${coveragePct(coverage.walk.Pooled)} date / ${coveragePct(coverage.family.Pooled)} family</p>`
 const dropPairs=entries(outerTerms).map(([k,label])=>[label,...schemes.map(s=>mult(ablation[k][s].miss))]),
-	kept=i=>schemes.every(s=>ablation[keys(outerTerms)[i]][s].miss<headline[s].miss)?"dropped":"kept",
+	kept=i=>["kept","mixed: kept","dropped"][schemes.filter(s=>ablation[keys(outerTerms)[i]][s].miss<headline[s].miss).length],
 	dropLine=`<p class=drop>Held out without · ${dropPairs.map(([label,...miss])=>label+" "+miss.join("/")).join(" · ")}</p>`
 const tokenLinks=(st,separator="")=>entries(groups).map(([k,label])=>
 	`<a href="${href("tokens",st,k)}"${st.route==="tokens"&&st.slug===k?" aria-current=page":""}><b>${ns[k]}</b> ${label}</a>`).join(separator),
@@ -289,7 +289,7 @@ function detail(st,r){
 ${ticket(r)}
 ${inset("Implied token value",`<div class=amount>${whole(r.score)}</div>
 <small class=value-range>${valRange(ranges)}</small>
-<small>${kind}: ${band.hits}/${band.n} held-out values in range</small>
+<small>${kind}: ${band.hits}/${band.n} family-test values in range</small>
 ${equation(r,whole)}${sources(r,st)}`," valuation")}
 ${inset("Nearest traded peers",facts(["Protocol","TVL","Cap"],
 		r.peers.map(p=>[esc(p.name),short(p.tvl_usd),short(p.mcap_usd)]))," peers")}
@@ -304,7 +304,7 @@ function calibration(){
 	const tests=[...schemes,"pooled"],
 		scores=facts(["Value form",...values(outerTests),"Pooled"],entries(forms).map(([f,label])=>
 			[label+(f===form?" · deployed":""),...tests.map(k=>mult(candidates[f][k]))])),
-		table=facts(["Model",...schemes.map(k=>`${outerTests[k]} · n=${headline[k].n}`),"Both tests improve?"],[
+		table=facts(["Model",...schemes.map(k=>`${outerTests[k]} · n=${headline[k].n}`),"Tests improved without it → verdict"],[
 			["Full model",...schemes.map(k=>mult(headline[k].miss)),dash],
 			...dropPairs.map(([label,...miss],i)=>["Without "+label,...miss,kept(i)])]),
 		bands=facts(["Family",...values(outerTests)],keys(coverage.family).map(f=>[f,...schemes.map(k=>{
