@@ -388,6 +388,8 @@ function readPage() {
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     termRows: [...document.querySelectorAll(".ablation tr")]
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
+    bandRows: [...document.querySelectorAll(".bands tbody tr")]
+      .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
     comparePass, compareVisible: visible("#compare"), compareRanks: picked().map(input => Number(input.value)),
     compareRows: [...document.querySelectorAll("#compare tbody tr")]
       .map(tr => [...tr.cells].map(cell => cell.textContent.trim())),
@@ -600,16 +602,23 @@ async function shoot(output, destination) {
   const likenessTest = `Token-screen ranking accuracy (AUC) ${odds.validation.walk.auc.toFixed(3)} walk-forward`;
   const mult = miss => miss == null ? "—" : `${miss.toFixed(3)}×`;
   const { headline, ranges, candidates, form } = value;
-  const pooledCoverage = new Map();
-  for (const { family, rows, bounds } of value.tests.family) {
-    if (!bounds) continue;
-    const key = rows.length < 8 ? "Other" : family;
-    const [hits, n] = pooledCoverage.get(key) ?? [0, 0];
-    pooledCoverage.set(key, [
-      hits + rows.filter(row => row[form] >= bounds[0] && row[form] <= bounds[1]).length,
-      n + rows.length
-    ]);
-  }
+  const countsByFamily = Object.groupBy(model.calibration, p => p.family);
+  const foldCoverage = Object.fromEntries(Object.entries(value.tests).map(([scheme, folds]) => {
+    const tallies = { Pooled: { hits: 0, n: 0 } };
+    for (const { inner, rows, bounds } of folds) {
+      if (!inner.length) continue;
+      for (const { family, shipped } of rows) {
+        const key = countsByFamily[family]?.length >= 8 ? family : "Other";
+        const [low, high] = bounds[family] ?? bounds.Pooled;
+        const hit = low <= shipped && shipped <= high;
+        for (const bucket of [tallies.Pooled, tallies[key] ??= { hits: 0, n: 0 }]) {
+          bucket.hits += Number(hit);
+          bucket.n++;
+        }
+      }
+    }
+    return [scheme, tallies];
+  }));
   const verifyAgeGraph = (graph, row, { horizon, q, pStar }) => {
     const age = row.ageDays ?? odds.fit.age;
     const end = Math.max(1000, Math.ceil(age / 80) * 100);
@@ -636,8 +645,13 @@ async function shoot(output, destination) {
       && graph.line === (pStar != null && pStar <= top ? `M2 ${y(pStar)}H298` : undefined);
   };
   const scheme = { walk: "Walk-forward", family: "Leave-one-family-out" };
-  const rangeLabel = ranges.n ? "80% range" : "Uncalibrated range";
-  const coverage = ranges.n ? `${rangeLabel} · Family holdout coverage ${ranges.label}% (${ranges.hits}/${ranges.n})` : "Range coverage unavailable";
+  const coveragePct = ({ hits, n } = {}) => n ? `${(100 * hits / n).toFixed(0)}%` : "—";
+  const rangeLabel = foldCoverage.family.Pooled.n ? "80% range" : "Uncalibrated range";
+  const coverage = `${rangeLabel} · Coverage ${coveragePct(foldCoverage.walk.Pooled)} date / ${coveragePct(foldCoverage.family.Pooled)} family`;
+  const bandRows = Object.keys(ranges.coverage.family).map(family => [family, ...["walk", "family"].map(scheme => {
+    const bucket = foldCoverage[scheme][family];
+    return bucket?.n ? `${coveragePct(bucket)} (${bucket.hits}/${bucket.n})` : "—";
+  })]);
   const comparisons = ["walk", "family", "pooled"];
   const candidateRows = Object.entries(api.forms).map(([key, label]) => [
     label + (key === form ? " · deployed" : ""), ...comparisons.map(test => mult(candidates[key][test]))
@@ -649,7 +663,7 @@ async function shoot(output, destination) {
   const termRows = [
     ["Model", ...tests.map(key => `${scheme[key]} · n=${headline[key].n}`)],
     ["Full model", ...tests.map(key => mult(headline[key].miss))],
-    ...dropPairs.map(([label, ...miss]) => [`Without ${label === "TVL" ? "TVL exponent" : label}`, ...miss])
+    ...dropPairs.map(([label, ...miss]) => [`Without ${label}`, ...miss])
   ];
   const work = mkdtempSync("/work/.tmp/rw-firefox-");
   try {
@@ -811,8 +825,8 @@ async function shoot(output, destination) {
             "Issuer factor", "Calibration →"].every(label => info.sources.includes(label))) {
           throw new Error(`${name}: value equation or held-out evidence is incomplete.`);
         }
-        const key = pooledCoverage.has(family) ? family : "Other";
-        const [hits, n] = pooledCoverage.get(key) ?? [0, 0];
+        const key = foldCoverage.family[family] ? family : "Other";
+        const { hits, n } = foldCoverage.family[key] ?? { hits: 0, n: 0 };
         if (info.familyCoverage !== `${key}: ${hits}/${n} held-out values in range`) {
           throw new Error(`${name}: family coverage differs from the held-out family rows.`);
         }
@@ -876,6 +890,7 @@ async function shoot(output, destination) {
           throw new Error("Reference candidate rows differ from the outer tests.");
         }
         if (JSON.stringify(info.termRows) !== JSON.stringify(termRows)) throw new Error("Ablation rows differ from the outer tests.");
+        if (JSON.stringify(info.bandRows) !== JSON.stringify(bandRows)) throw new Error("Range coverage differs from the outer tests.");
         if (!info.assumptions?.includes("Issuer haircut is fixed.")) throw new Error("Missing issuer rule in Assumptions.");
         if (info.assumptionTables.length) {
           throw new Error("Assumptions unexpectedly include a quote table.");

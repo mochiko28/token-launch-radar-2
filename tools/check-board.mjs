@@ -180,7 +180,12 @@ function report(output, input) {
       model, ...Object.fromEntries(Object.entries(result).map(([scheme, { miss, n }]) =>
         [scheme, `${show(miss)} (n=${n})`]))
     })));
-  console.log(ranges.n ? `Family holdout coverage ${ranges.label}% (${ranges.hits}/${ranges.n})` : "Range coverage unavailable");
+  console.table(Object.entries(ranges.coverage.family).map(([family]) => ({
+    family, ...Object.fromEntries(Object.entries(ranges.coverage).map(([scheme, groups]) => {
+      const { hits, n } = groups[family] ?? {};
+      return [scheme, n ? `${(100 * hits / n).toFixed(0)}% (${hits}/${n})` : "unavailable"];
+    }))
+  })));
   for (const [key, label] of [["loo", "Leave-one-out"], ["walk", "Walk-forward"]]) {
     const { auc, n } = model.odds.validation[key];
     console.log(`${label} token-screen ranking accuracy (AUC) ${auc?.toFixed(3) ?? "unavailable"} (n=${n} of ${oddsFit})`);

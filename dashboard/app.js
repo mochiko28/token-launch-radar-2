@@ -20,8 +20,9 @@ const {rows:rs,recs,counts:ns,verdicts,value,odds,assumptions:setup,board:{rows:
 	auc=k=>odds.validation[k].auc?.toFixed(3)??dash
 const aucLabel="Token-screen ranking accuracy (AUC)",
 	aucLine=`${aucLabel} ${auc("walk")} walk-forward`,
-	{headline,ablation,candidates,form,weight,ranges:{label,hits,n:bandN,coverage}}=value,
-	bandName=bandN?`${bandPct}% range`:"Uncalibrated range",
+	{headline,ablation,candidates,form,weight,ranges:{coverage}}=value,
+	bandName=coverage.family.Pooled.n?`${bandPct}% range`:"Uncalibrated range",
+	coveragePct=({n,hits})=>n?pct(hits/n,0):dash,
 	groups={traded:"traded",setAside:"set aside",recorded:"token, no cap",ranked:"ranked"},
 	choices=items=>["",...unique(items).sort()]
 const grades=keys(verdicts),actions=actionCounts(verdicts),
@@ -78,7 +79,7 @@ const valueStats=`<p class=nested>Form chosen inside training only</p>
 		const {miss,flat,n}=headline[k]
 		return`<div><span>${lbl} · n=${n}</span><strong>${mult(miss)}</strong> / ${mult(flat)}${miss!==null&&miss>=flat?"<small>Flat ratio ties or wins.</small>":""}</div>`
 	})}</div>
-<p class=coverage>${bandN?`${bandName} · Family holdout coverage ${label}% (${hits}/${bandN})`:"Range coverage unavailable"}</p>`
+<p class=coverage>${bandName} · Coverage ${coveragePct(coverage.walk.Pooled)} date / ${coveragePct(coverage.family.Pooled)} family</p>`
 const dropPairs=entries(outerTerms).map(([k,label])=>[label,...schemes.map(s=>mult(ablation[k][s].miss))]),
 	dropLine=`<p class=drop>Held out without · ${dropPairs.map(([label,...miss])=>label+" "+miss.join("/")).join(" · ")}</p>`
 const tokenLinks=(st,separator="")=>entries(groups).map(([k,label])=>
@@ -270,7 +271,7 @@ function detail(st,r){
 	const back=`<a class=back href="${href("board",st)}">← Rankings</a>`
 	if(!r) return back+intro("Unavailable")
 	const {plan:fp,ranges,edgePlans,family}=r,
-		kind=coverage[family]?family:"Other",band=coverage[kind]??{hits:0,n:0},
+		kind=coverage.family[family]?family:"Other",band=coverage.family[kind]??{hits:0,n:0},
 		tokenLine=r.reason==="watch"?`watchlist exception — kept despite ${r.nameRule||r.category}`:
 			`no CoinGecko ID, token symbol or ${r.mcap_usd==null?"":"positive "}market cap in the snapshot`,
 		summary=`${rowName(r)} · ${short(r.tvl_usd)} TVL · ${chg(r.change_7d)} 7d · ${days(r)} d listed<br><span id=token-reason>Token screen · ${esc(tokenLine)}</span>`,
@@ -304,11 +305,16 @@ function calibration(){
 			[label+(f===form?" · deployed":""),...tests.map(k=>mult(candidates[f][k]))])),
 		table=facts(["Model",...schemes.map(k=>`${outerTests[k]} · n=${headline[k].n}`)],[
 			["Full model",...schemes.map(k=>mult(headline[k].miss))],
-			...dropPairs.map(([label,...miss])=>["Without "+label+(label==="TVL"?" exponent":""),...miss])])
+			...dropPairs.map(([label,...miss])=>["Without "+label,...miss])]),
+		bands=facts(["Family",...values(outerTests)],keys(coverage.family).map(f=>[f,...schemes.map(k=>{
+			const b=coverage[k][f]
+			return b?.n?`${coveragePct(b)} (${b.hits}/${b.n})`:dash
+		})]))
 	return`${intro("Trading-token calibration")}
-${inset(missTitle,valueStats+`<p>Flat uses median training cap/TVL. Ranges use leave-one-out cap residuals.`)}
+${inset(missTitle,valueStats+`<p>Flat uses median training cap/TVL.`)}
 ${inset("Reference scores on outer folds",scores," candidates")}
 ${inset("Held-out median miss by omitted term",table," ablation")}
+${inset("80% range coverage",`<p>Fixed deployed formula. Training-only residuals, families under 8 pooled as Other, widths shrunk toward pooled.</p>`+bands," bands")}
 ${inset(oddsTitle,`<p class=likeness>${aucLine}. ${setup.timing}`)}`
 }
 const tokens=st=>`${intro("Token screen","Pre-token means no token recorded.")}
