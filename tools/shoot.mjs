@@ -581,12 +581,12 @@ async function shoot(output, destination) {
     const rounded = Number(value.toFixed(2));
     return (rounded > 0 ? "+" : "") + displaySigns(money(rounded));
   };
-  const totalTime = p => `${p.mins} min hands-on (${p.prepMins} setup + ${p.exitMins} exit + ${p.checkMins} weekly checks)`;
+  const totalTime = p => `${p.mins} min hands-on (${p.prepMins} setup + ${p.exitMins} exit + ${p.checkMins} checking)`;
   const totalCost = p => `${money(p.cost)} total (gas ${money(p.gas)} + funding ${money(p.funding)} + slippage ${money(p.slip)} + time ${money(p.labor)} + capital cost ${money(p.carry)})`;
   const actionLine = p => api.firstAction(p) + (p.trial ? "" : ` · Expected net ${signedMoney(p.net)}`);
   const aprBasis = trial => {
     const contribution = trial.q * (trial.drop - trial.claimCost);
-    return contribution === 0 ? "cash APR alone" : contribution > 0 ? "includes token upside" : "includes token costs";
+    return contribution === 0 ? "cash APR alone" : `after token EV ${signedMoney(contribution)}`;
   };
   const watchTerms = (p, format = compact) => {
     const { capital, horizon, net } = p.trial;

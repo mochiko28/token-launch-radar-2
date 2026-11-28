@@ -455,13 +455,13 @@ function targetsFor({q,pStar,cost,drop,claimCost},{slippage}){
 }
 const timeFee=(min,fees=0)=>`${costUsd(wage(min)+fees)} · ${min} min`,
 	farmTime=({mins,prepMins,exitMins,checkMins})=>
-		`${mins} min hands-on (${prepMins} setup + ${exitMins} exit + ${checkMins} weekly checks)`,
+		`${mins} min hands-on (${prepMins} setup + ${exitMins} exit + ${checkMins} checking)`,
 	farmCost=({cost,gas,funding,slip,labor,carry})=>
 		`${costUsd(cost)} total (gas ${costUsd(gas)} + funding ${costUsd(funding)} + slippage ${costUsd(slip)} + time ${costUsd(labor)} + capital cost ${costUsd(carry)})`,
 	farmNet=n=>(n<0?"−":n>0?"+":"")+costUsd(abs(n)),
 	entryApr=({capital,horizon,net})=>-net/(capital*horizon/A.year)*100,
 	aprCeil=apr=>ceil(apr*10)/10,aprLabel=apr=>aprCeil(apr).toFixed(1)+"% APR",
-	aprBasis=({q,drop,claimCost})=>q&&drop!==claimCost?"includes token "+(drop>claimCost?"upside":"costs"):"cash APR alone",
+	aprBasis=({q,drop,claimCost})=>q&&drop!==claimCost?`after token EV ${farmNet(q*(drop-claimCost))}`:"cash APR alone",
 	watchLines=(p,format=whole)=>[`Watch · needs ${aprLabel(entryApr(p))}`,aprBasis(p),`${farmNet(p.net)} at ${format(p.capital)}, ${p.horizon} d`],
 	actionTerms=p=>p.trial?watchLines(p.trial).join(" · "):
 		`${firstAction(p)} · expected net ${farmNet(p.net)}`
@@ -482,7 +482,7 @@ function farmPlan(p,review,curve,exitGrowth){
 			prepMins:verify+prep+entryMins,exitMins,flagged:!!p.flags.length},
 		result=chooseFarm(fp),priced=result.trial??result,
 		{capital:cap,horizon:h}=priced,apr=result.trial?entryApr(priced):null,
-		trigger=apr===null?null:{apr,rule:`the venue quotes ≥ ${aprLabel(apr)} in net cash rewards on ${ticketFor(cap)} for ${h} d (${aprBasis(priced)})`},
+		trigger=apr===null?null:{apr,rule:`the venue quotes ≥ ${aprLabel(apr)} in cash rewards on ${ticketFor(cap)} for ${h} d (${aprBasis(priced)})`},
 		route=`Plan route: ${name} (cheapest priced of ${chains.length} listed)`,
 		gate=trigger?"If entry trigger is met":"If eligible",
 		exits=[
