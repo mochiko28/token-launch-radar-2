@@ -760,7 +760,7 @@ async function shoot(output, destination) {
           const outcome = miss !== null && miss >= flat ? "Flat ratio ties or wins." : "";
           return info.heldOut?.includes(`${label} · n=${n}${mult(miss)} / ${mult(flat)}${outcome}`);
         })
-        || info.coverage !== coverage || info.nested !== "Form chosen inside training only")) {
+        || info.coverage !== coverage || info.nested !== "Misses: form chosen inside each training fold")) {
         throw new Error(`${name}: calibration summary is incomplete.`);
       }
       if (name === "1-board.jpg") {

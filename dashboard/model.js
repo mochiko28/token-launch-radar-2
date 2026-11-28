@@ -438,7 +438,7 @@ function sizeFarm(fp,quote,horizons){
 	const trials=ladder.slice(0,-1).map(rung=>rung.reduce(byNet)),
 		test=trials.find(p=>p.net>=0)
 	return test?{...test,verdict:"MARGINAL"}:
-		{capital:0,net:0,cost:0,verdict:"SKIP",trial:trials.reduce(byNet)}
+		{capital:0,net:0,cost:0,verdict:"SKIP",trial:ladder.slice(0,-1).flat().reduce((a,b)=>entryApr(b)<entryApr(a)?b:a)}
 }
 const chooseFarm=(fp,quote=fp.quote,h=0)=>sizeFarm(fp,quote,h?[h]:A.horizons),
 	stages={SKIP:"Watch",MARGINAL:"Test",FARM:"Farm"},
@@ -672,7 +672,7 @@ const statuses=["traded","recorded","setAside","ranked"],
 	reasons={cap:["traded","Positive market cap"],id:["recorded","Token ID or symbol recorded"],
 		product:["setAside","Wrapped, staked or bridged product"],exchange:["setAside","Exchange category or name"],
 		pre:["ranked","Pre-token"],watch:["ranked","Watchlist exception"]},
-	timing="With TVL fixed, rising token-likeness with age estimates launch chance, since the snapshot has no launch dates."
+	timing="Launch chance = rise in token-likeness from day d to d + horizon over (1 − token-likeness at d), TVL fixed; the snapshot has no launch dates."
 const settings={parameters:A,timing,
 	notes:[`Test cap ${whole(A.tickets.at(-2))}. Farm requires ${A.farmRatio}× cost in expected proceeds and no flags.`,
 		`Depositors get ${pct(A.depositorShare,0)} of rewards. ${pct(A.tvlShare,0)} of TVL competes.`,

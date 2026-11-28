@@ -74,7 +74,7 @@ const intro=(title,copy="",lead="",lbl="")=>`<header class=intro><div>${lbl}<h1>
 	panel=(kind,title,body)=>`<section class="panel ${kind}"><h2>${title}</h2>${body}</section>`,
 	card=(title,body)=>panel("kpi",title,body),inset=(title,body,kind="")=>panel("inset"+kind,title,body)
 
-const valueStats=`<p class=nested>Form chosen inside training only</p>
+const valueStats=`<p class=nested>Misses: form chosen inside each training fold</p>
 <div class="readings misses">${html(entries(outerTests),([k,lbl])=>{
 		const {miss,flat,n}=headline[k]
 		return`<div><span>${lbl} · n=${n}</span><strong>${mult(miss)}</strong> / ${mult(flat)}${miss!==null&&miss>=flat?"<small>Flat ratio ties or wins.</small>":""}</div>`
